@@ -379,7 +379,7 @@ void Translator::WriteOperand(const Decoder::Operand& operand, IR::Value value) 
 				ir.SetExecLo(mask[0]);
 				// In wave32 a lane-mask write touches only the low half; the high half is a free
 				// SGPR.
-				if (current_wave_size != 32u) {
+				if (program.wave_size != 32u) {
 					ir.SetExecHi(mask[1]);
 				}
 				return;
@@ -389,7 +389,7 @@ void Translator::WriteOperand(const Decoder::Operand& operand, IR::Value value) 
 				const auto mask = BallotMask(IR::U1(value));
 				ir.SetVcc(IR::U1(value));
 				ir.SetVccLo(mask[0]);
-				if (current_wave_size != 32u) {
+				if (program.wave_size != 32u) {
 					ir.SetVccHi(mask[1]);
 				}
 				return;
@@ -630,16 +630,21 @@ IR::U1 Translator::ReadMask(const Decoder::Operand& operand) {
 			    IR::ValueOpcode::SelectU1,
 			    {ir.GetScalarMaskTag(reg), ir.GetThreadBitScalarReg(reg), ThreadBit(mask)}));
 		}
-		case Decoder::OperandKind::ExecLo:
-		case Decoder::OperandKind::ExecHi: return ir.GetExec();
+		case Decoder::OperandKind::ExecLo: return ir.GetExec();
+		case Decoder::OperandKind::ExecHi:
+			return program.wave_size == 32u
+			           ? ThreadBit({ReadRawU32(operand), IR::U32(IR::Value(0u))})
+			           : ir.GetExec();
 		case Decoder::OperandKind::VccLo:
 		case Decoder::OperandKind::VccHi:
 			return program.wave_size == 32u
 			           ? ThreadBit({ReadRawU32(operand), IR::U32(IR::Value(0u))})
 			           : ir.GetVcc();
 		case Decoder::OperandKind::Scc: return ir.GetScc();
-		case Decoder::OperandKind::VccZ: return ir.LogicalNot(ir.GetVcc());
-		case Decoder::OperandKind::ExecZ: return ir.LogicalNot(ir.GetExec());
+		case Decoder::OperandKind::VccZ:
+			return ir.LogicalNot(AnyLane(ir.GetVccLo(), ir.GetVccHi()));
+		case Decoder::OperandKind::ExecZ:
+			return ir.LogicalNot(AnyLane(ir.GetExecLo(), ir.GetExecHi()));
 		default: return ir.INotEqual(ReadRawU32(operand), IR::U32(IR::Value(0u)));
 	}
 }
@@ -697,7 +702,7 @@ std::array<IR::U32, 2> Translator::WriteMask(const Decoder::Operand& operand, IR
 		case Decoder::OperandKind::ExecHi: {
 			ir.SetExec(value);
 			ir.SetExecLo(mask[0]);
-			if (current_wave_size == 64u) {
+			if (program.wave_size == 64u) {
 				ir.SetExecHi(mask[1]);
 			}
 			return mask;
@@ -710,7 +715,7 @@ std::array<IR::U32, 2> Translator::WriteMask(const Decoder::Operand& operand, IR
 			}
 			ir.SetVcc(value);
 			ir.SetVccLo(mask[0]);
-			if (current_wave_size == 64u) {
+			if (program.wave_size == 64u) {
 				ir.SetVccHi(mask[1]);
 			}
 			return mask;
@@ -721,6 +726,11 @@ std::array<IR::U32, 2> Translator::WriteMask(const Decoder::Operand& operand, IR
 			WriteRawU32(OffsetOperand(operand, 1), mask[1]);
 			return mask;
 	}
+}
+
+IR::U1 Translator::AnyLane(IR::U32 low, IR::U32 high) {
+	const auto word = program.wave_size == 32u ? low : ir.BitwiseOr(low, high);
+	return ir.INotEqual(word, IR::U32(IR::Value(0u)));
 }
 
 void Translator::WriteCompareResult(const Decoder::Operand& operand, IR::U1 value) {
@@ -764,10 +774,18 @@ void Translator::AddBranchCondition(const CFG::BasicBlock& source, IR::BlockInfo
 		case CFG::BranchCondition::Always: condition = IR::U1(IR::Value(true)); break;
 		case CFG::BranchCondition::SccZero: condition = ir.LogicalNot(ir.GetScc()); break;
 		case CFG::BranchCondition::SccNonZero: condition = ir.GetScc(); break;
-		case CFG::BranchCondition::VccZero: condition = ir.LogicalNot(ir.GetVcc()); break;
-		case CFG::BranchCondition::VccNonZero: condition = ir.GetVcc(); break;
-		case CFG::BranchCondition::ExecZero: condition = ir.LogicalNot(ir.GetExec()); break;
-		case CFG::BranchCondition::ExecNonZero: condition = ir.GetExec(); break;
+		case CFG::BranchCondition::VccZero:
+			condition = ir.LogicalNot(AnyLane(ir.GetVccLo(), ir.GetVccHi()));
+			break;
+		case CFG::BranchCondition::VccNonZero:
+			condition = AnyLane(ir.GetVccLo(), ir.GetVccHi());
+			break;
+		case CFG::BranchCondition::ExecZero:
+			condition = ir.LogicalNot(AnyLane(ir.GetExecLo(), ir.GetExecHi()));
+			break;
+		case CFG::BranchCondition::ExecNonZero:
+			condition = AnyLane(ir.GetExecLo(), ir.GetExecHi());
+			break;
 		case CFG::BranchCondition::GotoVariable:
 			if (source.terminator.goto_variable == UINT32_MAX) {
 				EXIT("block %u reads an invalid goto variable", source.id);
