@@ -23,29 +23,35 @@ Decoder::Operand ConditionOperand(Decoder::OperandKind kind) {
 } // namespace
 
 void Translator::S_SAVEEXEC(const Decoder::Instruction& inst, IR::ValueOpcode operation,
-                            bool negate_exec, bool negate_source, bool write_64) {
+                            bool negate_exec, bool negate_source, bool write_64,
+                            bool negate_result) {
 	if (!write_64) {
 		// Read the encoded scalar word and preserve EXEC_HI, including in wave32.
 		const auto old = ir.GetExecLo();
 		const auto src = ReadU32(inst.src0);
 		const auto lhs = negate_exec ? ir.BitwiseNot(old) : old;
 		const auto rhs = negate_source ? ir.BitwiseNot(src) : src;
-		IR::U32 result;
+		IR::U32    result;
 		switch (operation) {
 			case IR::ValueOpcode::LogicalAnd: result = ir.BitwiseAnd(lhs, rhs); break;
 			case IR::ValueOpcode::LogicalOr: result = ir.BitwiseOr(lhs, rhs); break;
+			case IR::ValueOpcode::LogicalXor: result = ir.BitwiseXor(lhs, rhs); break;
 			default: EXIT("unsupported SAVEEXEC operation");
+		}
+		if (negate_result) {
+			result = ir.BitwiseNot(result);
 		}
 		WriteRawU32(inst.dst, old);
 		WriteRawU32(ConditionOperand(Decoder::OperandKind::ExecLo), result);
 		ir.SetScc(ir.INotEqual(result, IR::U32(IR::Value(0u))));
 		return;
 	}
-	const auto old    = ir.GetExec();
-	const auto src    = ReadMask(inst.src0);
-	const auto lhs    = negate_exec ? ir.LogicalNot(old) : old;
-	const auto rhs    = negate_source ? ir.LogicalNot(src) : src;
-	const auto result = IR::U1(ir.Emit(operation, {lhs, rhs}));
+	const auto old      = ir.GetExec();
+	const auto src      = ReadMask(inst.src0);
+	const auto lhs      = negate_exec ? ir.LogicalNot(old) : old;
+	const auto rhs      = negate_source ? ir.LogicalNot(src) : src;
+	const auto combined = IR::U1(ir.Emit(operation, {lhs, rhs}));
+	const auto result   = negate_result ? ir.LogicalNot(combined) : combined;
 	WriteMask(inst.dst, old, true);
 	const auto mask = BallotMask(result);
 	ir.SetExec(result);
@@ -216,12 +222,12 @@ void Translator::S_CSELECT_B32(const Decoder::Instruction& inst) {
 }
 
 void Translator::ScalarSelect64(const Decoder::Instruction& inst,
-                                 const Decoder::Operand& false_source) {
+                                const Decoder::Operand&     false_source) {
 	const auto condition     = ir.GetScc();
 	const auto lhs           = ReadU32Pair(inst.src0);
 	const auto rhs           = ReadU32Pair(false_source);
-	const auto selected_mask = IR::U1(
-	    ir.Emit(IR::ValueOpcode::SelectU1, {condition, ReadMask(inst.src0), ReadMask(false_source)}));
+	const auto selected_mask = IR::U1(ir.Emit(
+	    IR::ValueOpcode::SelectU1, {condition, ReadMask(inst.src0), ReadMask(false_source)}));
 	const auto selected_mask_valid =
 	    IR::U1(ir.Emit(IR::ValueOpcode::SelectU1,
 	                   {condition, ReadMaskValid(inst.src0), ReadMaskValid(false_source)}));
@@ -250,13 +256,13 @@ void Translator::S_MOV_B64(const Decoder::Instruction& inst) {
 	const bool mask_source = inst.src0.kind == Decoder::OperandKind::Sgpr ||
 	                         inst.src0.kind == Decoder::OperandKind::ExecLo ||
 	                         inst.src0.kind == Decoder::OperandKind::VccLo;
-	IR::U1 source_mask;
-	IR::U1 source_mask_valid;
+	IR::U1     source_mask;
+	IR::U1     source_mask_valid;
 	if (mask_source) {
 		// A full VCC copy carries its predicate even in wave32; ReadMask also handles
 		// individual 32-bit VCC halves, which cannot preserve that provenance.
-		source_mask = inst.src0.kind == Decoder::OperandKind::VccLo ? ir.GetVcc()
-		                                                          : ReadMask(inst.src0);
+		source_mask =
+		    inst.src0.kind == Decoder::OperandKind::VccLo ? ir.GetVcc() : ReadMask(inst.src0);
 		source_mask_valid = ReadMaskValid(inst.src0);
 	}
 	// Preserve all 64 scalar bits independently of the per-thread predicate.
@@ -275,7 +281,7 @@ void Translator::S_MOV_B64(const Decoder::Instruction& inst) {
 }
 
 void Translator::S_WQM_B64(const Decoder::Instruction& inst) {
-	const auto mask_valid  = ReadMaskValid(inst.src0);
+	const auto mask_valid = ReadMaskValid(inst.src0);
 	const auto result =
 	    IR::U64(ir.Emit(IR::ValueOpcode::WqmU64, {ReadOperand(inst.src0, IR::Type::U64)}));
 	WriteOperand(DestinationOperand(inst), result);
