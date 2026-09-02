@@ -324,9 +324,8 @@ public:
 						                        (op == ValueOpcode::ReadConstBuffer &&
 						                         kind == ResourceKind::ScalarAddress);
 						if (crosswired) {
-							Fail(flags.pc,
-							     fmt::format("{} has incompatible scalar memory metadata",
-							                 ValueOpcodeName(op)));
+							Fail(flags.pc, fmt::format("{} has incompatible scalar memory metadata",
+							                           ValueOpcodeName(op)));
 						}
 					}
 				}
@@ -509,7 +508,7 @@ private:
 			return false;
 		}
 		m_visiting.push_back(inst);
-		uint64_t out = 0;
+		uint64_t   out       = 0;
 		const bool evaluated = EvaluateInst(*inst, out);
 		m_visiting.pop_back();
 		if (!evaluated) {
@@ -622,7 +621,7 @@ private:
 		} else {
 			// The address is derived from guest data, so it can be anything; a descriptor that
 			// does not resolve must fail evaluation rather than fault the emulator.
-			if (!HostMemoryRangeIsReadable(address, sizeof(word))) {
+			if (!RangeReadable(address, sizeof(word))) {
 				return false;
 			}
 			std::memcpy(&word, reinterpret_cast<const void*>(address), sizeof(word));
@@ -970,6 +969,24 @@ private:
 	std::unordered_map<const Inst*, uint64_t> m_cache;
 	std::vector<const Inst*>                  m_visiting;
 	bool                                      m_reserved = false;
+
+	// One host memory query per region instead of one per word; the same check, cached for this
+	// walk.
+	bool RangeReadable(uint64_t address, uint64_t size) {
+		for (const auto& [begin, end]: m_readable_regions) {
+			if (address >= begin && size <= end - address) {
+				return true;
+			}
+		}
+		uint64_t begin = 0;
+		uint64_t end   = 0;
+		if (HostMemoryReadableRegion(address, begin, end) && size <= end - address) {
+			m_readable_regions.emplace_back(begin, end);
+			return true;
+		}
+		return HostMemoryRangeIsReadable(address, size);
+	}
+	std::vector<std::pair<uint64_t, uint64_t>> m_readable_regions;
 };
 
 const DescriptorSource* Source(const ResourcePlan& program, uint32_t source) {
@@ -983,7 +1000,7 @@ bool EvaluateRuntimeSourcesImpl(const ResourcePlan& program, std::span<const uin
                                 const SrtRuntime& runtime, std::vector<DescriptorValue>& results,
                                 std::vector<uint32_t>& flat, bool evaluate_flat,
                                 std::span<const uint8_t> clean_flat_slots,
-                                std::vector<uint8_t>& active_sources) {
+                                std::vector<uint8_t>&    active_sources) {
 	if (!program.srt_plan_complete) {
 		return false;
 	}
@@ -1059,7 +1076,7 @@ bool EvaluateRuntimeSourcesImpl(const ResourcePlan& program, std::span<const uin
 			}
 		}
 	}
-	results = std::move(evaluated);
+	results        = std::move(evaluated);
 	active_sources = std::move(active);
 	if (evaluate_flat) {
 		flat = std::move(flattened);
@@ -1083,11 +1100,11 @@ void BuildSrtPlan(Program& program) {
 }
 
 bool EvaluateUniformValues(const ResourcePlan& program, std::span<const Value> values,
-                            const SrtRuntime& runtime, std::span<uint32_t> results) {
+                           const SrtRuntime& runtime, std::span<uint32_t> results) {
 	if (values.size() != results.size()) {
 		return false;
 	}
-	auto clean = runtime;
+	auto clean        = runtime;
 	clean.read_memory = runtime.read_specialization_memory != nullptr
 	                        ? runtime.read_specialization_memory
 	                        : +[](void*, uint64_t, uint32_t*) { return false; };
