@@ -3,13 +3,18 @@
 
 #include "graphics/shader/recompiler/ir/ShaderIR.h"
 
+#include <array>
+#include <optional>
 #include <span>
+#include <unordered_map>
 
 namespace Libs::Graphics::ShaderRecompiler::IR {
 
 class Value;
 
-using SrtMemoryReader = bool (*)(void* userdata, uint64_t address, uint32_t* value);
+using SrtMemoryReader      = bool (*)(void* userdata, uint64_t address, uint32_t* value);
+using SrtMemoryRangeReader = bool (*)(void* userdata, uint64_t address, void* data, uint64_t size);
+using SrtMemoryRangeValidator = bool (*)(void* userdata, uint64_t address, uint64_t size);
 
 struct SrtRuntime {
 	std::span<const uint32_t> user_data;
@@ -17,9 +22,45 @@ struct SrtRuntime {
 	SrtMemoryReader           read_memory                = nullptr;
 	void*                     userdata                   = nullptr;
 	SrtMemoryReader           read_specialization_memory = nullptr;
+	SrtMemoryRangeReader      read_specialization_range  = nullptr;
+	SrtMemoryRangeValidator   is_memory_mapped           = nullptr;
+	// Runtime dispatch extent; zero means the stage has no compute workgroups.
+	std::array<uint32_t, 3> workgroup_count {};
 };
 
 enum class RuntimeValueType { Any, Integer };
+
+// Reuse only within one resource plan and one runtime snapshot. Active-lane
+// walks keep their own caches because their values depend on the EXEC mask.
+struct UniformValueCache {
+	std::unordered_map<const Inst*, uint64_t> values;
+};
+
+// A raw scalar read proven to be bounded by a finite GPU selector. The host
+// snapshots the candidate words; the shader keeps the selector live and reads
+// the corresponding flattened entry.
+struct BoundedSrtReadProof {
+	Value    index;
+	Value    count;
+	Value    address_low;
+	Value    address_high;
+	Value    descriptor_word2;
+	Value    descriptor_word3;
+	uint32_t source_dwords  = 2;
+	uint32_t offset_scale   = 0;
+	uint32_t offset_bias    = 0;
+	uint32_t memory_offset  = 0;
+	uint32_t workgroup_axis = UINT32_MAX;
+	bool     count_signed   = false;
+};
+
+std::optional<BoundedSrtReadProof> ProveBoundedSrtRead(const Program& program, const Inst& read);
+
+bool EvaluateBoundedDescriptorSource(const ResourcePlan& program, uint32_t source,
+                                     const SrtRuntime&                 runtime,
+                                     std::span<const BoundedSrtLayout> layouts,
+                                     std::span<const uint32_t> flattened_srt, uint32_t candidate,
+                                     DescriptorValue& result);
 
 // Collects reachable ReadConst values. Immediate offsets receive compact flat-buffer slots;
 // dynamic offsets remain explicit and are never assigned a fake slot.
@@ -27,7 +68,8 @@ void BuildSrtPlan(Program& program);
 bool ValidateRuntimeValue(const ResourcePlan& program, Value value,
                           RuntimeValueType type = RuntimeValueType::Any);
 bool EvaluateUniformValues(const ResourcePlan& program, std::span<const Value> values,
-                            const SrtRuntime& runtime, std::span<uint32_t> results);
+                           const SrtRuntime& runtime, std::span<uint32_t> results,
+                           UniformValueCache* cache = nullptr);
 
 bool EvaluateDescriptorSource(const ResourcePlan& program, uint32_t source,
                               const SrtRuntime& runtime, DescriptorValue& result);
@@ -44,8 +86,7 @@ bool EvaluateRuntimeSources(const ResourcePlan& program, std::span<const uint32_
                             std::vector<uint32_t>& flat, std::span<const uint8_t> clean_flat_slots,
                             std::vector<uint8_t>& active_sources);
 
-bool WalkSrt(const ResourcePlan& program, const SrtRuntime& runtime,
-             std::vector<uint32_t>& flat);
+bool WalkSrt(const ResourcePlan& program, const SrtRuntime& runtime, std::vector<uint32_t>& flat);
 
 } // namespace Libs::Graphics::ShaderRecompiler::IR
 

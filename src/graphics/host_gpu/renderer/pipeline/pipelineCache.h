@@ -45,12 +45,12 @@ struct PipelineStaticParameters {
 	bool                       stencil_test_enable      = false;
 	PipelineStencilStaticState stencil_front;
 	PipelineStencilStaticState stencil_back;
-	uint32_t                   color_mask[RENDER_COLOR_ATTACHMENTS_MAX]           = {};
-	bool                       cull_front                                         = false;
-	bool                       cull_back                                          = false;
-	bool                       face                                               = false;
-	bool                       provoking_vtx_last                                 = false;
-	vk::PolygonMode            polygon_mode                                       = vk::PolygonMode::eFill;
+	uint32_t                   color_mask[RENDER_COLOR_ATTACHMENTS_MAX] = {};
+	bool                       cull_front                               = false;
+	bool                       cull_back                                = false;
+	bool                       face                                     = false;
+	bool                       provoking_vtx_last                       = false;
+	vk::PolygonMode            polygon_mode                             = vk::PolygonMode::eFill;
 	uint8_t                    color_srcblend[RENDER_COLOR_ATTACHMENTS_MAX]       = {};
 	uint8_t                    color_comb_fcn[RENDER_COLOR_ATTACHMENTS_MAX]       = {};
 	uint8_t                    color_destblend[RENDER_COLOR_ATTACHMENTS_MAX]      = {};
@@ -135,7 +135,8 @@ public:
 	                    ShaderPixelInputInfo& pixel_info);
 	ShaderProgram GetComputeProgram(const HW::ComputeShaderInfo& regs,
 	                                const HW::ShaderRegisters&   sh,
-	                                ShaderComputeInputInfo&      input_info);
+	                                ShaderComputeInputInfo&      input_info,
+	                                std::array<uint32_t, 3>      dispatch_dimensions);
 
 	Pipeline&
 	CreateGraphicsPipeline(std::span<const RenderColorInfo> colors, const RenderDepthInfo& depth,
@@ -214,7 +215,7 @@ private:
 	std::unordered_map<GraphicsPipelineKey, std::unique_ptr<Pipeline>, GraphicsPipelineKeyHash>
 	                                                        m_graphics_pipelines;
 	std::unordered_map<uint64_t, std::unique_ptr<Pipeline>> m_compute_pipelines;
-	Common::Mutex m_mutex;
+	Common::Mutex                                           m_mutex;
 
 	void InitializeDriverCache();
 };

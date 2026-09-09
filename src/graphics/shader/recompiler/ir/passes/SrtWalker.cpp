@@ -179,6 +179,11 @@ private:
 			return valid;
 		};
 		const auto op = inst->GetOpcode();
+		if (op == ValueOpcode::ReadBoundedSrtU32) {
+			const auto id = inst->Flags<uint32_t>();
+			return finish(inst->NumArgs() == 1u && inst->Arg(0).GetType() == Type::U32 &&
+			              id < m_program.bounded_srt_reads.size());
+		}
 		if (op == ValueOpcode::ReadConst) {
 			const auto slot = inst->NumArgs() == 2 ? inst->Arg(1).Resolve() : Value {};
 			if (inst->NumArgs() != 2 || inst->Arg(0).Resolve().TryInstruction() == nullptr ||
@@ -454,9 +459,17 @@ class Evaluator {
 public:
 	Evaluator(const ResourcePlan& program, const SrtRuntime& runtime,
 	          std::span<const uint8_t> clean_flat_slots = {}, Evaluator* clean_evaluator = nullptr,
-	          Value active_mask = {})
+	          Value active_mask = {}, uint32_t lane_depth = 0, size_t initial_capacity = 0,
+	          UniformValueCache*                cache             = nullptr,
+	          std::span<const BoundedSrtLayout> bounded_layouts   = {},
+	          std::span<const uint32_t>         bounded_flat      = {},
+	          std::optional<uint32_t>           bounded_candidate = {})
 	    : m_program(program), m_runtime(runtime), m_clean_flat_slots(clean_flat_slots),
-	      m_clean_evaluator(clean_evaluator), m_active_mask(active_mask.Resolve()) {}
+	      m_clean_evaluator(clean_evaluator), m_active_mask(active_mask.Resolve()),
+	      m_lane_depth(lane_depth), m_initial_capacity(initial_capacity),
+	      m_cache(cache != nullptr ? cache->values : m_cache_storage),
+	      m_bounded_layouts(bounded_layouts), m_bounded_flat(bounded_flat),
+	      m_bounded_candidate(bounded_candidate) {}
 
 	bool Evaluate(Value value, uint32_t& result) {
 		uint64_t wide = 0;
@@ -465,6 +478,13 @@ public:
 		}
 		result = static_cast<uint32_t>(wide);
 		return true;
+	}
+
+	const std::string& FailureReason() const { return m_failure_reason; }
+
+	bool Fail(std::string reason) {
+		if (m_failure_reason.empty()) m_failure_reason = std::move(reason);
+		return false;
 	}
 
 private:
@@ -489,11 +509,16 @@ private:
 		}
 		auto* inst = value.TryInstruction();
 		if (inst == nullptr) {
-			return false;
+			return Fail(fmt::format("non-immediate value has no defining instruction (type={})",
+			                        TypeName(value.GetType())));
 		}
 		if (!m_reserved) {
-			m_cache.reserve(m_program.value_storage.size());
-			m_visiting.reserve(m_program.value_storage.size());
+			const auto capacity =
+			    m_initial_capacity == 0
+			        ? m_program.value_storage.size()
+			        : std::min(m_initial_capacity, m_program.value_storage.size());
+			if (m_cache.empty()) m_cache.reserve(capacity);
+			m_visiting.reserve(capacity);
 			m_reserved = true;
 		}
 		if (!m_active_mask.IsEmpty() && IsRuntimeSelect(inst->GetOpcode()) &&
@@ -505,13 +530,16 @@ private:
 			return true;
 		}
 		if (std::ranges::find(m_visiting, inst) != m_visiting.end()) {
-			return false;
+			return Fail(fmt::format("cyclic dependency at {}", ValueOpcodeName(inst->GetOpcode())));
 		}
 		m_visiting.push_back(inst);
 		uint64_t   out       = 0;
 		const bool evaluated = EvaluateInst(*inst, out);
 		m_visiting.pop_back();
 		if (!evaluated) {
+			const auto opcode = ValueOpcodeName(inst->GetOpcode());
+			if (m_failure_reason.empty()) return Fail(fmt::format("cannot evaluate {}", opcode));
+			m_failure_reason = fmt::format("{} -> {}", opcode, m_failure_reason);
 			return false;
 		}
 		m_cache.emplace(inst, out);
@@ -525,7 +553,8 @@ private:
 
 	bool EvaluatePhi(const Inst& inst, uint64_t& result) {
 		const auto value = ResolveInvariantPhi(m_program, Value(const_cast<Inst*>(&inst)));
-		return !value.IsEmpty() && EvaluateWide(value, result);
+		if (value.IsEmpty()) return Fail("PHI is not invariant");
+		return EvaluateWide(value, result);
 	}
 
 	bool EvaluateExtract(const Inst& inst, uint64_t& result) {
@@ -547,7 +576,7 @@ private:
 		}
 		const auto* source = inst.Arg(0).ResolveInstruction();
 		if (source == nullptr) {
-			return false;
+			return Fail("composite extraction source is unavailable");
 		}
 		if (source->GetOpcode() == ValueOpcode::CompositeConstructU32x2) {
 			return EvaluateWide(source->Arg(component), result);
@@ -603,10 +632,18 @@ private:
 			                      ? static_cast<uint64_t>(static_cast<uint32_t>(records))
 			                      : static_cast<uint64_t>(stride) * static_cast<uint32_t>(records);
 			if (aligned > size || size - aligned < sizeof(uint32_t)) {
+				if (m_bounded_candidate.has_value()) {
+					result = 0u;
+					return true;
+				}
 				return false;
 			}
 			address = ((base & ~uint64_t {3}) + byte_offset) & ~uint64_t {3};
 		} else {
+			if (m_bounded_candidate.has_value() && base == 0u) {
+				result = 0u;
+				return true;
+			}
 			const auto relative = (immediate & ~int64_t {3}) +
 			                      static_cast<int64_t>(static_cast<uint32_t>(offset) & ~3u);
 			if (!AddSignedAddress(base & ~uint64_t {3}, relative, address)) {
@@ -651,8 +688,11 @@ private:
 			case ValueOpcode::GetShaderBase: result = m_runtime.shader_base; return true;
 			case ValueOpcode::Phi: return EvaluatePhi(inst, result);
 			case ValueOpcode::ReadFirstLane: {
+				// Bound recursive active-lane walks through loop-carried PHIs.
+				if (m_lane_depth >= 16u) return false;
 				Evaluator active(m_program, m_runtime, m_clean_flat_slots, m_clean_evaluator,
-				                 inst.Arg(1));
+				                 inst.Arg(1), m_lane_depth + 1u, m_initial_capacity, nullptr,
+				                 m_bounded_layouts, m_bounded_flat, m_bounded_candidate);
 				return active.EvaluateWide(inst.Arg(0), result);
 			}
 			case ValueOpcode::BitCastU32F32:
@@ -674,10 +714,27 @@ private:
 				}
 				if (slot.U32() < m_clean_flat_slots.size() &&
 				    m_clean_flat_slots[slot.U32()] != 0u && m_clean_evaluator != nullptr) {
-					return m_clean_evaluator->EvaluateWide(m_program.srt_reads[slot.U32()].value,
-					                                       result);
+					if (!m_clean_evaluator->EvaluateWide(m_program.srt_reads[slot.U32()].value,
+					                                     result)) {
+						return Fail(fmt::format("clean SRT slot {} failed: {}", slot.U32(),
+						                        m_clean_evaluator->FailureReason()));
+					}
+					return true;
 				}
 				return EvaluateWide(m_program.srt_reads[slot.U32()].value, result);
+			}
+			case ValueOpcode::ReadBoundedSrtU32: {
+				if (!m_bounded_candidate.has_value()) return false;
+				const auto id = inst.Flags<uint32_t>();
+				if (id >= m_bounded_layouts.size()) return false;
+				const auto& layout = m_bounded_layouts[id];
+				if (*m_bounded_candidate >= layout.count ||
+				    layout.flat_offset > m_bounded_flat.size() ||
+				    *m_bounded_candidate >= m_bounded_flat.size() - layout.flat_offset) {
+					return false;
+				}
+				result = m_bounded_flat[layout.flat_offset + *m_bounded_candidate];
+				return true;
 			}
 			case ValueOpcode::LoadAddressU32:
 			case ValueOpcode::ReadConstBuffer:
@@ -961,14 +1018,21 @@ private:
 		return false;
 	}
 
-	const ResourcePlan&                       m_program;
-	const SrtRuntime&                         m_runtime;
-	std::span<const uint8_t>                  m_clean_flat_slots;
-	Evaluator*                                m_clean_evaluator = nullptr;
-	Value                                     m_active_mask;
-	std::unordered_map<const Inst*, uint64_t> m_cache;
-	std::vector<const Inst*>                  m_visiting;
-	bool                                      m_reserved = false;
+	const ResourcePlan&                        m_program;
+	const SrtRuntime&                          m_runtime;
+	std::span<const uint8_t>                   m_clean_flat_slots;
+	Evaluator*                                 m_clean_evaluator = nullptr;
+	Value                                      m_active_mask;
+	uint32_t                                   m_lane_depth       = 0;
+	size_t                                     m_initial_capacity = 0;
+	std::unordered_map<const Inst*, uint64_t>  m_cache_storage;
+	std::unordered_map<const Inst*, uint64_t>& m_cache;
+	std::vector<const Inst*>                   m_visiting;
+	std::span<const BoundedSrtLayout>          m_bounded_layouts;
+	std::span<const uint32_t>                  m_bounded_flat;
+	std::optional<uint32_t>                    m_bounded_candidate;
+	std::string                                m_failure_reason;
+	bool                                       m_reserved = false;
 
 	// One host memory query per region instead of one per word; the same check, cached for this
 	// walk.
@@ -1013,13 +1077,18 @@ bool EvaluateRuntimeSourcesImpl(const ResourcePlan& program, std::span<const uin
 	Evaluator            clean_evaluator(program, clean_runtime);
 	Evaluator            evaluator(program, runtime, clean_flat_slots, &clean_evaluator);
 	std::vector<uint8_t> active;
+	std::vector<uint8_t> active_flat;
 	if (evaluate_flat) {
 		active.assign(program.descriptor_sources.size(), 1u);
+		active_flat.assign(program.srt_reads.size(), 1u);
 	}
 	if (evaluate_flat && !program.control_flow.empty()) {
 		for (const auto& block: program.control_flow) {
 			for (const auto source: block.sources) {
 				active.at(source) = 0u;
+			}
+			for (const auto slot: block.flat_slots) {
+				active_flat.at(slot) = 0u;
 			}
 		}
 		std::vector<uint8_t>  visited(program.control_flow.size());
@@ -1034,6 +1103,9 @@ bool EvaluateRuntimeSourcesImpl(const ResourcePlan& program, std::span<const uin
 			const auto& block = program.control_flow[index];
 			for (const auto source: block.sources) {
 				active[source] = 1u;
+			}
+			for (const auto slot: block.flat_slots) {
+				active_flat[slot] = 1u;
 			}
 			uint32_t condition = 0;
 			// A missing clean reader must never fall through to the evaluator's raw-memory path.
@@ -1057,6 +1129,14 @@ bool EvaluateRuntimeSourcesImpl(const ResourcePlan& program, std::span<const uin
 		if (!evaluate_flat || active[source_index]) {
 			for (uint32_t index = 0; index < source->dword_count; index++) {
 				if (!evaluator.Evaluate(source->dwords[index], value.dwords[index])) {
+					std::fprintf(
+					    stderr,
+					    "srt evaluation: descriptor failed hash=0x%016llx source=%u dword=%u "
+					    "indirect_buffer=%u indirect_image=%u reason=%s\n",
+					    static_cast<unsigned long long>(program.shader_hash), source_index, index,
+					    source->indirect_buffer.has_value() ? 1u : 0u,
+					    source->indirect_image.has_value() ? 1u : 0u,
+					    evaluator.FailureReason().c_str());
 					return false;
 				}
 			}
@@ -1067,11 +1147,21 @@ bool EvaluateRuntimeSourcesImpl(const ResourcePlan& program, std::span<const uin
 	if (evaluate_flat) {
 		flattened.resize(program.srt_reads.size());
 		for (const auto& read: program.srt_reads) {
+			if (read.flat_offset >= flattened.size()) return false;
+			// Descriptor evaluation already follows reachable blocks. Apply the same
+			// reachability to shader constants, leaving unused slots at zero.
+			if (!active_flat[read.flat_offset]) continue;
 			const bool clean    = read.flat_offset < clean_flat_slots.size() &&
 			                      clean_flat_slots[read.flat_offset] != 0u;
 			auto&      selected = clean ? clean_evaluator : evaluator;
 			if (read.flat_offset >= flattened.size() ||
 			    !selected.Evaluate(read.value, flattened[read.flat_offset])) {
+				std::fprintf(
+				    stderr,
+				    "srt evaluation: flat failed hash=0x%016llx slot=%u offset=%u reason=%s\n",
+				    static_cast<unsigned long long>(program.shader_hash),
+				    static_cast<unsigned>(&read - program.srt_reads.data()), read.flat_offset,
+				    selected.FailureReason().c_str());
 				return false;
 			}
 		}
@@ -1084,10 +1174,690 @@ bool EvaluateRuntimeSourcesImpl(const ResourcePlan& program, std::span<const uin
 	return true;
 }
 
+struct BoundedOffset {
+	const Inst* index = nullptr;
+	uint32_t    scale = 0;
+	uint32_t    bias  = 0;
+};
+
+bool ParseBoundedOffset(Value value, BoundedOffset& result,
+                        std::unordered_set<const Inst*>& visiting) {
+	value = value.Resolve();
+	if (value.GetType() != Type::U32) return false;
+	if (value.IsImmediate()) {
+		result.bias = value.U32();
+		return true;
+	}
+	const auto* inst = value.TryInstruction();
+	if (inst == nullptr || !visiting.insert(inst).second) return false;
+	const auto finish = [&](bool success) {
+		visiting.erase(inst);
+		return success;
+	};
+	if (inst->GetOpcode() == ValueOpcode::GetBuiltin) {
+		const auto kind = inst->NumArgs() == 2u ? inst->Arg(0).Resolve() : Value {};
+		const auto axis = inst->NumArgs() == 2u ? inst->Arg(1).Resolve() : Value {};
+		if (!kind.IsImmediate() || kind.GetType() != Type::U32 ||
+		    kind.U32() != static_cast<uint32_t>(StageInputKind::WorkgroupId) ||
+		    !axis.IsImmediate() || axis.GetType() != Type::U32 || axis.U32() >= 3u)
+			return finish(false);
+		result.index = inst;
+		result.scale = 1u;
+		return finish(true);
+	}
+	if (inst->GetOpcode() == ValueOpcode::Phi || inst->GetOpcode() == ValueOpcode::SelectU32 ||
+	    inst->GetOpcode() == ValueOpcode::ReadFirstLane ||
+	    inst->GetOpcode() == ValueOpcode::ReadLane) {
+		result.index = inst;
+		result.scale = 1u;
+		return finish(true);
+	}
+	if (inst->GetOpcode() == ValueOpcode::BitFieldUExtract && inst->NumArgs() == 3u) {
+		// The extracted value is itself a dense selector. Its source may stay
+		// lane-varying; FiniteMaximum validates the immediate bit range below.
+		result.index = inst;
+		result.scale = 1u;
+		return finish(true);
+	}
+	if (inst->NumArgs() != 2u) return finish(false);
+	const Inst* arithmetic = inst;
+	auto        op         = inst->GetOpcode();
+	if (op == ValueOpcode::CompositeExtractU32x2) {
+		const auto component = inst->Arg(1).Resolve();
+		arithmetic           = inst->Arg(0).Resolve().TryInstruction();
+		if (!component.IsImmediate() || component.GetType() != Type::U32 || component.U32() != 0u ||
+		    arithmetic == nullptr || arithmetic->GetOpcode() != ValueOpcode::IAddCarry32 ||
+		    arithmetic->NumArgs() != 2u)
+			return finish(false);
+		// S_ADD_U32 lowers through carry pairs. Its low word has exactly the
+		// same modulo-U32 value as IAdd32; the high/carry word is not affine.
+		op = ValueOpcode::IAdd32;
+	}
+	if (op != ValueOpcode::IAdd32 && op != ValueOpcode::ISub32 && op != ValueOpcode::IMul32 &&
+	    op != ValueOpcode::ShiftLeftLogical32)
+		return finish(false);
+	BoundedOffset left, right;
+	if (!ParseBoundedOffset(arithmetic->Arg(0), left, visiting) ||
+	    !ParseBoundedOffset(arithmetic->Arg(1), right, visiting))
+		return finish(false);
+	if (left.index != nullptr && right.index != nullptr && left.index != right.index)
+		return finish(false);
+	result.index = left.index != nullptr ? left.index : right.index;
+	switch (op) {
+		case ValueOpcode::IAdd32:
+			result.scale = left.scale + right.scale;
+			result.bias  = left.bias + right.bias;
+			break;
+		case ValueOpcode::ISub32:
+			result.scale = left.scale - right.scale;
+			result.bias  = left.bias - right.bias;
+			break;
+		case ValueOpcode::IMul32:
+			if (left.index != nullptr && right.index != nullptr) return finish(false);
+			result.scale = left.scale * right.bias + right.scale * left.bias;
+			result.bias  = left.bias * right.bias;
+			break;
+		case ValueOpcode::ShiftLeftLogical32:
+			if (right.index != nullptr) return finish(false);
+			result.scale = left.scale << (right.bias & 31u);
+			result.bias  = left.bias << (right.bias & 31u);
+			break;
+		default: return finish(false);
+	}
+	return finish(true);
+}
+
+class BoundedReadProof {
+public:
+	explicit BoundedReadProof(const Program& program): m_program(program) {}
+
+	std::optional<BoundedSrtReadProof> Run(const Inst& read) {
+		if (m_program.stage != ShaderType::Compute || m_program.dispatcher_fallback ||
+		    m_program.blocks.empty() || m_program.blocks.size() != m_program.block_info.size())
+			return {};
+		const auto opcode       = read.GetOpcode();
+		const bool address_read = opcode == ValueOpcode::LoadAddressU32 && read.NumArgs() == 4u;
+		const bool buffer_read  = opcode == ValueOpcode::ReadConstBuffer && read.NumArgs() == 2u;
+		if (!address_read && !buffer_read) return {};
+		const auto flags = read.Flags<MemoryFlags>();
+		if (flags.index >= m_program.memory_info.size()) return {};
+		const auto& memory = m_program.memory_info[flags.index];
+		const auto  expected_kind =
+		    address_read ? ResourceKind::ScalarAddress : ResourceKind::ScalarBuffer;
+		if (memory.kind != expected_kind || memory.planning_only || memory.data_dwords != 1u ||
+		    memory.data_bits != 32u ||
+		    (address_read && (!Immediate(read.Arg(2), 0u) || read.Arg(3).Resolve() != Value(true))))
+			return {};
+		const auto*    address       = read.Arg(0).Resolve().TryInstruction();
+		const uint32_t source_dwords = address_read ? 2u : 4u;
+		const auto     expected_handle =
+		    address_read ? ValueOpcode::GetAddressResource : ValueOpcode::GetBufferResource;
+		if (address == nullptr || address->GetOpcode() != expected_handle ||
+		    address->NumArgs() != source_dwords)
+			return {};
+		for (uint32_t word = 0; word < source_dwords; ++word)
+			if (!ValidateRuntimeValue(m_program, address->Arg(word))) return {};
+		BoundedOffset                   offset;
+		std::unordered_set<const Inst*> visiting;
+		if (!ParseBoundedOffset(read.Arg(1), offset, visiting) || offset.index == nullptr) {
+			return {};
+		}
+		if (!BuildGraph()) return {};
+		const bool workgroup = offset.index->GetOpcode() == ValueOpcode::GetBuiltin;
+		const auto maximum   = workgroup ? std::optional<uint32_t> {}
+		                                 : FiniteMaximum(Value(const_cast<Inst*>(offset.index)));
+		if (workgroup || maximum.has_value()) {
+			// The dense enclosure includes every possible GPU value. Keep the key
+			// live; only its constant bound is evaluated on the host. Existing
+			// materialization budgets and coherent-read checks apply to every entry.
+			if (maximum == UINT32_MAX) return {}; // max+1 must not wrap to an empty table.
+			if (!Dominates(offset.index->Parent(), read.Parent()) ||
+			    (offset.index->Parent() == read.Parent() && !Precedes(*offset.index, read)))
+				return {};
+			// Only memory roots in the guaranteed entry prefix may be evaluated
+			// eagerly. A dispatch bound does not make a conditional pointer load
+			// unconditional, even when the coefficient itself is read later.
+			const Block*                     prefix = m_program.blocks.front();
+			std::unordered_set<const Block*> visited;
+			while (m_program.block_info[m_ids.at(prefix)].terminator.kind ==
+			       CFG::TerminatorKind::Branch) {
+				if (!visited.insert(prefix).second) return {};
+				const auto  target = m_program.block_info[m_ids.at(prefix)].terminator.true_block;
+				const auto* next   = m_by_id.at(target);
+				if (next->ImmPredecessors().size() != 1u ||
+				    next->ImmPredecessors().front() != prefix)
+					break;
+				prefix = next;
+			}
+			// Buffer-backed tables can inherit their source descriptor from an
+			// unavoidable scalar load on the path to this read. Snapshotting may
+			// then fail closed when that guest address is unavailable, while the
+			// direct-address form retains the stricter unconditional entry prefix.
+			const Block* source_scope = buffer_read ? read.Parent() : prefix;
+			for (uint32_t word = 0; word < source_dwords; ++word)
+				if (!RuntimeReadsDominate(address->Arg(word), source_scope, &read)) return {};
+			return BoundedSrtReadProof {
+			    .index            = Value(const_cast<Inst*>(offset.index)),
+			    .count            = workgroup ? Value {} : Value(*maximum + 1u),
+			    .address_low      = address->Arg(0).Resolve(),
+			    .address_high     = address->Arg(1).Resolve(),
+			    .descriptor_word2 = source_dwords == 4u ? address->Arg(2).Resolve() : Value {},
+			    .descriptor_word3 = source_dwords == 4u ? address->Arg(3).Resolve() : Value {},
+			    .source_dwords    = source_dwords,
+			    .offset_scale     = offset.scale,
+			    .offset_bias      = offset.bias,
+			    .memory_offset    = memory.offset,
+			    .workgroup_axis   = workgroup ? offset.index->Arg(1).Resolve().U32() : UINT32_MAX};
+		}
+		const auto* phi = offset.index;
+		if (phi->GetOpcode() != ValueOpcode::Phi) return {};
+		const auto* header = phi->Parent();
+		if (header == nullptr || !m_ids.contains(header) || !m_ids.contains(read.Parent()) ||
+		    !Reachable(read.Parent()) || phi->NumArgs() != 2u || phi->NumPhiBlocks() != 2u ||
+		    header->ImmPredecessors().size() != 2u)
+			return {};
+		const Block* initial = nullptr;
+		const Block* latch   = nullptr;
+		for (size_t incoming = 0; incoming < 2u; ++incoming) {
+			const auto* predecessor = phi->PhiBlock(incoming);
+			if (predecessor == nullptr || !m_ids.contains(predecessor) ||
+			    std::ranges::find(header->ImmPredecessors(), predecessor) ==
+			        header->ImmPredecessors().end())
+				return {};
+			const auto value = phi->Arg(incoming).Resolve();
+			if (Immediate(value, 0u) && !Dominates(header, predecessor)) {
+				if (initial != nullptr) return {};
+				initial = predecessor;
+			} else {
+				const auto* next = value.TryInstruction();
+				if (latch != nullptr || next == nullptr || !Dominates(header, predecessor) ||
+				    next->Parent() == nullptr || !Dominates(next->Parent(), predecessor))
+					return {};
+				BoundedOffset                   update;
+				std::unordered_set<const Inst*> update_visiting;
+				if (!ParseBoundedOffset(value, update, update_visiting) || update.index != phi ||
+				    update.scale != 1u || update.bias != 1u)
+					return {};
+				latch = predecessor;
+			}
+		}
+		if (initial == nullptr || latch == nullptr || initial == latch) return {};
+		// SSA construction may put the induction Phi in a separate empty header.
+		// Follow only an unavoidable, single-entry unconditional chain to its
+		// guard: every visit to the Phi must execute the same comparison.
+		const Block*                     guard = header;
+		std::unordered_set<const Block*> guard_chain;
+		while (m_program.block_info[m_ids.at(guard)].terminator.kind ==
+		       CFG::TerminatorKind::Branch) {
+			if (!guard_chain.insert(guard).second) return {};
+			const auto  next_id = m_program.block_info[m_ids.at(guard)].terminator.true_block;
+			const auto* next    = m_by_id.at(next_id);
+			if (next->ImmPredecessors().size() != 1u || next->ImmPredecessors().front() != guard)
+				return {};
+			guard = next;
+		}
+		const auto& info = m_program.block_info[m_ids.at(guard)];
+		if (info.terminator.kind != CFG::TerminatorKind::ConditionalBranch) return {};
+		auto                            condition = info.condition.Resolve();
+		bool                            invert    = false;
+		std::unordered_set<const Inst*> condition_visited;
+		while (const auto* inst = condition.TryInstruction()) {
+			if (!condition_visited.insert(inst).second) return {};
+			if (inst->GetOpcode() != ValueOpcode::LogicalNot || inst->NumArgs() != 1u) break;
+			invert    = !invert;
+			condition = inst->Arg(0).Resolve();
+		}
+		const auto* compare = condition.TryInstruction();
+		if (compare == nullptr || compare->NumArgs() != 2u) return {};
+		const auto index = Value(const_cast<Inst*>(phi));
+		Value      count;
+		if (compare->GetOpcode() == ValueOpcode::ULessThan32 && compare->Arg(0).Resolve() == index)
+			count = compare->Arg(1).Resolve();
+		else if (compare->GetOpcode() == ValueOpcode::UGreaterThan32 &&
+		         compare->Arg(1).Resolve() == index)
+			count = compare->Arg(0).Resolve();
+		else
+			return {};
+		if (count.GetType() != Type::U32 || !ValidateRuntimeValue(m_program, count)) return {};
+		// Roots may be loaded in the preheader or in this unavoidable guard
+		// chain. Both execute even when N is zero; success-only pointer loads
+		// remain ineligible for eager snapshot evaluation.
+		if (!RuntimeReadsDominate(count, guard)) return {};
+		for (uint32_t word = 0; word < source_dwords; ++word)
+			if (!RuntimeReadsDominate(address->Arg(word), guard)) return {};
+		const auto  success_id = invert ? info.terminator.false_block : info.terminator.true_block;
+		const auto* success    = m_by_id.at(success_id);
+		// Removing the successful i<N edge must make the actual read unreachable.
+		// Block dominance alone is insufficient when the guard's false path merges.
+		if (Reachable(read.Parent(), nullptr, guard, success)) return {};
+		return BoundedSrtReadProof {
+		    .index            = index,
+		    .count            = count,
+		    .address_low      = address->Arg(0).Resolve(),
+		    .address_high     = address->Arg(1).Resolve(),
+		    .descriptor_word2 = source_dwords == 4u ? address->Arg(2).Resolve() : Value {},
+		    .descriptor_word3 = source_dwords == 4u ? address->Arg(3).Resolve() : Value {},
+		    .source_dwords    = source_dwords,
+		    .offset_scale     = offset.scale,
+		    .offset_bias      = offset.bias,
+		    .memory_offset    = memory.offset};
+	}
+
+private:
+	std::optional<uint32_t> FiniteMaximum(Value value) {
+		value = value.Resolve();
+		if (value.GetType() != Type::U32) return {};
+		if (value.IsImmediate()) return value.U32();
+		const auto* inst = value.TryInstruction();
+		if (inst == nullptr || !m_ids.contains(inst->Parent())) return {};
+		if (const auto found = m_finite_values.find(inst); found != m_finite_values.end())
+			return found->second;
+		if (!m_finite_visiting.insert(inst).second) return {};
+		const auto finish = [&](std::optional<uint32_t> result) {
+			m_finite_visiting.erase(inst);
+			m_finite_values.emplace(inst, result);
+			return result;
+		};
+		if (inst->GetOpcode() == ValueOpcode::ReadFirstLane && inst->NumArgs() == 2u &&
+		    inst->Arg(1).GetType() == Type::U1) {
+			// Every source lane must be bounded, including lane0 for empty EXEC.
+			// Matching a predicated write's mask alone does not justify erasing
+			// its inactive old value; no GPU predicate is evaluated by this proof.
+			if (const auto strict = FiniteMaximum(inst->Arg(0)); strict.has_value())
+				return finish(strict);
+			const auto active = inst->Arg(1).Resolve();
+			if (!ProveActiveMaskNonempty(*inst, active)) return finish({});
+			std::unordered_set<const Inst*> active_visiting;
+			return finish(FiniteMaximumActive(inst->Arg(0), active, active_visiting));
+		}
+		if (inst->GetOpcode() == ValueOpcode::ReadLane && inst->NumArgs() == 2u) {
+			const auto lane = FiniteMaximum(inst->Arg(1));
+			if (!lane || *lane >= m_program.wave_size) return finish({});
+			return finish(FiniteMaximum(inst->Arg(0)));
+		}
+		if (inst->GetOpcode() == ValueOpcode::ShiftRightLogical32 && inst->NumArgs() == 2u) {
+			const auto shift = inst->Arg(1).Resolve();
+			if (!shift.IsImmediate() || shift.GetType() != Type::U32) return finish({});
+			const auto bits   = shift.U32() & 31u;
+			const auto source = FiniteMaximum(inst->Arg(0));
+			return finish(source ? *source >> bits : UINT32_MAX >> bits);
+		}
+		if (inst->GetOpcode() == ValueOpcode::BitwiseAnd32 && inst->NumArgs() == 2u) {
+			const auto left  = inst->Arg(0).Resolve();
+			const auto right = inst->Arg(1).Resolve();
+			if (left.IsImmediate() && left.GetType() == Type::U32) return finish(left.U32());
+			if (right.IsImmediate() && right.GetType() == Type::U32) return finish(right.U32());
+			const auto left_bound  = FiniteMaximum(left);
+			const auto right_bound = FiniteMaximum(right);
+			return finish(left_bound && right_bound
+			                  ? std::optional(std::min(*left_bound, *right_bound))
+			                  : std::nullopt);
+		}
+		if (inst->GetOpcode() == ValueOpcode::SelectU32 && inst->NumArgs() == 3u) {
+			const auto condition = inst->Arg(0).Resolve();
+			if (condition.GetType() != Type::U1) return finish({});
+			if (condition.IsImmediate())
+				return finish(FiniteMaximum(inst->Arg(condition.U1() ? 1u : 2u)));
+			const auto yes = FiniteMaximum(inst->Arg(1));
+			const auto no  = FiniteMaximum(inst->Arg(2));
+			return finish(yes && no ? std::optional(std::max(*yes, *no)) : std::nullopt);
+		}
+		if (inst->GetOpcode() == ValueOpcode::BitFieldUExtract && inst->NumArgs() == 3u) {
+			const auto offset = inst->Arg(1).Resolve();
+			const auto width  = inst->Arg(2).Resolve();
+			if (!offset.IsImmediate() || offset.GetType() != Type::U32 || !width.IsImmediate() ||
+			    width.GetType() != Type::U32 || offset.U32() > 32u ||
+			    width.U32() > 32u - offset.U32()) {
+				return finish({});
+			}
+			if (width.U32() == 32u) return finish(UINT32_MAX);
+			return finish(width.U32() == 0u ? 0u : (uint32_t {1} << width.U32()) - 1u);
+		}
+		if (inst->GetOpcode() == ValueOpcode::Phi && inst->NumArgs() != 0u &&
+		    inst->NumArgs() == inst->NumPhiBlocks() &&
+		    inst->NumArgs() == inst->Parent()->ImmPredecessors().size()) {
+			std::unordered_set<const Block*> incoming;
+			uint32_t                         maximum = 0u;
+			for (size_t arg = 0; arg < inst->NumArgs(); ++arg) {
+				const auto* predecessor = inst->PhiBlock(arg);
+				if (!m_ids.contains(predecessor) || !incoming.insert(predecessor).second ||
+				    std::ranges::find(inst->Parent()->ImmPredecessors(), predecessor) ==
+				        inst->Parent()->ImmPredecessors().end())
+					return finish({});
+				const auto bound = FiniteMaximum(inst->Arg(arg));
+				if (!bound) return finish({});
+				maximum = std::max(maximum, *bound);
+			}
+			return finish(maximum);
+		}
+		return finish({});
+	}
+
+	std::optional<uint32_t> FiniteMaximumActive(Value value, Value active,
+	                                            std::unordered_set<const Inst*>& visiting) {
+		value  = value.Resolve();
+		active = active.Resolve();
+		if (value.GetType() != Type::U32) return {};
+		if (value.IsImmediate()) return value.U32();
+		const auto* inst = value.TryInstruction();
+		if (inst == nullptr || !m_ids.contains(inst->Parent()) || !visiting.insert(inst).second)
+			return {};
+		const auto finish = [&](std::optional<uint32_t> result) {
+			visiting.erase(inst);
+			return result;
+		};
+		if (inst->GetOpcode() == ValueOpcode::ReadFirstLane) {
+			// A nested lane selection has its own mask and proof context.
+			return finish(FiniteMaximum(value));
+		}
+		if (inst->GetOpcode() == ValueOpcode::SelectU32 && inst->NumArgs() == 3u) {
+			const auto condition = inst->Arg(0).Resolve();
+			if (condition.GetType() != Type::U1) return finish({});
+			if (condition.IsImmediate())
+				return finish(
+				    FiniteMaximumActive(inst->Arg(condition.U1() ? 1u : 2u), active, visiting));
+			if (condition == active)
+				return finish(FiniteMaximumActive(inst->Arg(1), active, visiting));
+			const auto yes = FiniteMaximumActive(inst->Arg(1), active, visiting);
+			const auto no  = FiniteMaximumActive(inst->Arg(2), active, visiting);
+			return finish(yes && no ? std::optional(std::max(*yes, *no)) : std::nullopt);
+		}
+		if (inst->GetOpcode() == ValueOpcode::Phi && inst->NumArgs() != 0u &&
+		    inst->NumArgs() == inst->NumPhiBlocks() &&
+		    inst->NumArgs() == inst->Parent()->ImmPredecessors().size()) {
+			std::unordered_set<const Block*> incoming;
+			uint32_t                         maximum = 0u;
+			for (size_t arg = 0; arg < inst->NumArgs(); ++arg) {
+				const auto* predecessor = inst->PhiBlock(arg);
+				if (!m_ids.contains(predecessor) || !incoming.insert(predecessor).second ||
+				    std::ranges::find(inst->Parent()->ImmPredecessors(), predecessor) ==
+				        inst->Parent()->ImmPredecessors().end())
+					return finish({});
+				const auto bound = FiniteMaximumActive(inst->Arg(arg), active, visiting);
+				if (!bound) return finish({});
+				maximum = std::max(maximum, *bound);
+			}
+			return finish(maximum);
+		}
+		return finish({});
+	}
+
+	struct MaskWordProof {
+		bool uniform = false;
+		bool subset  = false;
+	};
+
+	MaskWordProof ProveMaskWord(Value value, uint32_t component,
+	                            std::unordered_set<const Inst*>& visiting) const {
+		value = value.Resolve();
+		if (value.GetType() != Type::U32) return {};
+		if (value.IsImmediate()) return {true, value.U32() == 0u};
+		const auto* inst = value.TryInstruction();
+		if (inst == nullptr || !visiting.insert(inst).second) return {};
+		const auto finish = [&](MaskWordProof result) {
+			visiting.erase(inst);
+			return result;
+		};
+		if (inst->GetOpcode() == ValueOpcode::CompositeExtractU32x4 && inst->NumArgs() == 2u) {
+			const auto  index  = inst->Arg(1).Resolve();
+			const auto* ballot = inst->Arg(0).Resolve().TryInstruction();
+			const bool  entry_ballot =
+			    index.IsImmediate() && index.GetType() == Type::U32 && ballot != nullptr &&
+			    ballot->GetOpcode() == ValueOpcode::Ballot && ballot->NumArgs() == 1u &&
+			    ballot->Arg(0).Resolve() == Value(true) &&
+			    ballot->Parent() == m_program.blocks.front();
+			return finish({entry_ballot, entry_ballot && index.U32() == component});
+		}
+		if ((inst->GetOpcode() == ValueOpcode::BitwiseAnd32 ||
+		     inst->GetOpcode() == ValueOpcode::BitwiseOr32) &&
+		    inst->NumArgs() == 2u) {
+			const auto left  = ProveMaskWord(inst->Arg(0), component, visiting);
+			const auto right = ProveMaskWord(inst->Arg(1), component, visiting);
+			if (!left.uniform || !right.uniform) return finish({});
+			const bool subset = inst->GetOpcode() == ValueOpcode::BitwiseAnd32
+			                        ? left.subset || right.subset
+			                        : left.subset && right.subset;
+			return finish({true, subset});
+		}
+		return finish({});
+	}
+
+	bool ParseThreadBit(Value active, Value& low, Value& high) const {
+		active              = active.Resolve();
+		const auto* nonzero = active.TryInstruction();
+		if (nonzero == nullptr || nonzero->GetOpcode() != ValueOpcode::INotEqual32 ||
+		    nonzero->NumArgs() != 2u)
+			return false;
+		Value selected;
+		if (Immediate(nonzero->Arg(0), 0u))
+			selected = nonzero->Arg(1).Resolve();
+		else if (Immediate(nonzero->Arg(1), 0u))
+			selected = nonzero->Arg(0).Resolve();
+		else
+			return false;
+		const auto* one = selected.TryInstruction();
+		if (one == nullptr || one->GetOpcode() != ValueOpcode::BitwiseAnd32 || one->NumArgs() != 2u)
+			return false;
+		Value shifted;
+		if (Immediate(one->Arg(0), 1u))
+			shifted = one->Arg(1).Resolve();
+		else if (Immediate(one->Arg(1), 1u))
+			shifted = one->Arg(0).Resolve();
+		else
+			return false;
+		const auto* shift = shifted.TryInstruction();
+		if (shift == nullptr || shift->GetOpcode() != ValueOpcode::ShiftRightLogical32 ||
+		    shift->NumArgs() != 2u)
+			return false;
+		const auto* bit = shift->Arg(1).Resolve().TryInstruction();
+		if (bit == nullptr || bit->GetOpcode() != ValueOpcode::BitwiseAnd32 || bit->NumArgs() != 2u)
+			return false;
+		Value lane;
+		if (Immediate(bit->Arg(0), 31u))
+			lane = bit->Arg(1).Resolve();
+		else if (Immediate(bit->Arg(1), 31u))
+			lane = bit->Arg(0).Resolve();
+		else
+			return false;
+		const auto* lane_inst = lane.TryInstruction();
+		const auto* choose    = shift->Arg(0).Resolve().TryInstruction();
+		if (lane_inst == nullptr || lane_inst->GetOpcode() != ValueOpcode::LaneId ||
+		    choose == nullptr || choose->GetOpcode() != ValueOpcode::SelectU32 ||
+		    choose->NumArgs() != 3u)
+			return false;
+		const auto* upper = choose->Arg(0).Resolve().TryInstruction();
+		if (upper == nullptr || upper->GetOpcode() != ValueOpcode::UGreaterThanEqual32 ||
+		    upper->NumArgs() != 2u || upper->Arg(0).Resolve() != lane ||
+		    !Immediate(upper->Arg(1), 32u))
+			return false;
+		high = choose->Arg(1).Resolve();
+		low  = choose->Arg(2).Resolve();
+		return true;
+	}
+
+	bool IsZeroMaskGuard(Value condition, Value low, Value high) const {
+		condition         = condition.Resolve();
+		const auto* equal = condition.TryInstruction();
+		if (equal == nullptr || equal->GetOpcode() != ValueOpcode::IEqual32 ||
+		    equal->NumArgs() != 2u)
+			return false;
+		Value combined;
+		if (Immediate(equal->Arg(0), 0u))
+			combined = equal->Arg(1).Resolve();
+		else if (Immediate(equal->Arg(1), 0u))
+			combined = equal->Arg(0).Resolve();
+		else
+			return false;
+		const auto* bit_or = combined.TryInstruction();
+		if (bit_or == nullptr || bit_or->GetOpcode() != ValueOpcode::BitwiseOr32 ||
+		    bit_or->NumArgs() != 2u)
+			return false;
+		const auto left  = bit_or->Arg(0).Resolve();
+		const auto right = bit_or->Arg(1).Resolve();
+		return (left == low.Resolve() && right == high.Resolve()) ||
+		       (left == high.Resolve() && right == low.Resolve());
+	}
+
+	bool GraphHasCycle(const Block* block, std::unordered_set<const Block*>& active,
+	                   std::unordered_set<const Block*>& complete) const {
+		if (complete.contains(block)) return false;
+		if (!active.insert(block).second) return true;
+		for (const auto* successor: block->ImmSuccessors())
+			if (GraphHasCycle(successor, active, complete)) return true;
+		active.erase(block);
+		complete.insert(block);
+		return false;
+	}
+
+	bool PostDominates(const Block* required, const Block* start) const {
+		if (required == start) return true;
+		std::vector<const Block*>        work {start};
+		std::unordered_set<const Block*> visited;
+		while (!work.empty()) {
+			const auto* block = work.back();
+			work.pop_back();
+			if (block == required || !visited.insert(block).second) continue;
+			const auto& term = m_program.block_info[m_ids.at(block)].terminator;
+			if (term.kind == CFG::TerminatorKind::Return) return false;
+			for (const auto* successor: block->ImmSuccessors())
+				work.push_back(successor);
+		}
+		return true;
+	}
+
+	bool ProveActiveMaskNonempty(const Inst& read_first_lane, Value active) const {
+		if (read_first_lane.Parent() == nullptr || !m_ids.contains(read_first_lane.Parent()))
+			return false;
+		std::unordered_set<const Block*> graph_active;
+		std::unordered_set<const Block*> graph_complete;
+		if (GraphHasCycle(m_program.blocks.front(), graph_active, graph_complete)) return false;
+		Value low, high;
+		if (!ParseThreadBit(active, low, high)) return false;
+		std::unordered_set<const Inst*> low_visiting;
+		std::unordered_set<const Inst*> high_visiting;
+		const auto                      low_proof  = ProveMaskWord(low, 0u, low_visiting);
+		const auto                      high_proof = ProveMaskWord(high, 1u, high_visiting);
+		if (!low_proof.uniform || !low_proof.subset || !high_proof.uniform || !high_proof.subset)
+			return false;
+		for (const auto* guard: m_program.blocks) {
+			const auto& info = m_program.block_info[m_ids.at(guard)];
+			if (info.terminator.kind != CFG::TerminatorKind::ConditionalBranch ||
+			    !IsZeroMaskGuard(info.condition, low, high))
+				continue;
+			const auto* nonempty = m_by_id.at(info.terminator.false_block);
+			if (!PostDominates(guard, m_program.blocks.front()) ||
+			    !Dominates(nonempty, read_first_lane.Parent()) ||
+			    !PostDominates(read_first_lane.Parent(), nonempty))
+				continue;
+			return true;
+		}
+		return false;
+	}
+
+	static bool Immediate(Value value, uint32_t expected) {
+		value = value.Resolve();
+		return value.IsImmediate() && value.GetType() == Type::U32 && value.U32() == expected;
+	}
+	static bool Precedes(const Inst& definition, const Inst& use) {
+		if (definition.Parent() == nullptr || definition.Parent() != use.Parent()) return false;
+		for (const auto& inst: *use.Parent()) {
+			if (&inst == &use) return false;
+			if (&inst == &definition) return true;
+		}
+		return false;
+	}
+	bool RuntimeReadsDominate(Value root, const Block* header, const Inst* before = nullptr) const {
+		std::vector<Value>              work {root};
+		std::unordered_set<const Inst*> visited;
+		while (!work.empty()) {
+			const auto value = work.back().Resolve();
+			work.pop_back();
+			const auto* inst = value.TryInstruction();
+			if (inst == nullptr || !visited.insert(inst).second) continue;
+			if (inst->GetOpcode() == ValueOpcode::ReadConst) {
+				const auto slot = inst->NumArgs() == 2u ? inst->Arg(1).Resolve() : Value {};
+				if (!slot.IsImmediate() || slot.GetType() != Type::U32 ||
+				    slot.U32() >= m_program.srt_reads.size())
+					return false;
+				work.push_back(m_program.srt_reads[slot.U32()].value);
+			}
+			if (inst->GetOpcode() == ValueOpcode::LoadAddressU32 ||
+			    inst->GetOpcode() == ValueOpcode::ReadConstBuffer) {
+				if (inst->Parent() == nullptr || !Dominates(inst->Parent(), header)) return false;
+				if (before != nullptr &&
+				    (!Dominates(inst->Parent(), before->Parent()) ||
+				     (inst->Parent() == before->Parent() && !Precedes(*inst, *before))))
+					return false;
+			}
+			for (size_t arg = 0; arg < inst->NumArgs(); ++arg)
+				work.push_back(inst->Arg(arg));
+		}
+		return true;
+	}
+	bool BuildGraph() {
+		for (uint32_t i = 0; i < m_program.blocks.size(); ++i) {
+			if (m_program.blocks[i] == nullptr || !m_ids.emplace(m_program.blocks[i], i).second ||
+			    m_program.block_info[i].id == UINT32_MAX ||
+			    !m_by_id.emplace(m_program.block_info[i].id, m_program.blocks[i]).second)
+				return false;
+		}
+		for (uint32_t i = 0; i < m_program.blocks.size(); ++i) {
+			const auto&               term = m_program.block_info[i].terminator;
+			std::vector<const Block*> expected;
+			if (term.kind == CFG::TerminatorKind::Branch ||
+			    term.kind == CFG::TerminatorKind::ConditionalBranch) {
+				if (!m_by_id.contains(term.true_block)) return false;
+				expected.push_back(m_by_id.at(term.true_block));
+			}
+			if (term.kind == CFG::TerminatorKind::ConditionalBranch) {
+				if (!m_by_id.contains(term.false_block) || term.true_block == term.false_block)
+					return false;
+				expected.push_back(m_by_id.at(term.false_block));
+			}
+			if (term.kind != CFG::TerminatorKind::Branch &&
+			    term.kind != CFG::TerminatorKind::ConditionalBranch &&
+			    term.kind != CFG::TerminatorKind::Return)
+				return false;
+			const auto actual = m_program.blocks[i]->ImmSuccessors();
+			if (actual.size() != expected.size()) return false;
+			for (const auto* successor: actual)
+				if (std::ranges::find(expected, successor) == expected.end()) return false;
+		}
+		return true;
+	}
+	bool Reachable(const Block* target, const Block* exclude = nullptr,
+	               const Block* edge_from = nullptr, const Block* edge_to = nullptr) const {
+		std::vector<const Block*>        work {m_program.blocks.front()};
+		std::unordered_set<const Block*> visited;
+		while (!work.empty()) {
+			const auto* block = work.back();
+			work.pop_back();
+			if (block == exclude || !visited.insert(block).second) continue;
+			if (block == target) return true;
+			for (const auto* successor: block->ImmSuccessors())
+				if (block != edge_from || successor != edge_to) work.push_back(successor);
+		}
+		return false;
+	}
+	bool Dominates(const Block* dominator, const Block* block) const {
+		return m_ids.contains(dominator) && m_ids.contains(block) && Reachable(block) &&
+		       (dominator == block || !Reachable(block, dominator));
+	}
+	const Program&                                           m_program;
+	std::unordered_map<const Block*, uint32_t>               m_ids;
+	std::unordered_map<uint32_t, const Block*>               m_by_id;
+	std::unordered_map<const Inst*, std::optional<uint32_t>> m_finite_values;
+	std::unordered_set<const Inst*>                          m_finite_visiting;
+};
+
 } // namespace
 
 bool ValidateRuntimeValue(const ResourcePlan& program, Value value, RuntimeValueType type) {
 	return RuntimeValidator(program, type).Run(value);
+}
+
+std::optional<BoundedSrtReadProof> ProveBoundedSrtRead(const Program& program, const Inst& read) {
+	return BoundedReadProof(program).Run(read);
 }
 
 void BuildSrtPlan(Program& program) {
@@ -1100,7 +1870,8 @@ void BuildSrtPlan(Program& program) {
 }
 
 bool EvaluateUniformValues(const ResourcePlan& program, std::span<const Value> values,
-                           const SrtRuntime& runtime, std::span<uint32_t> results) {
+                           const SrtRuntime& runtime, std::span<uint32_t> results,
+                           UniformValueCache* cache) {
 	if (values.size() != results.size()) {
 		return false;
 	}
@@ -1108,7 +1879,9 @@ bool EvaluateUniformValues(const ResourcePlan& program, std::span<const Value> v
 	clean.read_memory = runtime.read_specialization_memory != nullptr
 	                        ? runtime.read_specialization_memory
 	                        : +[](void*, uint64_t, uint32_t*) { return false; };
-	Evaluator evaluator(program, clean);
+	// Selector enumeration often requests only one leaf or a four-word buffer
+	// handle. Reserve a small initial working set while allowing normal growth.
+	Evaluator evaluator(program, clean, {}, nullptr, {}, 0, 64, cache);
 	for (size_t i = 0; i < values.size(); ++i) {
 		if (!evaluator.Evaluate(values[i], results[i])) {
 			return false;
@@ -1124,6 +1897,24 @@ bool EvaluateDescriptorSource(const ResourcePlan& program, uint32_t source,
 		return false;
 	}
 	result = results.front();
+	return true;
+}
+
+bool EvaluateBoundedDescriptorSource(const ResourcePlan& program, uint32_t source,
+                                     const SrtRuntime&                 runtime,
+                                     std::span<const BoundedSrtLayout> layouts,
+                                     std::span<const uint32_t> flattened_srt, uint32_t candidate,
+                                     DescriptorValue& result) {
+	const auto* descriptor = Source(program, source);
+	if (descriptor == nullptr) return false;
+	Evaluator evaluator(program, runtime, {}, nullptr, {}, 0, 0, nullptr, layouts, flattened_srt,
+	                    candidate);
+	DescriptorValue next;
+	next.dword_count = descriptor->dword_count;
+	for (uint32_t word = 0; word < descriptor->dword_count; ++word) {
+		if (!evaluator.Evaluate(descriptor->dwords[word], next.dwords[word])) return false;
+	}
+	result = next;
 	return true;
 }
 

@@ -259,16 +259,17 @@ ConfigurationListWidget::~ConfigurationListWidget() {
 
 void ConfigurationListWidget::changeEvent(QEvent* event) {
 	QWidget::changeEvent(event);
-	if (event->type() == QEvent::ApplicationPaletteChange || event->type() == QEvent::PaletteChange) {
+	if (event->type() == QEvent::ApplicationPaletteChange ||
+	    event->type() == QEvent::PaletteChange) {
 		UpdateToolbarIcons();
 	}
 }
 
 void ConfigurationListWidget::UpdateToolbarIcons() {
-	const auto color = palette().color(QPalette::Window).lightness() < 128 ? QColor(Qt::white)
-	                                                                      : QColor(Qt::black);
+	const auto color =
+	    palette().color(QPalette::Window).lightness() < 128 ? QColor(Qt::white) : QColor(Qt::black);
 	const auto set_icon = [&color](QToolButton* button, const QString& resource) {
-		auto pixmap = QIcon(resource).pixmap(button->iconSize(), button->devicePixelRatioF());
+		auto     pixmap = QIcon(resource).pixmap(button->iconSize(), button->devicePixelRatioF());
 		QPainter painter(&pixmap);
 		painter.setCompositionMode(QPainter::CompositionMode_SourceIn);
 		painter.fillRect(pixmap.rect(), color);
@@ -578,12 +579,9 @@ void ConfigurationListWidget::ScanGameDirectory() {
 			continue;
 		}
 
-		QList<QDir> pending_dirs;
-		const auto  root_subdirs =
-		    root.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot | QDir::NoSymLinks);
-		for (const auto& subdir: root_subdirs) {
-			pending_dirs.append(QDir(subdir.absoluteFilePath()));
-		}
+		// A configured root may itself be a game directory. Check it before
+		// traversing all of its descendants (which can be very large).
+		QList<QDir> pending_dirs({root});
 
 		while (!pending_dirs.isEmpty()) {
 			QDir game_dir = pending_dirs.takeFirst();

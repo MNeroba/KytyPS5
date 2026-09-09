@@ -1,6 +1,5 @@
-#include "graphics/shader/recompiler/backend/spirv/spirvEmitterInternal.h"
-
 #include "common/assert.h"
+#include "graphics/shader/recompiler/backend/spirv/spirvEmitterInternal.h"
 
 #include <algorithm>
 #include <bit>
@@ -55,11 +54,11 @@ struct StructuredFunctionState {
 
 struct DispatcherFunctionState {
 	std::array<std::unordered_map<const IR::Inst*, uint32_t>, 2> spills;
-	uint32_t                                      header_label       = 0;
-	uint32_t                                      select_label       = 0;
-	uint32_t                                      after_switch_label = 0;
-	uint32_t                                      continue_label     = 0;
-	uint32_t                                      merge_label        = 0;
+	uint32_t                                                     header_label       = 0;
+	uint32_t                                                     select_label       = 0;
+	uint32_t                                                     after_switch_label = 0;
+	uint32_t                                                     continue_label     = 0;
+	uint32_t                                                     merge_label        = 0;
 };
 
 void StoreDispatcherPhiEdge(ValueEmitContext& ctx, const DispatcherFunctionState& dispatcher,
@@ -118,7 +117,7 @@ uint32_t BranchCondition(ValueEmitContext& ctx, const IR::BlockInfo& info) {
 
 void EmitStructuredTerminator(ValueEmitContext& ctx, const IR::Block* block,
                               const IR::BlockInfo& info) {
-	const auto& program = ctx.state.program;
+	const auto& program    = ctx.state.program;
 	const auto& term       = info.terminator;
 	const auto  emit_merge = [&]() {
 		if (term.loop_header) {
@@ -312,7 +311,7 @@ void PatchStructuredPhis(ValueEmitContext& ctx, StructuredFunctionState& structu
 }
 
 void EmitStructuredFunction(ValueEmitContext& ctx) {
-	const auto& program = ctx.state.program;
+	const auto&             program = ctx.state.program;
 	StructuredFunctionState structured;
 	ctx.state.builder.AddFunction({OpBranch, ctx.Label(program.blocks.front())});
 	for (size_t index = 0; index < program.blocks.size(); index++) {
@@ -530,8 +529,8 @@ uint32_t ValueEmitContext::Result(const IR::Inst& inst) {
 
 uint32_t ValueEmitContext::Emit(const IR::Inst& inst, uint32_t opcode, IR::Type type,
                                 std::initializer_list<uint32_t> args) {
-	const auto type_id = TypeId(type);
-	const auto result  = Result(inst);
+	const auto            type_id = TypeId(type);
+	const auto            result  = Result(inst);
 	std::vector<uint32_t> words {opcode, type_id, result};
 	words.insert(words.end(), args.begin(), args.end());
 	state.builder.AddFunction(words);
@@ -566,6 +565,9 @@ const IR::Inst* ValueEmitContext::ImageAddress(IR::Value value) {
 }
 
 const IR::MemoryInfo& ValueEmitContext::Memory(const IR::Inst& inst) const {
+	if (&inst == memory_override_inst) {
+		return *memory_override;
+	}
 	return state.program.memory_info.at(inst.Flags<IR::MemoryFlags>().index);
 }
 

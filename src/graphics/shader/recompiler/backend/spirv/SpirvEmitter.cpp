@@ -79,10 +79,16 @@ void ValidateNativeProgram(const IR::Program& program) {
 		Expect(Kind::FaultBuffer);
 	}
 	const bool uses_flattened_runtime =
-	    !program.srt_reads.empty() ||
-	     std::ranges::any_of(program.info.images, [](const IR::ImageResource& image) {
-		     return image.indirect_search_iterations != 0u;
-	     });
+	    !program.srt_reads.empty() || !program.bounded_srt_reads.empty() ||
+	    std::ranges::any_of(program.info.bounded_srt_reads,
+	                        [](const IR::BoundedSrtLayout& read) { return read.count != 0u; }) ||
+	    std::ranges::any_of(program.info.buffers,
+	                        [](const IR::BufferResource& buffer) {
+		                        return buffer.indirect_search_iterations != 0u;
+	                        }) ||
+	    std::ranges::any_of(program.info.images, [](const IR::ImageResource& image) {
+		    return image.indirect_search_iterations != 0u;
+	    });
 	if (uses_flattened_runtime) {
 		Expect(Kind::FlattenedSrt);
 	}
@@ -105,7 +111,7 @@ void ValidateNativeProgram(const IR::Program& program) {
 		}
 	}
 	const auto has_shader_data_storage = present[static_cast<size_t>(Kind::ShaderData)];
-	const auto shader_data_dwords = program.bindings.ShaderDataDwords();
+	const auto shader_data_dwords      = program.bindings.ShaderDataDwords();
 	if ((program.bindings.UsesPushData() &&
 	     !IR::PushData::CanFit(program.bindings.push_data_start_dword, shader_data_dwords)) ||
 	    program.bindings.memory_offset_dword != program.bindings.user_data_registers.size() ||
@@ -186,7 +192,7 @@ void ValidateNativeProgram(const IR::Program& program) {
 void AnalyzeProgramRequirements(IR::Program& program) {
 	program.spirv_requirements.reset();
 	IR::SpirvRequirements requirements {};
-	const auto MarkBallot = [&] { requirements.subgroup_ballot = true; };
+	const auto            MarkBallot = [&] { requirements.subgroup_ballot = true; };
 	for (const auto* block: program.blocks) {
 		for (const auto& inst: *block) {
 			if (IR::BufferAccessOf(inst.GetOpcode()) == IR::BufferAccess::Atomic &&
@@ -218,10 +224,14 @@ void AnalyzeProgramRequirements(IR::Program& program) {
 					if (memory.resource >= program.info.buffers.size()) {
 						Fail(program, "buffer operation has invalid resource metadata");
 					}
-					if ((program.info.buffers[memory.resource].packed_stride & (1u << 20u)) != 0u) {
-						if (program.stage != ShaderType::Compute) {
-							Fail(program, "buffer ADD_TID is only valid for compute shaders");
-						}
+					const auto& buffer = program.info.buffers[memory.resource];
+					if ((buffer.packed_stride & (1u << 20u)) != 0u ||
+					    std::ranges::any_of(buffer.indirect_resources, [&](uint32_t candidate) {
+						    return (program.info.buffers[candidate].packed_stride & (1u << 20u)) !=
+						           0u;
+					    })) {
+						// ADD_TID adds the lane within the wave, including in graphics
+						// stages. Its address calculation uses SubgroupLocalInvocationId.
 						requirements.subgroup_local_invocation_id = true;
 					}
 				}
@@ -294,8 +304,7 @@ void AnalyzeProgramRequirements(IR::Program& program) {
 					if (index >= program.export_info.size()) {
 						Fail(program, "attribute export has invalid metadata");
 					}
-					if (program.stage == ShaderType::Pixel &&
-					    program.export_info[index].vm) {
+					if (program.stage == ShaderType::Pixel && program.export_info[index].vm) {
 						requirements.pixel_valid_mask = true;
 					}
 					break;
@@ -307,8 +316,7 @@ void AnalyzeProgramRequirements(IR::Program& program) {
 	program.spirv_requirements.emplace(requirements);
 }
 
-std::vector<uint32_t> EmitProgram(const IR::Program& program,
-                                  ShaderStageInputInfo input_info) {
+std::vector<uint32_t> EmitProgram(const IR::Program& program, ShaderStageInputInfo input_info) {
 	using namespace Emitter;
 
 	if (program.stage != ShaderType::Compute && program.stage != ShaderType::Vertex &&
@@ -323,7 +331,7 @@ std::vector<uint32_t> EmitProgram(const IR::Program& program,
 	ValidateNativeProgram(program);
 	IR::ValidateProgram(program, true);
 	EmitterState state(program, input_info);
-	state.stage = program.stage;
+	state.stage           = program.stage;
 	const auto* workgroup = ShaderWorkgroupInput(program.stage, input_info);
 	state.lane_count =
 	    workgroup != nullptr && program.wave_size == 64u && workgroup->host_subgroup_size == 32u

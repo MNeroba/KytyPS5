@@ -92,7 +92,7 @@ enum : uint32_t {
 	BuiltInClipDistance              = 3,
 	BuiltInCullDistance              = 4,
 	BuiltInLayer                     = 9,
-	BuiltInViewportIndex              = 10,
+	BuiltInViewportIndex             = 10,
 	BuiltInFragCoord                 = 15,
 	BuiltInFrontFacing               = 17,
 	BuiltInSampleId                  = 18,
@@ -365,43 +365,43 @@ struct EmitterState {
 	uint32_t                                         storage_buffer_variable = 0;
 	uint32_t                                         storage_buffer_u64_variable = 0;
 	std::array<uint32_t, IR::ShaderInfo::MaxBuffers> memory_byte_offsets {};
-	uint32_t                                         bda_pagetable_variable  = 0;
-	uint32_t                                         fault_buffer_variable   = 0;
-	uint32_t                                         bda_pointer_function    = 0;
-	uint32_t                                         gds_variable            = 0;
-	uint32_t                                         gds_length              = 0;
-	uint32_t                                         push_constant_variable  = 0;
+	uint32_t                                         bda_pagetable_variable       = 0;
+	uint32_t                                         fault_buffer_variable        = 0;
+	uint32_t                                         bda_pointer_function         = 0;
+	uint32_t                                         gds_variable                 = 0;
+	uint32_t                                         gds_length                   = 0;
+	uint32_t                                         push_constant_variable       = 0;
 	uint32_t                                         shader_data_storage_variable = 0;
-	uint32_t                                         flattened_srt_variable  = 0;
-	uint32_t                                         lds_variable            = 0;
+	uint32_t                                         flattened_srt_variable       = 0;
+	uint32_t                                         lds_variable                 = 0;
 	std::array<uint32_t, 2>                          scratch_variable {};
 	std::array<uint32_t, IR::ImageBindingCount>      image_variables {};
-	uint32_t                   sampler_variable                      = 0;
-	uint32_t                   main_func                             = 0;
-	uint32_t                   mesh_guest_func                       = 0;
-	uint32_t                   mesh_allocation                       = 0;
-	uint32_t                   mesh_primitive_data                   = 0;
-	uint32_t                   mesh_primitives                       = 0;
-	uint32_t                   mesh_cull                             = 0;
-	uint32_t                   entry_label                           = 0;
-	uint32_t                   current_label                         = 0;
-	const IR::Block*           current_block                         = nullptr;
-	uint32_t                   pixel_valid_mask_variable             = 0;
-	uint32_t                   subgroup_local_invocation_id_variable = 0;
-	uint32_t                   per_vertex_variable                   = 0;
-	uint32_t                   point_size_variable                   = 0;
-	uint32_t                   clip_distance_variable                = 0;
-	uint32_t                   cull_distance_variable                = 0;
-	uint32_t                   layer_variable                        = 0;
-	uint32_t                   viewport_index_variable               = 0;
-	uint32_t                   clip_distance_count                   = 0;
-	uint32_t                   cull_distance_count                   = 0;
-	uint32_t                   depth_variable                        = 0;
-	uint32_t                   sample_mask_variable                  = 0;
-	std::vector<InputBinding>  inputs;
-	std::vector<OutputBinding> outputs;
-	std::vector<uint32_t>      interface_variables;
-	std::unordered_map<const IR::Block*, uint32_t> labels;
+	uint32_t                                         sampler_variable          = 0;
+	uint32_t                                         main_func                 = 0;
+	uint32_t                                         mesh_guest_func           = 0;
+	uint32_t                                         mesh_allocation           = 0;
+	uint32_t                                         mesh_primitive_data       = 0;
+	uint32_t                                         mesh_primitives           = 0;
+	uint32_t                                         mesh_cull                 = 0;
+	uint32_t                                         entry_label               = 0;
+	uint32_t                                         current_label             = 0;
+	const IR::Block*                                 current_block             = nullptr;
+	uint32_t                                         pixel_valid_mask_variable = 0;
+	uint32_t                                         subgroup_local_invocation_id_variable = 0;
+	uint32_t                                         per_vertex_variable                   = 0;
+	uint32_t                                         point_size_variable                   = 0;
+	uint32_t                                         clip_distance_variable                = 0;
+	uint32_t                                         cull_distance_variable                = 0;
+	uint32_t                                         layer_variable                        = 0;
+	uint32_t                                         viewport_index_variable               = 0;
+	uint32_t                                         clip_distance_count                   = 0;
+	uint32_t                                         cull_distance_count                   = 0;
+	uint32_t                                         depth_variable                        = 0;
+	uint32_t                                         sample_mask_variable                  = 0;
+	std::vector<InputBinding>                        inputs;
+	std::vector<OutputBinding>                       outputs;
+	std::vector<uint32_t>                            interface_variables;
+	std::unordered_map<const IR::Block*, uint32_t>   labels;
 };
 
 uint32_t TypeVoid(EmitterState& state);
@@ -444,14 +444,14 @@ inline uint32_t Unary(EmitterState& state, uint32_t opcode, uint32_t type, uint3
 }
 
 inline uint32_t Binary(EmitterState& state, uint32_t opcode, uint32_t type, uint32_t lhs,
-                            uint32_t rhs) {
+                       uint32_t rhs) {
 	const auto result = state.builder.AllocateId();
 	state.builder.AddFunction({opcode, type, result, lhs, rhs});
 	return result;
 }
 
-inline uint32_t Select(EmitterState& state, uint32_t type, uint32_t condition,
-                            uint32_t true_value, uint32_t false_value) {
+inline uint32_t Select(EmitterState& state, uint32_t type, uint32_t condition, uint32_t true_value,
+                       uint32_t false_value) {
 	const auto result = state.builder.AllocateId();
 	state.builder.AddFunction({OpSelect, type, result, condition, true_value, false_value});
 	return result;
@@ -483,9 +483,11 @@ struct ValueEmitContext {
 	std::unordered_map<const IR::Inst*, uint32_t>                      definitions;
 	const std::unordered_map<const IR::Inst*, uint32_t>*               dispatcher_spills = nullptr;
 	std::unordered_map<const IR::Inst*, std::pair<uint32_t, uint32_t>> dispatcher_block_loads;
-	uint32_t                                                           scratch_u32_variable = 0;
-	ValueEmitContext*                                                  other_half = nullptr;
-	uint32_t                                                           half       = 0;
+	const IR::Inst*       memory_override_inst = nullptr;
+	const IR::MemoryInfo* memory_override      = nullptr;
+	uint32_t              scratch_u32_variable = 0;
+	ValueEmitContext*     other_half           = nullptr;
+	uint32_t              half                 = 0;
 };
 
 enum class VertexInputScalarKind { Float, Sint, Uint };
@@ -605,7 +607,7 @@ void DecorateDescriptor(EmitterState& state, uint32_t variable, const char* name
 
 void AddDescriptorAnnotationsAndNames(EmitterState& state);
 
-void DefineModule(EmitterState& state);
+void     DefineModule(EmitterState& state);
 void     DefineMeshOutputs(EmitterState& state);
 void     EmitMeshEntryPoint(EmitterState& state);
 void     EmitMeshAllocate(ValueEmitContext& ctx, const IR::Inst& inst);
@@ -665,10 +667,9 @@ struct MemoryResourceAccess {
 
 MemoryResourceAccess PrepareMemoryResourceAccess(EmitterState& state, const IR::MemoryInfo& mem);
 
-MemoryResourceAccess PrepareStorageBufferResourceAccess(EmitterState& state,
-                                                         const IR::MemoryInfo& mem,
-                                                         uint32_t variable,
-                                                         uint32_t pointer_type);
+MemoryResourceAccess PrepareStorageBufferResourceAccess(EmitterState&         state,
+                                                        const IR::MemoryInfo& mem,
+                                                        uint32_t variable, uint32_t pointer_type);
 
 uint32_t EmitMemoryElementIndex(EmitterState& state, const MemoryResourceAccess& access,
                                 uint32_t raw_index);
@@ -679,9 +680,8 @@ uint32_t EmitMemoryElementInBounds(EmitterState& state, const MemoryResourceAcce
 uint32_t EmitMemoryElementPointer(EmitterState& state, const MemoryResourceAccess& access,
                                   uint32_t index);
 
-uint32_t EmitStorageBufferElementPointer(EmitterState& state,
-                                         const MemoryResourceAccess& access, uint32_t index,
-                                         uint32_t pointer_type);
+uint32_t EmitStorageBufferElementPointer(EmitterState& state, const MemoryResourceAccess& access,
+                                         uint32_t index, uint32_t pointer_type);
 
 uint32_t EmitTBufferBitcastU32ToI32(EmitterState& state, uint32_t value);
 
@@ -819,7 +819,7 @@ uint32_t EmitValueOrZeroIfCondition(EmitterState& state, uint32_t condition, Fn&
 
 template <typename Fn>
 uint32_t AtomicUpdate(EmitterState& state, uint32_t pointer, IR::ResourceKind kind, Fn&& desired) {
-	const auto scope = kind == IR::ResourceKind::Lds ? ScopeWorkgroup : ScopeDevice;
+	const auto scope  = kind == IR::ResourceKind::Lds ? ScopeWorkgroup : ScopeDevice;
 	const auto memory = [&] {
 		switch (kind) {
 			case IR::ResourceKind::Lds: return MemorySemanticsWorkgroupMemory;

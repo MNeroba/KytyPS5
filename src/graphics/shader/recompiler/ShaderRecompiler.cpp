@@ -71,14 +71,7 @@ void LogDispatcherFallback(const CompileOptions& options, const CFG::Graph& cfg,
 	     static_cast<uint64_t>(cfg.back_edges.size()), reason.c_str());
 }
 
-enum class EmbeddedFetchValueType {
-	Unknown,
-	Constant,
-	AttribTable,
-	Attrib,
-	BufferTable,
-	Buffer
-};
+enum class EmbeddedFetchValueType { Unknown, Constant, AttribTable, Attrib, BufferTable, Buffer };
 
 struct EmbeddedFetchSgprInfo {
 	EmbeddedFetchValueType type      = EmbeddedFetchValueType::Unknown;
@@ -238,7 +231,7 @@ EmbeddedFetchData DetectEmbeddedVertexFetch(const Decoder::Program&      decoded
 	const int buffer_reg = input_info->fetch_buffer_reg + shift_regs;
 
 	std::array<EmbeddedFetchSgprInfo, 108> sgprs {};
-	std::array<bool, 256>                 vgpr_is_index {};
+	std::array<bool, 256>                  vgpr_is_index {};
 	EmbeddedFetchVectorLanes               vector_lanes;
 	const bool                             track_vector_lanes =
 	    std::none_of(decoded.instructions.begin(), decoded.instructions.end(),
@@ -268,8 +261,7 @@ EmbeddedFetchData DetectEmbeddedVertexFetch(const Decoder::Program&      decoded
 		    IsDecodedVgpr(inst.dst) && (inst.dst.reg == (user_data_base == 8 ? 8u : 3u));
 		uint32_t   sad_zero = 0;
 		const bool index_offset_add =
-		    (vertex_index_accumulator || instance_index_accumulator) &&
-		    IsDecodedSgpr(inst.src0) &&
+		    (vertex_index_accumulator || instance_index_accumulator) && IsDecodedSgpr(inst.src0) &&
 		    ((inst.opcode == Decoder::Opcode::V_ADD_I32 && IsDecodedVgpr(inst.src1) &&
 		      inst.src1.reg == inst.dst.reg) ||
 		     (user_data_base == 8 && (inst.dst.reg == 5 || inst.dst.reg == 8) &&
@@ -279,10 +271,10 @@ EmbeddedFetchData DetectEmbeddedVertexFetch(const Decoder::Program&      decoded
 		if (data.loads.empty() && index_offset_add) {
 			const auto reg = DecodedSgprReg(inst.src0);
 			if (reg >= user_data_base && reg - user_data_base < user_data_count) {
-				auto& candidate = vertex_index_accumulator ? vertex_offset_candidate
-				                                           : instance_offset_candidate;
-				auto& conflict  = vertex_index_accumulator ? vertex_offset_conflict
-				                                           : instance_offset_conflict;
+				auto& candidate =
+				    vertex_index_accumulator ? vertex_offset_candidate : instance_offset_candidate;
+				auto& conflict =
+				    vertex_index_accumulator ? vertex_offset_conflict : instance_offset_conflict;
 				if (candidate >= 0 && candidate != static_cast<int32_t>(reg)) {
 					conflict = true;
 				} else {
@@ -436,8 +428,8 @@ EmbeddedFetchData DetectEmbeddedVertexFetch(const Decoder::Program&      decoded
 					}
 				} else if (IsEmbeddedFetchBufferLoad(inst)) {
 					if (IsDecodedVgpr(inst.src0) && inst.src0.reg < vgpr_is_index.size() &&
-					    vgpr_is_index[inst.src0.reg] &&
-					    IsDecodedSgpr(inst.src1) && DecodedSgprReg(inst.src1) < sgprs.size() &&
+					    vgpr_is_index[inst.src0.reg] && IsDecodedSgpr(inst.src1) &&
+					    DecodedSgprReg(inst.src1) < sgprs.size() &&
 					    sgprs[DecodedSgprReg(inst.src1)].type == EmbeddedFetchValueType::Buffer) {
 						const auto& buffer = sgprs[DecodedSgprReg(inst.src1)];
 						if (data.loads.empty()) {
@@ -461,8 +453,7 @@ EmbeddedFetchData DetectEmbeddedVertexFetch(const Decoder::Program&      decoded
 			vector_lanes.clear();
 		} else if (inst.opcode != Decoder::Opcode::V_WRITELANE_B32 && IsDecodedVgpr(inst.dst)) {
 			for (uint32_t i = 0;
-			     i < EmbeddedFetchDstSize(inst) && inst.dst.reg + i < vgpr_is_index.size();
-			     i++) {
+			     i < EmbeddedFetchDstSize(inst) && inst.dst.reg + i < vgpr_is_index.size(); i++) {
 				ClearEmbeddedFetchVectorLanes(&vector_lanes, inst.dst.reg + i);
 			}
 		}
@@ -533,7 +524,7 @@ TranslateResult TranslateProgram(std::span<const uint32_t> code, const CompileOp
 	     GetDumpLabel(options), StageName(options.stage), options.shader_hash,
 	     static_cast<uint64_t>(code.size()));
 
-	Decoder::Program decoded;
+	Decoder::Program      decoded;
 	std::vector<uint32_t> joined_code;
 	if (!options.back_code.empty()) {
 		decoded = DecodeFusedProgram(code, options.back_code, joined_code);
@@ -599,12 +590,8 @@ TranslateResult TranslateProgram(std::span<const uint32_t> code, const CompileOp
 	switch (options.stage) {
 		case ShaderType::Vertex:
 		case ShaderType::Mesh: vertex = options.input_info.vertex; break;
-		case ShaderType::Pixel:
-			pixel = options.input_info.pixel;
-			break;
-		case ShaderType::Compute:
-			compute = options.input_info.compute;
-			break;
+		case ShaderType::Pixel: pixel = options.input_info.pixel; break;
+		case ShaderType::Compute: compute = options.input_info.compute; break;
 		default: break;
 	}
 	EmbeddedFetchData embedded_fetch;
@@ -626,12 +613,11 @@ TranslateResult TranslateProgram(std::span<const uint32_t> code, const CompileOp
 	    .scratch_dwords      = options.scratch_dwords,
 	    .dispatcher_fallback = dispatcher_fallback,
 	    .cfg_failure_kind    = cfg.failure_kind,
-	    .fallback_reason     = dispatcher_reason.empty() ? cfg.unsupported_reason
-	                                                    : dispatcher_reason,
-	    .vertex              = vertex,
-	    .pixel               = pixel,
-	    .compute             = compute,
-	    .embedded_fetch      = embedded_fetch.loads.empty() ? nullptr : &embedded_fetch,
+	    .fallback_reason = dispatcher_reason.empty() ? cfg.unsupported_reason : dispatcher_reason,
+	    .vertex          = vertex,
+	    .pixel           = pixel,
+	    .compute         = compute,
+	    .embedded_fetch  = embedded_fetch.loads.empty() ? nullptr : &embedded_fetch,
 	};
 	LOGF("%s phase begin: stage=%s hash=0x%016" PRIx64 " IR TranslateProgram\n",
 	     GetDumpLabel(options), StageName(options.stage), options.shader_hash);
@@ -640,12 +626,34 @@ TranslateResult TranslateProgram(std::span<const uint32_t> code, const CompileOp
 	     " elapsed_ms=%" PRIu64 "\n",
 	     GetDumpLabel(options), StageName(options.stage), options.shader_hash,
 	     static_cast<uint64_t>(ir.blocks.size()), phase_ms());
+	const bool trace_problem_shader = options.shader_hash == 0x78af8e269b528b5cULL;
+	if (trace_problem_shader)
+		LOGF("ShaderRecompiler trace hash=0x%016" PRIx64 " RewriteToSsa begin\n",
+		     options.shader_hash);
 	IR::RewriteToSsa(ir.blocks);
+	if (trace_problem_shader)
+		LOGF("ShaderRecompiler trace hash=0x%016" PRIx64 " RewriteToSsa end\n",
+		     options.shader_hash);
 	IR::ConstantPropagationPass(ir.blocks);
+	if (trace_problem_shader)
+		LOGF("ShaderRecompiler trace hash=0x%016" PRIx64 " ConstantPropagation end\n",
+		     options.shader_hash);
 	IR::ResolveControlFlowIdentities(ir);
+	if (trace_problem_shader)
+		LOGF("ShaderRecompiler trace hash=0x%016" PRIx64 " ResolveControlFlowIdentities end\n",
+		     options.shader_hash);
 	IR::RemoveIdentities(ir.blocks);
+	if (trace_problem_shader)
+		LOGF("ShaderRecompiler trace hash=0x%016" PRIx64 " RemoveIdentities end\n",
+		     options.shader_hash);
 	IR::EliminateDeadCode(ir.blocks);
+	if (trace_problem_shader)
+		LOGF("ShaderRecompiler trace hash=0x%016" PRIx64 " EliminateDeadCode end\n",
+		     options.shader_hash);
 	const auto read_lane_stats = IR::EliminateReadLane(ir, ir.wave_size);
+	if (trace_problem_shader)
+		LOGF("ShaderRecompiler trace hash=0x%016" PRIx64 " EliminateReadLane end\n",
+		     options.shader_hash);
 	if (read_lane_stats.rewritten_reads != 0) {
 		LOGF("%s read-lane elimination: reads=%" PRIu32 "\n", GetDumpLabel(options),
 		     read_lane_stats.rewritten_reads);
@@ -654,10 +662,32 @@ TranslateResult TranslateProgram(std::span<const uint32_t> code, const CompileOp
 		IR::RemoveIdentities(ir.blocks);
 		IR::EliminateDeadCode(ir.blocks);
 	}
+	if (trace_problem_shader)
+		LOGF("ShaderRecompiler trace hash=0x%016" PRIx64 " BuildSrtPlan begin\n",
+		     options.shader_hash);
 	IR::BuildSrtPlan(ir);
+	if (trace_problem_shader)
+		LOGF("ShaderRecompiler trace hash=0x%016" PRIx64 " BuildSrtPlan end\n",
+		     options.shader_hash);
 	IR::EliminateDeadCode(ir.blocks);
-	IR::TrackResources(ir);
+	if (trace_problem_shader)
+		LOGF("ShaderRecompiler trace hash=0x%016" PRIx64 " pre TrackResources DCE end\n",
+		     options.shader_hash);
+	if (trace_problem_shader)
+		LOGF("ShaderRecompiler trace hash=0x%016" PRIx64 " TrackResources begin\n",
+		     options.shader_hash);
+	IR::TrackResources(ir,
+	                   compute ? std::array {compute->threads_num[0], compute->threads_num[1],
+	                                         compute->threads_num[2]}
+	                           : std::array<uint32_t, 3> {},
+	                   compute ? compute->lds_size_dwords * 4u : 0u);
+	if (trace_problem_shader)
+		LOGF("ShaderRecompiler trace hash=0x%016" PRIx64 " TrackResources end\n",
+		     options.shader_hash);
 	IR::EliminateDeadCode(ir.blocks);
+	if (trace_problem_shader)
+		LOGF("ShaderRecompiler trace hash=0x%016" PRIx64 " post TrackResources DCE end\n",
+		     options.shader_hash);
 	TranslateResult result;
 	result.program = std::move(ir);
 	if (options.dump_ir) {
@@ -669,9 +699,9 @@ TranslateResult TranslateProgram(std::span<const uint32_t> code, const CompileOp
 
 CompileResult CompileProgram(TranslateResult translated, const CompileOptions& options,
                              const IR::ResourceSpecialization& specialization,
-                             uint32_t push_data_start_dword) {
+                             uint32_t                          push_data_start_dword) {
 	const auto emit_begin = std::chrono::steady_clock::now();
-	auto& ir = translated.program;
+	auto&      ir         = translated.program;
 	IR::ApplyResourceSpecialization(ir, specialization);
 	IR::RemoveIdentities(ir.blocks);
 	IR::EliminateDeadCode(ir.blocks);
