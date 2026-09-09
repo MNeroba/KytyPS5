@@ -249,6 +249,10 @@ void AnalyzeProgramRequirements(IR::Program& program) {
 			}
 			switch (inst.GetOpcode()) {
 				case IR::ValueOpcode::Ballot: MarkBallot(); break;
+				case IR::ValueOpcode::WqmMask:
+					MarkBallot();
+					requirements.subgroup_local_invocation_id = true;
+					break;
 				case IR::ValueOpcode::DppMoveU32:
 				case IR::ValueOpcode::ReadFirstLane:
 				case IR::ValueOpcode::ReadLane: {

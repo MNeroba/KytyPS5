@@ -5,6 +5,60 @@
 namespace Libs::Graphics::ShaderRecompiler::Spirv::Emitter {
 namespace {
 
+uint32_t EmitWqmWordU32(EmitterState& state, uint32_t value) {
+	const auto shifted_one = state.builder.AllocateId();
+	const auto merged_one  = state.builder.AllocateId();
+	const auto shifted_two = state.builder.AllocateId();
+	const auto merged_two  = state.builder.AllocateId();
+	const auto quad_bits   = state.builder.AllocateId();
+	const auto result      = state.builder.AllocateId();
+	state.builder.AddFunction(
+	    {OpShiftRightLogical, TypeU32(state), shifted_one, value, ConstantU32(state, 1)});
+	state.builder.AddFunction({OpBitwiseOr, TypeU32(state), merged_one, value, shifted_one});
+	state.builder.AddFunction(
+	    {OpShiftRightLogical, TypeU32(state), shifted_two, merged_one, ConstantU32(state, 2)});
+	state.builder.AddFunction({OpBitwiseOr, TypeU32(state), merged_two, merged_one, shifted_two});
+	state.builder.AddFunction(
+	    {OpBitwiseAnd, TypeU32(state), quad_bits, merged_two, ConstantU32(state, 0x11111111u)});
+	state.builder.AddFunction(
+	    {OpIMul, TypeU32(state), result, quad_bits, ConstantU32(state, 0x0fu)});
+	return result;
+}
+
+uint32_t EmitWqmMask(ValueEmitContext& ctx, IR::Value predicate) {
+	auto& state = ctx.state;
+	const auto ballot = ctx.Ballot(predicate);
+	const auto low    = state.builder.AllocateId();
+	state.builder.AddFunction({OpCompositeExtract, TypeU32(state), low, ballot, 0});
+	const auto wqm_low = EmitWqmWordU32(state, low);
+	const auto lane    = EmitSubgroupLocalInvocationId(state);
+	uint32_t   mask    = wqm_low;
+	uint32_t   bit_lane = lane;
+	if (state.program.wave_size == 64u) {
+		const auto high     = state.builder.AllocateId();
+		const auto upper    = state.builder.AllocateId();
+		const auto selected = state.builder.AllocateId();
+		state.builder.AddFunction({OpCompositeExtract, TypeU32(state), high, ballot, 1});
+		const auto wqm_high = EmitWqmWordU32(state, high);
+		state.builder.AddFunction({OpUGreaterThanEqual, TypeBool(state), upper, lane,
+		                           ConstantU32(state, 32)});
+		state.builder.AddFunction({OpSelect, TypeU32(state), selected, upper, wqm_high, wqm_low});
+		mask = selected;
+		bit_lane = state.builder.AllocateId();
+		state.builder.AddFunction({OpBitwiseAnd, TypeU32(state), bit_lane, lane,
+		                           ConstantU32(state, 31)});
+	}
+	const auto bit    = state.builder.AllocateId();
+	const auto hit    = state.builder.AllocateId();
+	const auto result = state.builder.AllocateId();
+	state.builder.AddFunction(
+	    {OpShiftLeftLogical, TypeU32(state), bit, ConstantU32(state, 1), bit_lane});
+	state.builder.AddFunction({OpBitwiseAnd, TypeU32(state), hit, mask, bit});
+	state.builder.AddFunction(
+	    {OpINotEqual, TypeBool(state), result, hit, ConstantU32(state, 0)});
+	return result;
+}
+
 bool UserDataDwordIndex(const EmitterState& state, IR::ScalarReg reg, uint32_t& dword_index) {
 	const auto register_index = IR::RegIndex(reg);
 	const auto& registers = state.program.bindings.user_data_registers;
@@ -585,6 +639,9 @@ bool EmitValueFlow(ValueEmitContext& ctx, const IR::Inst& inst) {
 		}
 		case IR::ValueOpcode::WqmU64:
 			ctx.Define(inst, EmitWqmU64(ctx.state, ctx.Arg(inst, 0)));
+			return true;
+		case IR::ValueOpcode::WqmMask:
+			ctx.Define(inst, EmitWqmMask(ctx, inst.Arg(0)));
 			return true;
 		case IR::ValueOpcode::LaneId:
 			ctx.Define(inst, EmitSubgroupLocalInvocationId(state));
