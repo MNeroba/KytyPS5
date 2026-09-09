@@ -955,11 +955,14 @@ private:
 			case ValueOpcode::SelectU32:
 			case ValueOpcode::SelectU1:
 			case ValueOpcode::SelectF32:
-				if (ternary()) {
-					result = a != 0u ? b : c;
-					return true;
-				}
-				return false;
+				// Host-side resource evaluation must preserve the shader's control
+				// dependency.  In particular, a runtime-selected descriptor may have
+				// an inactive arm whose address is unmapped or whose PHI is not valid in
+				// this materialization context.  Evaluate the predicate first and only
+				// then visit the selected arm; SPIR-V emission keeps its normal Select
+				// semantics and is unaffected by this host evaluator rule.
+				if (!Arg(inst, 0, a)) return false;
+				return Arg(inst, a != 0u ? 1u : 2u, result);
 			case ValueOpcode::IEqual32:
 				if (binary()) {
 					result = static_cast<uint32_t>(a) == static_cast<uint32_t>(b);

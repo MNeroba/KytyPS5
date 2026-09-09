@@ -9,6 +9,7 @@
 #include <array>
 #include <bit>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <fmt/format.h>
 #include <functional>
@@ -2034,13 +2035,13 @@ ResourcePlan ExtractResourcePlan(const Program& program) {
 	// original GPU SSA, but resolve a PHI in the CPU materialization plan using the
 	// PC of the scalar load that consumes it. The PC belongs in the clone key because
 	// separate loads can legitimately select different incoming values.
-	std::map<std::pair<const Inst*, uint32_t>, Inst*> cloned;
-	std::map<std::pair<const Inst*, uint32_t>, bool>  contextual;
-	std::map<std::pair<const Inst*, uint32_t>, Value> resolved_phis;
-	std::map<std::pair<const Inst*, uint32_t>, Value> lowered_phis;
-	std::set<std::pair<const Inst*, uint32_t>>        lowering_phis;
-	uint32_t                                          clone_depth = 0;
-	std::vector<std::pair<const Inst*, uint32_t>>     clone_stack;
+	std::map<std::pair<const Inst*, uint32_t>, Inst*>        cloned;
+	std::map<std::pair<const Inst*, uint32_t>, bool>         contextual;
+	std::map<std::pair<const Inst*, uint32_t>, Value>        resolved_phis;
+	std::map<std::pair<const Inst*, uint32_t>, Value>        lowered_phis;
+	std::set<std::pair<const Inst*, uint32_t>>               lowering_phis;
+	std::set<std::pair<const Inst*, uint32_t>>               cloning;
+	std::set<std::tuple<const Inst*, uint32_t, std::string>> runtime_phi_reports;
 	const auto BlockMetadata = [&](const Block* block) -> const BlockInfo* {
 		const auto found = std::ranges::find(program.blocks, block);
 		if (found == program.blocks.end()) return nullptr;
@@ -2077,8 +2078,11 @@ ResourcePlan ExtractResourcePlan(const Program& program) {
 			if (op == ValueOpcode::LoadAddressU32 || op == ValueOpcode::ReadConstBuffer ||
 			    op == ValueOpcode::ReadConst)
 				continue;
-			if (op == ValueOpcode::Phi &&
-			    ResolvePhiAt(inst, pc) != Value(const_cast<Inst*>(inst))) {
+			// A PHI is inherently context-sensitive until it has been resolved or
+			// lowered.  Keep every containing expression keyed by the active PC;
+			// treating an ambiguous PHI as context-free would let the first arm's
+			// cached clone leak into another arm before RuntimePhiSelect can prove it.
+			if (op == ValueOpcode::Phi) {
 				needed = true;
 				break;
 			}
@@ -2094,133 +2098,439 @@ ResourcePlan ExtractResourcePlan(const Program& program) {
 		contextual.emplace(key, needed);
 		return needed;
 	};
-	const auto RuntimePhiSelect = [&](const Inst* phi, uint32_t pc, Value& condition,
-	                                  Value& true_value, Value& false_value) {
-		if (pc == UINT32_MAX || phi == nullptr || phi->GetOpcode() != ValueOpcode::Phi ||
-		    phi->NumArgs() != 2u || phi->NumPhiBlocks() != 2u || phi->Parent() == nullptr ||
-		    phi->Parent()->ImmPredecessors().size() != 2u)
+	const bool trace_runtime_phi = std::getenv("KYTY_TRACE_RUNTIME_PHI") != nullptr;
+	const auto RuntimePhiSelect  = [&](const Inst* phi, uint32_t pc, Value& condition,
+	                                   Value& true_value, Value& false_value,
+	                                   const Block*& true_pred, const Block*& false_pred) {
+		const bool trace       = trace_runtime_phi;
+		const auto parent      = phi == nullptr ? nullptr : phi->Parent();
+		const auto parent_info = BlockMetadata(parent);
+		const auto reject      = [&](const char* reason) {
+			if (trace) {
+				if (runtime_phi_reports.emplace(phi, pc, reason).second) {
+					std::fprintf(stderr,
+					             "runtime PHI select rejected phi=%p parent=%u pc=0x%08x "
+					             "reason=%s\n",
+					             static_cast<const void*>(phi),
+					             parent_info == nullptr ? UINT32_MAX : parent_info->id, pc, reason);
+				}
+			}
 			return false;
-		const auto* first       = phi->PhiBlock(0u);
-		const auto* second      = phi->PhiBlock(1u);
-		const auto* parent_info = BlockMetadata(phi->Parent());
+		};
+		const auto note = [&](const char* reason) {
+			if (trace) {
+				if (runtime_phi_reports.emplace(phi, pc, reason).second) {
+					std::fprintf(stderr,
+					             "runtime PHI select candidate phi=%p parent=%u pc=0x%08x "
+					             "note=%s\n",
+					             static_cast<const void*>(phi),
+					             parent_info == nullptr ? UINT32_MAX : parent_info->id, pc, reason);
+				}
+			}
+		};
+		if (pc == UINT32_MAX) return reject("missing consuming PC");
+		if (phi == nullptr) return reject("null value");
+		if (phi->GetOpcode() != ValueOpcode::Phi) return reject("value is not PHI");
+		if (phi->NumArgs() != 2u || phi->NumPhiBlocks() != 2u) return reject("PHI is not binary");
+		if (parent == nullptr) return reject("PHI has no parent block");
+		if (parent->ImmPredecessors().size() != 2u)
+			return reject("merge does not have exactly two predecessors");
+		const auto* first  = phi->PhiBlock(0u);
+		const auto* second = phi->PhiBlock(1u);
+		if (first == nullptr || second == nullptr) return reject("missing PHI predecessor");
+		if (first == second) return reject("PHI predecessors are identical");
+		if (std::ranges::find(parent->ImmPredecessors(), first) ==
+		        parent->ImmPredecessors().end() ||
+		    std::ranges::find(parent->ImmPredecessors(), second) == parent->ImmPredecessors().end())
+			return reject("PHI predecessor is not a merge predecessor");
 		const auto* first_info  = BlockMetadata(first);
 		const auto* second_info = BlockMetadata(second);
-		if (first_info == nullptr || second_info == nullptr || parent_info == nullptr) return false;
-		const Block* split     = nullptr;
-		const Block* other     = nullptr;
-		uint32_t     split_arg = 0u;
-		uint32_t     other_arg = 0u;
-		const auto   try_shape = [&](const Block* candidate_split, const Block* candidate_other,
-		                             uint32_t candidate_split_arg, uint32_t candidate_other_arg) {
+		if (first_info == nullptr || second_info == nullptr || parent_info == nullptr)
+			return reject("missing CFG metadata");
+
+		struct Shape {
+			const Block* split      = nullptr;
+			uint32_t     true_arg   = 0u;
+			uint32_t     false_arg  = 0u;
+			const Block* true_pred  = nullptr;
+			const Block* false_pred = nullptr;
+			bool         direct     = false;
+		};
+		Shape shape;
+
+		// Keep the old compact form for CFGs where the conditional block itself is
+		// one PHI predecessor. This compact form occurs in shaders that merge an
+		// if-then edge directly with the conditional block.
+		const auto try_direct_shape = [&](const Block* candidate_split,
+		                                  const Block* candidate_other, uint32_t split_arg,
+		                                  uint32_t other_arg) {
 			const auto* split_info = BlockMetadata(candidate_split);
 			const auto* other_info = BlockMetadata(candidate_other);
-			if (split_info == nullptr || other_info == nullptr ||
-			    split_info->terminator.kind != CFG::TerminatorKind::ConditionalBranch ||
-			    other_info->terminator.kind != CFG::TerminatorKind::Branch ||
+			if (split_info == nullptr || other_info == nullptr) return false;
+			if (split_info->terminator.kind != CFG::TerminatorKind::ConditionalBranch ||
+			    other_info->terminator.kind != CFG::TerminatorKind::Branch)
+				return false;
+			if (split_info->terminator.loop_header || other_info->terminator.loop_header)
+				return false;
+			if (candidate_split->ImmSuccessors().size() != 2u ||
+			    std::ranges::find(candidate_split->ImmSuccessors(), parent) ==
+			        candidate_split->ImmSuccessors().end() ||
+			    std::ranges::find(candidate_split->ImmSuccessors(), candidate_other) ==
+			        candidate_split->ImmSuccessors().end())
+				return false;
+			if (candidate_other->ImmPredecessors().size() != 1u ||
+			    candidate_other->ImmPredecessors().front() != candidate_split ||
+			    candidate_other->ImmSuccessors().size() != 1u ||
+			    candidate_other->ImmSuccessors().front() != parent ||
 			    other_info->terminator.true_block != parent_info->id)
 				return false;
-			const auto other_id = BlockMetadata(candidate_other)->id;
-			if (!((split_info->terminator.true_block == parent_info->id &&
-			       split_info->terminator.false_block == other_id) ||
-			      (split_info->terminator.false_block == parent_info->id &&
-			       split_info->terminator.true_block == other_id)))
-				return false;
-			split     = candidate_split;
-			other     = candidate_other;
-			split_arg = candidate_split_arg;
-			other_arg = candidate_other_arg;
-			return true;
-		};
-		if (!try_shape(first, second, 0u, 1u) && !try_shape(second, first, 1u, 0u)) return false;
-		const auto* split_info = BlockMetadata(split);
-		condition              = split_info->condition.Resolve();
-		if (condition.GetType() != Type::U1 || !ValidateRuntimeValue(program, condition))
-			return false;
-		true_value =
-		    phi->Arg(split_info->terminator.true_block == parent_info->id ? split_arg : other_arg);
-		false_value =
-		    phi->Arg(split_info->terminator.false_block == parent_info->id ? split_arg : other_arg);
-		if (true_value.GetType() != Type::U32 || false_value.GetType() != Type::U32 ||
-		    !ValidateRuntimeValue(program, true_value) ||
-		    !ValidateRuntimeValue(program, false_value))
-			return false;
-		return true;
-	};
-	std::function<Value(Value, uint32_t)> CloneAt = [&](Value value, uint32_t pc) -> Value {
-		value              = value.Resolve();
-		const auto* source = value.TryInstruction();
-		if (source == nullptr) return value;
-		++clone_depth;
-		clone_stack.emplace_back(source, pc);
-		const auto clone_scope = [&] {
-			clone_stack.pop_back();
-			--clone_depth;
-		};
-		if (clone_depth > 256u) {
-			std::fprintf(stderr, "resource plan clone recursion depth=%u op=%s pc=0x%08x\n",
-			             clone_depth, ValueOpcodeName(source->GetOpcode()), pc);
-			for (auto it = clone_stack.rbegin(); it != clone_stack.rend(); ++it) {
-				const auto [inst, active_pc] = *it;
-				std::fprintf(stderr, "  clone op=%s inst=%p pc=0x%08x\n",
-				             ValueOpcodeName(inst->GetOpcode()), static_cast<const void*>(inst),
-				             active_pc);
+			if (split_info->terminator.true_block == parent_info->id &&
+			    split_info->terminator.false_block == other_info->id) {
+				shape = {candidate_split, split_arg, other_arg, candidate_split, candidate_other};
+				shape.direct = true;
+				return true;
 			}
-			std::fflush(stderr);
-			clone_scope();
-			return {};
-		}
-		struct CloneScope {
-			const decltype(clone_scope)& exit;
-			~CloneScope() { exit(); }
-		} scope {clone_scope};
-		const auto op = source->GetOpcode();
-		if (op == ValueOpcode::LoadAddressU32 || op == ValueOpcode::ReadConstBuffer) {
-			pc = source->Flags<MemoryFlags>().pc;
-		} else if (op == ValueOpcode::ReadConst || op == ValueOpcode::GetUserData ||
-		           op == ValueOpcode::GetShaderBase || op == ValueOpcode::GetSrtResource) {
-			pc = UINT32_MAX;
-		}
-		if (op == ValueOpcode::Phi) {
-			if (pc != UINT32_MAX) {
-				const auto guarded = ResolvePhiAt(source, pc);
-				if (guarded != value) return CloneAt(guarded, pc);
+			if (split_info->terminator.false_block == parent_info->id &&
+			    split_info->terminator.true_block == other_info->id) {
+				shape = {candidate_split, other_arg, split_arg, candidate_other, candidate_split};
+				shape.direct = true;
+				return true;
 			}
-			const auto invariant = ResolveInvariantPhi(program, value);
-			if (!invariant.IsEmpty() && invariant != value) return CloneAt(invariant, pc);
-			const auto key = std::pair {source, pc};
-			if (const auto found = lowered_phis.find(key); found != lowered_phis.end())
-				return found->second;
-			Value condition;
-			Value true_value;
-			Value false_value;
-			if (!lowering_phis.contains(key) &&
-			    RuntimePhiSelect(source, pc, condition, true_value, false_value)) {
-				lowering_phis.insert(key);
-				auto&      target = plan.value_storage.emplace_back(ValueOpcode::SelectU32,
-				                                                    source->Flags<uint64_t>());
-				const auto result = Value(&target);
-				lowered_phis.emplace(key, result);
-				target.SetArg(0, CloneAt(condition, UINT32_MAX));
-				target.SetArg(1, CloneAt(true_value, pc));
-				target.SetArg(2, CloneAt(false_value, pc));
-				lowering_phis.erase(key);
+			return false;
+		};
+		if (!try_direct_shape(first, second, 0u, 1u) && !try_direct_shape(second, first, 1u, 0u)) {
+			note("direct if-then shape rejected");
+		}
+
+		struct PathResult {
+			bool                      ok     = false;
+			const char*               reason = "unknown path failure";
+			std::vector<const Block*> blocks;
+		};
+		const auto follow_trivial_path = [&](const Block* split, const Block* start,
+		                                     const Block* target) {
+			PathResult result;
+			if (split == nullptr || start == nullptr || target == nullptr || start == parent ||
+			    target == parent || start == split || target == split) {
+				result.reason = "path starts or ends at split/merge";
 				return result;
 			}
+			const Block*           previous = split;
+			const Block*           current  = start;
+			std::set<const Block*> visited;
+			while (current != target) {
+				if (current == split || current == parent) {
+					result.reason = "loop reaches split or merge";
+					return result;
+				}
+				if (!visited.insert(current).second) {
+					result.reason = "loop in trivial path";
+					return result;
+				}
+				const auto* info = BlockMetadata(current);
+				if (info == nullptr) {
+					result.reason = "missing path metadata";
+					return result;
+				}
+				if (info->terminator.loop_header) {
+					result.reason = "loop header in trivial path";
+					return result;
+				}
+				if (current->ImmPredecessors().size() != 1u ||
+				    current->ImmPredecessors().front() != previous) {
+					result.reason = "cross-edge in trivial path";
+					return result;
+				}
+				if (info->terminator.kind != CFG::TerminatorKind::Branch ||
+				    current->ImmSuccessors().size() != 1u) {
+					result.reason = "secondary branch in trivial path";
+					return result;
+				}
+				const auto* next      = current->ImmSuccessors().front();
+				const auto* next_info = BlockMetadata(next);
+				if (next_info == nullptr || info->terminator.true_block != next_info->id) {
+					result.reason = "inconsistent trivial successor";
+					return result;
+				}
+				result.blocks.push_back(current);
+				previous = current;
+				current  = next;
+			}
+			const auto* target_info = BlockMetadata(target);
+			if (target_info == nullptr || target_info->terminator.loop_header ||
+			    target_info->terminator.kind != CFG::TerminatorKind::Branch ||
+			    target->ImmSuccessors().size() != 1u || target->ImmSuccessors().front() != parent ||
+			    target_info->terminator.true_block != parent_info->id) {
+				result.reason = "secondary branch at PHI predecessor";
+				return result;
+			}
+			if (current->ImmPredecessors().size() != 1u ||
+			    current->ImmPredecessors().front() != previous) {
+				result.reason = "cross-edge at PHI predecessor";
+				return result;
+			}
+			result.blocks.push_back(target);
+			result.ok = true;
+			return result;
+		};
+
+		// A normal diamond has a common conditional split and only unconditional,
+		// single-entry blocks on each arm. Enumerate all possible splits so a block
+		// immediately preceding an arm is not mistaken for the split itself.
+		std::vector<Shape> matches;
+		const char*        last_path_failure = "no conditional split candidate";
+		if (shape.split == nullptr) {
+			for (const auto* candidate_split: program.blocks) {
+				if (BlockMetadata(candidate_split) == nullptr || candidate_split == parent)
+					continue;
+				const auto* split_info = BlockMetadata(candidate_split);
+				if (split_info->terminator.kind != CFG::TerminatorKind::ConditionalBranch ||
+				    split_info->terminator.loop_header ||
+				    candidate_split->ImmSuccessors().size() != 2u)
+					continue;
+				const auto successor_for_id = [&](uint32_t id) -> const Block* {
+					for (const auto* successor: candidate_split->ImmSuccessors()) {
+						const auto* info = BlockMetadata(successor);
+						if (info != nullptr && info->id == id) return successor;
+					}
+					return nullptr;
+				};
+				const auto* true_start  = successor_for_id(split_info->terminator.true_block);
+				const auto* false_start = successor_for_id(split_info->terminator.false_block);
+				if (true_start == false_start || true_start == parent || false_start == parent)
+					continue;
+				if (true_start == nullptr || false_start == nullptr) {
+					last_path_failure = "conditional successor metadata mismatch";
+					continue;
+				}
+				const auto try_paths = [&](const Block* true_target, const Block* false_target,
+				                           uint32_t true_arg, uint32_t false_arg) {
+					const auto true_path =
+					    follow_trivial_path(candidate_split, true_start, true_target);
+					const auto false_path =
+					    follow_trivial_path(candidate_split, false_start, false_target);
+					if (!true_path.ok || !false_path.ok) {
+						last_path_failure = !true_path.ok ? true_path.reason : false_path.reason;
+						return;
+					}
+					for (const auto* block: true_path.blocks) {
+						if (std::ranges::find(false_path.blocks, block) !=
+						    false_path.blocks.end()) {
+							last_path_failure = "arm paths intersect";
+							return;
+						}
+					}
+					matches.push_back(
+					    {candidate_split, true_arg, false_arg, true_target, false_target, false});
+				};
+				try_paths(first, second, 0u, 1u);
+				try_paths(second, first, 1u, 0u);
+			}
 		}
-		// Preserve shared loop/index identities when no guarded PHI needs rewriting.
-		const auto key = std::pair {source, NeedsContext(source, pc) ? pc : UINT32_MAX};
-		if (const auto found = cloned.find(key); found != cloned.end()) return Value(found->second);
-		auto& target =
-		    plan.value_storage.emplace_back(source->GetOpcode(), source->Flags<uint64_t>());
-		cloned.emplace(key, &target);
-		if (op == ValueOpcode::Phi) {
-			for (size_t index = 0; index < source->NumArgs(); index++)
-				target.AddPhiOperand(nullptr, CloneAt(source->Arg(index), pc));
-		} else {
-			for (size_t index = 0; index < source->NumArgs(); index++)
-				target.SetArg(index, CloneAt(source->Arg(index), pc));
+		if (shape.split == nullptr) {
+			if (matches.empty()) {
+				note(last_path_failure);
+				return reject("no common conditional split");
+			}
+			if (matches.size() != 1u) return reject("ambiguous conditional split");
+			shape = matches.front();
 		}
-		return Value(&target);
+		const auto* split_info = BlockMetadata(shape.split);
+		if (split_info == nullptr) return reject("selected split has no metadata");
+		if (trace) {
+			std::fprintf(stderr,
+			             "runtime PHI select CFG accepted phi=%p parent=%u split=%u true_pred=%u "
+			             "false_pred=%u shape=%s pc=0x%08x; structural proof only\n",
+			             static_cast<const void*>(phi), parent_info->id, split_info->id,
+			             BlockMetadata(shape.true_pred)->id, BlockMetadata(shape.false_pred)->id,
+			             shape.direct ? "direct" : "diamond", pc);
+		}
+		condition = split_info->condition.Resolve();
+		if (condition.GetType() != Type::U1) return reject("condition has wrong type");
+		true_value  = phi->Arg(shape.true_arg).Resolve();
+		false_value = phi->Arg(shape.false_arg).Resolve();
+		if (true_value.GetType() != Type::U32) return reject("true arm has wrong type");
+		if (false_value.GetType() != Type::U32) return reject("false arm has wrong type");
+		// Do not validate the condition or either incoming expression here.  The
+		// incoming values may contain context-dependent PHIs (including a raw
+		// SelectU32 root) whose validity is established only after CloneAt walks
+		// them with the corresponding predecessor PC.  RuntimePhiSelect proves
+		// only the CFG shape and exact operand mapping; the resulting graph is
+		// validated after all recursive lowering has completed.
+		true_pred  = shape.true_pred;
+		false_pred = shape.false_pred;
+		if (trace) {
+			std::fprintf(stderr,
+			             "runtime PHI select accepted phi=%p parent=%u split=%u pc=0x%08x\n",
+			             static_cast<const void*>(phi), parent_info->id, split_info->id, pc);
+		}
+		return true;
+	};
+	std::function<Value(Value, uint32_t)> CloneAt = [&](Value root, uint32_t root_pc) -> Value {
+		enum class FrameMode { Resolve, Redirect, Lower, Clone };
+		struct Frame {
+			Value                            value;
+			uint32_t                         pc     = UINT32_MAX;
+			const Inst*                      source = nullptr;
+			std::pair<const Inst*, uint32_t> active_key {};
+			Inst*                            target = nullptr;
+			std::vector<Value>               children;
+			std::vector<uint32_t>            child_pcs;
+			std::vector<Value>               results;
+			size_t                           next_child = 0;
+			FrameMode                        mode       = FrameMode::Resolve;
+			bool                             active     = false;
+			bool                             lowering   = false;
+		};
+		const auto BlockContextPc = [&](const Block* block, uint32_t fallback) {
+			const auto* info = BlockMetadata(block);
+			return info != nullptr && info->end_pc > info->start_pc ? info->start_pc : fallback;
+		};
+
+		std::vector<Frame> stack;
+		stack.push_back({.value = root, .pc = root_pc});
+		Value      last_result;
+		bool       have_result = false;
+		const auto finish      = [&](Frame& frame, Value result) {
+			if (frame.lowering) {
+				lowering_phis.erase(frame.active_key);
+			}
+			if (frame.active) {
+				cloning.erase(frame.active_key);
+			}
+			last_result = result;
+			have_result = true;
+			stack.pop_back();
+		};
+		const auto push_child = [&](Frame& frame, Value value, uint32_t pc) {
+			frame.next_child++;
+			have_result = false;
+			stack.push_back({.value = value, .pc = pc});
+		};
+
+		while (!stack.empty()) {
+			Frame& frame = stack.back();
+			if (frame.mode == FrameMode::Resolve) {
+				frame.value  = frame.value.Resolve();
+				frame.source = frame.value.TryInstruction();
+				if (frame.source == nullptr) {
+					finish(frame, frame.value);
+					continue;
+				}
+				const auto op = frame.source->GetOpcode();
+				if (op == ValueOpcode::LoadAddressU32 || op == ValueOpcode::ReadConstBuffer) {
+					frame.pc = frame.source->Flags<MemoryFlags>().pc;
+				} else if (op == ValueOpcode::ReadConst || op == ValueOpcode::GetUserData ||
+				           op == ValueOpcode::GetShaderBase || op == ValueOpcode::GetSrtResource) {
+					frame.pc = UINT32_MAX;
+				}
+				frame.active_key = {frame.source, frame.pc};
+				if (!cloning.insert(frame.active_key).second) {
+					// A resource expression that re-enters the same contextual definition
+					// is cyclic. Reject that dependency instead of imposing a depth limit.
+					finish(frame, {});
+					continue;
+				}
+				frame.active = true;
+				if (op == ValueOpcode::Phi) {
+					if (frame.pc != UINT32_MAX) {
+						const auto guarded = ResolvePhiAt(frame.source, frame.pc);
+						if (guarded != frame.value) {
+							frame.mode      = FrameMode::Redirect;
+							frame.children  = {guarded};
+							frame.child_pcs = {frame.pc};
+							frame.results.resize(1u);
+							push_child(frame, guarded, frame.pc);
+							continue;
+						}
+					}
+					const auto invariant = ResolveInvariantPhi(program, frame.value);
+					if (!invariant.IsEmpty() && invariant != frame.value) {
+						frame.mode      = FrameMode::Redirect;
+						frame.children  = {invariant};
+						frame.child_pcs = {frame.pc};
+						frame.results.resize(1u);
+						push_child(frame, invariant, frame.pc);
+						continue;
+					}
+					if (const auto found = lowered_phis.find(frame.active_key);
+					    found != lowered_phis.end()) {
+						finish(frame, found->second);
+						continue;
+					}
+					Value        condition;
+					Value        true_value;
+					Value        false_value;
+					const Block* true_pred  = nullptr;
+					const Block* false_pred = nullptr;
+					if (!lowering_phis.contains(frame.active_key) &&
+					    RuntimePhiSelect(frame.source, frame.pc, condition, true_value, false_value,
+					                     true_pred, false_pred)) {
+						lowering_phis.insert(frame.active_key);
+						auto& target = plan.value_storage.emplace_back(
+						    ValueOpcode::SelectU32, frame.source->Flags<uint64_t>());
+						frame.target   = &target;
+						frame.mode     = FrameMode::Lower;
+						frame.lowering = true;
+						lowered_phis.emplace(frame.active_key, Value(&target));
+						frame.children = {condition, true_value, false_value};
+						// Keep the active use-site PC for the selector itself.  Incoming
+						// values are evaluated in the corresponding predecessor block so
+						// nested PHIs can select their own edge without losing context.
+						frame.child_pcs = {frame.pc, BlockContextPc(true_pred, frame.pc),
+						                   BlockContextPc(false_pred, frame.pc)};
+						frame.results.resize(frame.children.size());
+						push_child(frame, frame.children[0], frame.child_pcs[0]);
+						continue;
+					}
+				}
+				const auto clone_key = std::pair {
+				    frame.source, NeedsContext(frame.source, frame.pc) ? frame.pc : UINT32_MAX};
+				if (const auto found = cloned.find(clone_key); found != cloned.end()) {
+					finish(frame, Value(found->second));
+					continue;
+				}
+				auto& target = plan.value_storage.emplace_back(frame.source->GetOpcode(),
+				                                               frame.source->Flags<uint64_t>());
+				cloned.emplace(clone_key, &target);
+				frame.target = &target;
+				frame.mode   = FrameMode::Clone;
+				frame.children.reserve(frame.source->NumArgs());
+				frame.child_pcs.reserve(frame.source->NumArgs());
+				frame.results.resize(frame.source->NumArgs());
+				for (size_t index = 0; index < frame.source->NumArgs(); ++index) {
+					frame.children.push_back(frame.source->Arg(index));
+					frame.child_pcs.push_back(frame.pc);
+				}
+				if (frame.children.empty()) {
+					finish(frame, Value(frame.target));
+					continue;
+				}
+				push_child(frame, frame.children[0], frame.pc);
+				continue;
+			}
+			if (!have_result) continue;
+			frame.results[frame.next_child - 1u] = last_result;
+			if (frame.next_child < frame.children.size()) {
+				push_child(frame, frame.children[frame.next_child],
+				           frame.child_pcs[frame.next_child]);
+				continue;
+			}
+			if (frame.mode == FrameMode::Redirect) {
+				finish(frame, frame.results[0]);
+				continue;
+			}
+			for (size_t index = 0; index < frame.results.size(); ++index) {
+				if (frame.mode == FrameMode::Lower ||
+				    frame.source->GetOpcode() != ValueOpcode::Phi) {
+					frame.target->SetArg(index, frame.results[index]);
+				} else {
+					frame.target->AddPhiOperand(nullptr, frame.results[index]);
+				}
+			}
+			finish(frame, Value(frame.target));
+		}
+		return last_result;
 	};
 	const auto Clone = [&](Value value) { return CloneAt(value, UINT32_MAX); };
 
@@ -2260,6 +2570,51 @@ ResourcePlan ExtractResourcePlan(const Program& program) {
 	for (const auto& read: program.srt_reads) {
 		plan.srt_reads.push_back({Clone(read.value), read.flat_offset});
 	}
+	bool       runtime_graph_valid      = true;
+	const auto ValidateMaterializedRoot = [&](Value value, const char* kind, uint32_t index) {
+		value            = value.Resolve();
+		const auto* root = value.TryInstruction();
+		// Descriptor arrays may carry an unused Void slot beyond their populated
+		// dword count.  There is no runtime graph to validate in that slot.
+		if (value.IsEmpty() || root == nullptr || root->GetOpcode() == ValueOpcode::Void ||
+		    ValidateRuntimeValue(plan, value, RuntimeValueType::Integer))
+			return;
+		runtime_graph_valid = false;
+		if (trace_runtime_phi) {
+			const auto* inst = value.TryInstruction();
+			std::fprintf(stderr, "runtime graph validation rejected kind=%s index=%u opcode=%s\n",
+			             kind, index,
+			             inst == nullptr ? "immediate-or-empty"
+			                             : ValueOpcodeName(inst->GetOpcode()).data());
+		}
+	};
+	for (uint32_t source_index = 0; source_index < plan.descriptor_sources.size(); ++source_index) {
+		const auto& source = plan.descriptor_sources[source_index];
+		for (uint32_t dword = 0; dword < source.dword_count; ++dword)
+			ValidateMaterializedRoot(source.dwords[dword], "descriptor-dword", source_index);
+		if (source.indirect_image.has_value()) {
+			ValidateMaterializedRoot(source.indirect_image->direct_offset, "image-offset",
+			                         source_index);
+			for (const auto& range: source.indirect_image->index_ranges) {
+				ValidateMaterializedRoot(range.value, "image-index", source_index);
+				ValidateMaterializedRoot(range.begin, "image-begin", source_index);
+				ValidateMaterializedRoot(range.end, "image-end", source_index);
+				for (const auto& [bound, limit]: range.bound_limits)
+					ValidateMaterializedRoot(bound, "image-bound", source_index);
+			}
+		}
+		if (source.indirect_buffer.has_value()) {
+			ValidateMaterializedRoot(source.indirect_buffer->byte_offset, "buffer-offset",
+			                         source_index);
+			for (const auto& range: source.indirect_buffer->index_ranges) {
+				ValidateMaterializedRoot(range.value, "buffer-index", source_index);
+				ValidateMaterializedRoot(range.begin, "buffer-begin", source_index);
+				ValidateMaterializedRoot(range.end, "buffer-end", source_index);
+				for (const auto& [bound, limit]: range.bound_limits)
+					ValidateMaterializedRoot(bound, "buffer-bound", source_index);
+			}
+		}
+	}
 	if (program.shader_hash == 0x78af8e269b528b5cULL) {
 		const auto describe = [](Value value) {
 			value            = value.Resolve();
@@ -2268,7 +2623,7 @@ ResourcePlan ExtractResourcePlan(const Program& program) {
 			                       : std::string {ValueOpcodeName(inst->GetOpcode())};
 		};
 		const auto dump_value = [&](auto&& self, Value value, uint32_t depth) -> void {
-			if (depth > 5) return;
+			if (depth > 12) return;
 			value            = value.Resolve();
 			const auto* inst = value.TryInstruction();
 			if (inst == nullptr) return;
@@ -2365,7 +2720,7 @@ ResourcePlan ExtractResourcePlan(const Program& program) {
 			const auto* handle       = handle_value.TryInstruction();
 			std::fprintf(stderr, "plan trace slot=%u handle=%s args=%u\n", slot,
 			             describe(handle_value).c_str(),
-			             handle == nullptr ? 0u : handle->NumArgs());
+			             handle == nullptr ? 0u : static_cast<unsigned>(handle->NumArgs()));
 			if (handle == nullptr) continue;
 			for (uint32_t arg = 0; arg < handle->NumArgs(); ++arg) {
 				const auto  value = handle->Arg(arg).Resolve();
@@ -2388,6 +2743,15 @@ ResourcePlan ExtractResourcePlan(const Program& program) {
 	plan.uniform_fill = AnalyzeUniformFill(program);
 	for (uint32_t i = 0; i < plan.uniform_fill.fill.words; ++i) {
 		plan.uniform_fill.values[i] = Clone(plan.uniform_fill.values[i]);
+		ValidateMaterializedRoot(plan.uniform_fill.values[i], "uniform-fill", i);
+	}
+	for (uint32_t index = 0; index < plan.control_flow.size(); ++index)
+		ValidateMaterializedRoot(plan.control_flow[index].condition, "control-flow", index);
+	if (!runtime_graph_valid) {
+		// A graph with an unresolved non-invariant PHI is not a usable resource
+		// plan.  Keep the graph intact for diagnostics, but make materialization
+		// reject it before the evaluator can treat the PHI as a runtime value.
+		plan.resource_tracking_complete = false;
 	}
 	plan.materialization_sources.reserve(plan.info.buffers.size() + plan.info.images.size() +
 	                                     plan.info.samplers.size());
