@@ -16,6 +16,7 @@
 #include <map>
 #include <numeric>
 #include <set>
+#include <string>
 #include <tuple>
 #include <unordered_set>
 
@@ -2042,6 +2043,7 @@ ResourcePlan ExtractResourcePlan(const Program& program) {
 	std::set<std::pair<const Inst*, uint32_t>>               lowering_phis;
 	std::set<std::pair<const Inst*, uint32_t>>               cloning;
 	std::set<std::tuple<const Inst*, uint32_t, std::string>> runtime_phi_reports;
+	std::map<const Inst*, const Inst*>                       clone_origins;
 	const auto BlockMetadata = [&](const Block* block) -> const BlockInfo* {
 		const auto found = std::ranges::find(program.blocks, block);
 		if (found == program.blocks.end()) return nullptr;
@@ -2206,6 +2208,8 @@ ResourcePlan ExtractResourcePlan(const Program& program) {
 			bool                      ok     = false;
 			const char*               reason = "unknown path failure";
 			std::vector<const Block*> blocks;
+			const Block*              edge_from = nullptr;
+			const Block*              edge_to   = nullptr;
 		};
 		const auto follow_trivial_path = [&](const Block* split, const Block* start,
 		                                     const Block* target) {
@@ -2238,7 +2242,9 @@ ResourcePlan ExtractResourcePlan(const Program& program) {
 				}
 				if (current->ImmPredecessors().size() != 1u ||
 				    current->ImmPredecessors().front() != previous) {
-					result.reason = "cross-edge in trivial path";
+					result.reason    = "cross-edge in trivial path";
+					result.edge_from = previous;
+					result.edge_to   = current;
 					return result;
 				}
 				if (info->terminator.kind != CFG::TerminatorKind::Branch ||
@@ -2266,7 +2272,9 @@ ResourcePlan ExtractResourcePlan(const Program& program) {
 			}
 			if (current->ImmPredecessors().size() != 1u ||
 			    current->ImmPredecessors().front() != previous) {
-				result.reason = "cross-edge at PHI predecessor";
+				result.reason    = "cross-edge at PHI predecessor";
+				result.edge_from = previous;
+				result.edge_to   = current;
 				return result;
 			}
 			result.blocks.push_back(target);
@@ -2311,6 +2319,37 @@ ResourcePlan ExtractResourcePlan(const Program& program) {
 					    follow_trivial_path(candidate_split, false_start, false_target);
 					if (!true_path.ok || !false_path.ok) {
 						last_path_failure = !true_path.ok ? true_path.reason : false_path.reason;
+						if (trace && runtime_phi_reports.emplace(phi, pc, "path-detail").second) {
+							const auto block_id = [&](const Block* block) {
+								const auto* info = BlockMetadata(block);
+								return info == nullptr ? UINT32_MAX : info->id;
+							};
+							const auto dump_path = [&](const char* label, const Block* start,
+							                           const Block*      target,
+							                           const PathResult& result) {
+								std::fprintf(stderr,
+								             "runtime PHI path candidate split=%u %s-start=%u "
+								             "target=%u result=%s path=%u->",
+								             block_id(candidate_split), label, block_id(start),
+								             block_id(target), result.reason, block_id(start));
+								for (const auto* block: result.blocks)
+									std::fprintf(stderr, "%u->", block_id(block));
+								std::fprintf(stderr, "%u\n", block_id(target));
+								if (result.edge_to != nullptr) {
+									std::fprintf(stderr,
+									             "runtime PHI path unexpected edge from=%u to=%u "
+									             "expected predecessor=%u actual-preds=",
+									             block_id(result.edge_from),
+									             block_id(result.edge_to),
+									             block_id(result.edge_from));
+									for (const auto* predecessor: result.edge_to->ImmPredecessors())
+										std::fprintf(stderr, "%u,", block_id(predecessor));
+									std::fprintf(stderr, "\n");
+								}
+							};
+							dump_path("true", true_start, true_target, true_path);
+							dump_path("false", false_start, false_target, false_path);
+						}
 						return;
 					}
 					for (const auto* block: true_path.blocks) {
@@ -2493,6 +2532,7 @@ ResourcePlan ExtractResourcePlan(const Program& program) {
 				auto& target = plan.value_storage.emplace_back(frame.source->GetOpcode(),
 				                                               frame.source->Flags<uint64_t>());
 				cloned.emplace(clone_key, &target);
+				clone_origins.emplace(&target, frame.source);
 				frame.target = &target;
 				frame.mode   = FrameMode::Clone;
 				frame.children.reserve(frame.source->NumArgs());
@@ -2570,8 +2610,270 @@ ResourcePlan ExtractResourcePlan(const Program& program) {
 	for (const auto& read: program.srt_reads) {
 		plan.srt_reads.push_back({Clone(read.value), read.flat_offset});
 	}
+	bool       residual_phi_reported = false;
+	const auto DescribeValue         = [](Value value) {
+		value            = value.Resolve();
+		const auto* inst = value.TryInstruction();
+		if (value.IsEmpty()) return std::string {"empty"};
+		if (value.IsImmediate()) {
+			return fmt::format("immediate:{}:{}", TypeName(value.GetType()), value.U32());
+		}
+		if (inst == nullptr) return std::string {"unknown"};
+		return fmt::format("{}:{}", ValueOpcodeName(inst->GetOpcode()), TypeName(value.GetType()));
+	};
+	const auto TerminatorName = [](CFG::TerminatorKind kind) {
+		switch (kind) {
+			case CFG::TerminatorKind::Branch: return "branch";
+			case CFG::TerminatorKind::ConditionalBranch: return "conditional";
+			case CFG::TerminatorKind::IndirectBranch: return "indirect";
+			case CFG::TerminatorKind::Return: return "return";
+			default: return "unsupported";
+		}
+	};
+	const auto BlockId = [&](const Block* block) {
+		const auto* info = BlockMetadata(block);
+		return info == nullptr ? UINT32_MAX : info->id;
+	};
+	const auto PrintBlock = [&](const char* label, const Block* block) {
+		const auto* info = BlockMetadata(block);
+		if (block == nullptr || info == nullptr) {
+			std::fprintf(stderr, "runtime PHI %s block=<unknown>\n", label);
+			return;
+		}
+		const auto& term = info->terminator;
+		std::fprintf(stderr,
+		             "runtime PHI %s block=%u pc=[0x%08x,0x%08x) term=%s loop=%u "
+		             "true=%u false=%u preds=",
+		             label, info->id, info->start_pc, info->end_pc, TerminatorName(term.kind),
+		             term.loop_header ? 1u : 0u, term.true_block, term.false_block);
+		for (const auto* predecessor: block->ImmPredecessors())
+			std::fprintf(stderr, "%u,", BlockId(predecessor));
+		std::fprintf(stderr, " succs=");
+		for (const auto* successor: block->ImmSuccessors())
+			std::fprintf(stderr, "%u,", BlockId(successor));
+		if (term.kind == CFG::TerminatorKind::ConditionalBranch) {
+			std::fprintf(stderr, " condition=%s", DescribeValue(info->condition).c_str());
+		}
+		std::fprintf(stderr, "\n");
+	};
+	const auto HasExecDependency = [&](Value root) {
+		std::unordered_set<const Inst*> visited;
+		std::function<bool(Value)>      walk = [&](Value value) {
+			value            = value.Resolve();
+			const auto* inst = value.TryInstruction();
+			if (inst == nullptr || !visited.insert(inst).second) return false;
+			switch (inst->GetOpcode()) {
+				case ValueOpcode::GetExec:
+				case ValueOpcode::GetExecLo:
+				case ValueOpcode::GetExecHi:
+				case ValueOpcode::GetVcc:
+				case ValueOpcode::GetVccLo:
+				case ValueOpcode::GetVccHi:
+				case ValueOpcode::SetExec:
+				case ValueOpcode::SetExecLo:
+				case ValueOpcode::SetExecHi:
+				case ValueOpcode::SetVcc:
+				case ValueOpcode::SetVccLo:
+				case ValueOpcode::SetVccHi: return true;
+				default: break;
+			}
+			for (size_t index = 0; index < inst->NumArgs(); ++index)
+				if (walk(inst->Arg(index))) return true;
+			return false;
+		};
+		return walk(root);
+	};
+	const auto EmitResidualPhiDiagnostic = [&](Value root, const char* kind, uint32_t index,
+	                                           uint32_t dword) {
+		if (!trace_runtime_phi || residual_phi_reported) return;
+		std::vector<std::string>        path {"root"};
+		std::unordered_set<const Inst*> visited;
+		const Inst*                     residual         = nullptr;
+		const Inst*                     first_read_const = nullptr;
+		const auto                      FindPhi          = [&](auto&& self, Value value) -> bool {
+			value            = value.Resolve();
+			const auto* inst = value.TryInstruction();
+			if (inst == nullptr) return false;
+			if (inst->GetOpcode() == ValueOpcode::Phi) {
+				residual = inst;
+				return true;
+			}
+			if (inst->GetOpcode() == ValueOpcode::ReadConst && first_read_const == nullptr)
+				first_read_const = inst;
+			if (!visited.insert(inst).second) return false;
+			if (inst->GetOpcode() == ValueOpcode::ReadConst && inst->NumArgs() == 2u) {
+				const auto slot = inst->Arg(1).Resolve();
+				if (slot.IsImmediate() && slot.GetType() == Type::U32 &&
+				    slot.U32() < plan.srt_reads.size()) {
+					path.push_back(fmt::format("ReadConst[srt={}]", slot.U32()));
+					if (self(self, plan.srt_reads[slot.U32()].value)) return true;
+					path.pop_back();
+				}
+			}
+			for (size_t arg = 0; arg < inst->NumArgs(); ++arg) {
+				path.push_back(fmt::format("{}[{}]", ValueOpcodeName(inst->GetOpcode()), arg));
+				if (self(self, inst->Arg(arg))) return true;
+				path.pop_back();
+			}
+			return false;
+		};
+		if (!FindPhi(FindPhi, root)) return;
+		residual_phi_reported        = true;
+		const auto            origin = clone_origins.find(residual);
+		const auto*           phi    = origin == clone_origins.end() ? residual : origin->second;
+		std::vector<uint32_t> slots;
+		const auto            Contains = [&](Value value, const Inst* target) {
+			std::unordered_set<const Inst*> graph_visited;
+			std::function<bool(Value)>      walk = [&](Value current) {
+				current          = current.Resolve();
+				const auto* inst = current.TryInstruction();
+				if (inst == nullptr) return false;
+				if (inst == target) return true;
+				if (!graph_visited.insert(inst).second) return false;
+				if (inst->GetOpcode() == ValueOpcode::ReadConst && inst->NumArgs() == 2u) {
+					const auto slot = inst->Arg(1).Resolve();
+					if (slot.IsImmediate() && slot.GetType() == Type::U32 &&
+					    slot.U32() < plan.srt_reads.size() &&
+					    walk(plan.srt_reads[slot.U32()].value))
+						return true;
+				}
+				for (size_t arg = 0; arg < inst->NumArgs(); ++arg)
+					if (walk(inst->Arg(arg))) return true;
+				return false;
+			};
+			return walk(value);
+		};
+		for (uint32_t slot = 0; slot < plan.srt_reads.size(); ++slot) {
+			if (Contains(plan.srt_reads[slot].value, residual) ||
+			    (origin != clone_origins.end() && Contains(program.srt_reads[slot].value, phi)))
+				slots.push_back(slot);
+		}
+		std::fprintf(stderr,
+		             "runtime PHI residual shader=0x%016llx kind=%s source=%u dword=%s "
+		             "slots=",
+		             static_cast<unsigned long long>(program.shader_hash), kind, index,
+		             dword == UINT32_MAX ? "<none>" : std::to_string(dword).c_str());
+		if (slots.empty()) {
+			std::fprintf(stderr, "<none>");
+		} else {
+			for (const auto slot: slots)
+				std::fprintf(stderr, "%u,", slot);
+		}
+		std::fprintf(stderr, " path=");
+		for (size_t part = 0; part < path.size(); ++part)
+			std::fprintf(stderr, "%s%s", part == 0 ? "" : " -> ", path[part].c_str());
+		std::fprintf(stderr, " residual=%p origin=%p op=%s type=%s\n",
+		             static_cast<const void*>(residual), static_cast<const void*>(phi),
+		             ValueOpcodeName(phi->GetOpcode()).data(),
+		             TypeName(Value(phi).GetType()).c_str());
+		if (first_read_const != nullptr) {
+			std::fprintf(stderr, "runtime PHI ReadConst context read=%p args=%u\n",
+			             static_cast<const void*>(first_read_const),
+			             static_cast<unsigned>(first_read_const->NumArgs()));
+			for (const auto slot: slots) {
+				uint32_t context_pc = UINT32_MAX;
+				if (slot < program.srt_reads.size()) {
+					const auto* srt_root = program.srt_reads[slot].value.ResolveInstruction();
+					if (srt_root != nullptr &&
+					    (srt_root->GetOpcode() == ValueOpcode::LoadAddressU32 ||
+					     srt_root->GetOpcode() == ValueOpcode::ReadConstBuffer))
+						context_pc = srt_root->Flags<MemoryFlags>().pc;
+				}
+				if (context_pc != UINT32_MAX) {
+					std::fprintf(
+					    stderr,
+					    "runtime PHI ReadConst context slot=%u pc=0x%08x "
+					    "read_needs=%u srt_needs=%u\n",
+					    slot, context_pc, NeedsContext(first_read_const, context_pc) ? 1u : 0u,
+					    NeedsContext(program.srt_reads[slot].value.TryInstruction(), context_pc)
+					        ? 1u
+					        : 0u);
+				}
+			}
+		}
+		if (phi->GetOpcode() != ValueOpcode::Phi) return;
+		PrintBlock("phi-parent", phi->Parent());
+		if (phi->Parent() != nullptr) {
+			for (const auto* predecessor: phi->Parent()->ImmPredecessors())
+				PrintBlock("parent-predecessor", predecessor);
+			for (const auto* successor: phi->Parent()->ImmSuccessors())
+				PrintBlock("parent-successor", successor);
+		}
+		for (size_t incoming = 0; incoming < phi->NumArgs(); ++incoming) {
+			const auto  value         = phi->Arg(incoming).Resolve();
+			const auto* incoming_inst = value.TryInstruction();
+			std::fprintf(stderr, "runtime PHI incoming=%u block=%u value=%s\n",
+			             static_cast<unsigned>(incoming), BlockId(phi->PhiBlock(incoming)),
+			             DescribeValue(value).c_str());
+			if (incoming_inst != nullptr && incoming_inst->GetOpcode() == ValueOpcode::Phi) {
+				std::fprintf(stderr, "runtime PHI incoming=%u nested-parent=%u nested-args=%u\n",
+				             static_cast<unsigned>(incoming), BlockId(incoming_inst->Parent()),
+				             static_cast<unsigned>(incoming_inst->NumArgs()));
+				PrintBlock("nested-phi-parent", incoming_inst->Parent());
+				for (const auto* nested_predecessor:
+				     incoming_inst->Parent() == nullptr
+				         ? std::span<Block* const> {}
+				         : incoming_inst->Parent()->ImmPredecessors())
+					PrintBlock("nested-phi-predecessor", nested_predecessor);
+			}
+			PrintBlock("incoming-predecessor", phi->PhiBlock(incoming));
+			if (phi->PhiBlock(incoming) != nullptr) {
+				for (const auto* predecessor: phi->PhiBlock(incoming)->ImmPredecessors())
+					PrintBlock("incoming-predecessor-parent", predecessor);
+			}
+		}
+		const auto ContainsOpcode = [](Value root, ValueOpcode opcode) {
+			std::unordered_set<const Inst*> opcode_visited;
+			std::function<bool(Value)>      walk = [&](Value value) {
+				value            = value.Resolve();
+				const auto* inst = value.TryInstruction();
+				if (inst == nullptr) return false;
+				if (inst->GetOpcode() == opcode) return true;
+				if (!opcode_visited.insert(inst).second) return false;
+				for (size_t arg = 0; arg < inst->NumArgs(); ++arg)
+					if (walk(inst->Arg(arg))) return true;
+				return false;
+			};
+			return walk(root);
+		};
+		std::unordered_set<const Inst*> lane_visited;
+		std::unordered_set<const Inst*> lane_reported;
+		const auto                      WalkReadLane = [&](auto&& self, Value value) -> void {
+			value            = value.Resolve();
+			const auto* inst = value.TryInstruction();
+			if (inst == nullptr || !lane_visited.insert(inst).second) return;
+			if (inst->GetOpcode() == ValueOpcode::ReadLane && lane_reported.insert(inst).second) {
+				const auto lane = inst->NumArgs() > 1u ? inst->Arg(1).Resolve() : Value {};
+				const auto data = inst->NumArgs() > 0u ? inst->Arg(0).Resolve() : Value {};
+				std::fprintf(stderr,
+				             "runtime PHI ReadLane inst=%p value=%s lane=%s lane_immediate=%u "
+				             "lane_runtime_valid=%u exec_dependency=%u lane_id=%u lane_phi=%u "
+				             "lane_readlane=%u data_phi=%u\n",
+				             static_cast<const void*>(inst), DescribeValue(data).c_str(),
+				             DescribeValue(lane).c_str(), lane.IsImmediate() ? 1u : 0u,
+				             ValidateRuntimeValue(program, lane, RuntimeValueType::Integer) ? 1u
+				                                                                            : 0u,
+				             HasExecDependency(data) || HasExecDependency(lane) ? 1u : 0u,
+				             ContainsOpcode(lane, ValueOpcode::LaneId) ? 1u : 0u,
+				             ContainsOpcode(lane, ValueOpcode::Phi) ? 1u : 0u,
+				             ContainsOpcode(lane, ValueOpcode::ReadLane) ? 1u : 0u,
+				             ContainsOpcode(data, ValueOpcode::Phi) ? 1u : 0u);
+			}
+			if (inst->GetOpcode() == ValueOpcode::ReadConst && inst->NumArgs() == 2u) {
+				const auto slot = inst->Arg(1).Resolve();
+				if (slot.IsImmediate() && slot.GetType() == Type::U32 &&
+				    slot.U32() < program.srt_reads.size())
+					self(self, program.srt_reads[slot.U32()].value);
+			}
+			for (size_t arg = 0; arg < inst->NumArgs(); ++arg)
+				self(self, inst->Arg(arg));
+		};
+		for (size_t incoming = 0; incoming < phi->NumArgs(); ++incoming)
+			WalkReadLane(WalkReadLane, phi->Arg(incoming));
+	};
 	bool       runtime_graph_valid      = true;
-	const auto ValidateMaterializedRoot = [&](Value value, const char* kind, uint32_t index) {
+	const auto ValidateMaterializedRoot = [&](Value value, const char* kind, uint32_t index,
+	                                          uint32_t dword = UINT32_MAX) {
 		value            = value.Resolve();
 		const auto* root = value.TryInstruction();
 		// Descriptor arrays may carry an unused Void slot beyond their populated
@@ -2586,12 +2888,13 @@ ResourcePlan ExtractResourcePlan(const Program& program) {
 			             kind, index,
 			             inst == nullptr ? "immediate-or-empty"
 			                             : ValueOpcodeName(inst->GetOpcode()).data());
+			EmitResidualPhiDiagnostic(value, kind, index, dword);
 		}
 	};
 	for (uint32_t source_index = 0; source_index < plan.descriptor_sources.size(); ++source_index) {
 		const auto& source = plan.descriptor_sources[source_index];
 		for (uint32_t dword = 0; dword < source.dword_count; ++dword)
-			ValidateMaterializedRoot(source.dwords[dword], "descriptor-dword", source_index);
+			ValidateMaterializedRoot(source.dwords[dword], "descriptor-dword", source_index, dword);
 		if (source.indirect_image.has_value()) {
 			ValidateMaterializedRoot(source.indirect_image->direct_offset, "image-offset",
 			                         source_index);
@@ -2612,127 +2915,6 @@ ResourcePlan ExtractResourcePlan(const Program& program) {
 				ValidateMaterializedRoot(range.end, "buffer-end", source_index);
 				for (const auto& [bound, limit]: range.bound_limits)
 					ValidateMaterializedRoot(bound, "buffer-bound", source_index);
-			}
-		}
-	}
-	if (program.shader_hash == 0x78af8e269b528b5cULL) {
-		const auto describe = [](Value value) {
-			value            = value.Resolve();
-			const auto* inst = value.TryInstruction();
-			return inst == nullptr ? std::string {value.IsImmediate() ? "immediate" : "unknown"}
-			                       : std::string {ValueOpcodeName(inst->GetOpcode())};
-		};
-		const auto dump_value = [&](auto&& self, Value value, uint32_t depth) -> void {
-			if (depth > 12) return;
-			value            = value.Resolve();
-			const auto* inst = value.TryInstruction();
-			if (inst == nullptr) return;
-			std::fprintf(stderr, "plan trace graph depth=%u op=%s inst=%p args=%u\n", depth,
-			             describe(value).c_str(), static_cast<const void*>(inst),
-			             static_cast<unsigned>(inst->NumArgs()));
-			for (uint32_t arg = 0; arg < inst->NumArgs(); ++arg)
-				self(self, inst->Arg(arg), depth + 1u);
-		};
-		for (const uint32_t slot: {245u, 246u}) {
-			const auto  original_root = program.srt_reads[slot].value.Resolve();
-			const auto* original_read = original_root.TryInstruction();
-			const auto* original_handle =
-			    original_read == nullptr ? nullptr : original_read->Arg(0).ResolveInstruction();
-			if (original_handle != nullptr) {
-				for (uint32_t arg = 0; arg < original_handle->NumArgs(); ++arg) {
-					const auto* phi = original_handle->Arg(arg).ResolveInstruction();
-					if (phi == nullptr || phi->GetOpcode() != ValueOpcode::Phi) continue;
-					std::fprintf(stderr,
-					             "plan trace original slot=%u arg=%u phi=%p parent=%p args=%u\n",
-					             slot, arg, static_cast<const void*>(phi),
-					             static_cast<const void*>(phi->Parent()),
-					             static_cast<unsigned>(phi->NumArgs()));
-					const auto parent_it = std::ranges::find(program.blocks, phi->Parent());
-					if (parent_it != program.blocks.end()) {
-						const auto parent_index =
-						    static_cast<size_t>(parent_it - program.blocks.begin());
-						if (parent_index < program.block_info.size()) {
-							const auto& parent_info = program.block_info[parent_index];
-							std::fprintf(stderr,
-							             "plan trace original slot=%u phi_parent_id=%u "
-							             "pc=[0x%08x,0x%08x) term=%u cond=%s\n",
-							             slot, parent_info.id, parent_info.start_pc,
-							             parent_info.end_pc,
-							             static_cast<unsigned>(parent_info.terminator.kind),
-							             describe(parent_info.condition).c_str());
-						}
-					}
-					for (const auto* candidate_block:
-					     {phi->PhiBlock(0u), phi->PhiBlock(1u), phi->Parent()}) {
-						const auto it = std::ranges::find(program.blocks, candidate_block);
-						if (it == program.blocks.end()) continue;
-						const auto index = static_cast<size_t>(it - program.blocks.begin());
-						if (index >= program.block_info.size()) continue;
-						const auto& info = program.block_info[index];
-						std::fprintf(
-						    stderr,
-						    "plan trace edge block_id=%u term=%u true=%u false=%u preds=%zu\n",
-						    info.id, static_cast<unsigned>(info.terminator.kind),
-						    info.terminator.true_block, info.terminator.false_block,
-						    candidate_block == nullptr ? 0u
-						                               : candidate_block->ImmPredecessors().size());
-					}
-					const auto resolved =
-					    ResolveResourcePhi(program, Value(const_cast<Inst*>(phi)),
-					                       original_read->Flags<MemoryFlags>().pc);
-					std::fprintf(stderr, "plan trace original slot=%u resolve_at_pc=0x%08x op=%s\n",
-					             slot, original_read->Flags<MemoryFlags>().pc,
-					             describe(resolved).c_str());
-					dump_value(dump_value, Value(const_cast<Inst*>(phi)), 0u);
-					for (uint32_t incoming = 0; incoming < phi->NumArgs(); ++incoming) {
-						const auto  candidate      = phi->Arg(incoming).Resolve();
-						const auto* candidate_inst = candidate.TryInstruction();
-						std::fprintf(stderr,
-						             "plan trace original slot=%u arg=%u incoming=%u op=%s inst=%p "
-						             "block=%p\n",
-						             slot, arg, incoming, describe(candidate).c_str(),
-						             static_cast<const void*>(candidate_inst),
-						             static_cast<const void*>(phi->PhiBlock(incoming)));
-						const auto* predecessor = phi->PhiBlock(incoming);
-						const auto  block_it    = std::ranges::find(program.blocks, predecessor);
-						if (block_it != program.blocks.end()) {
-							const auto index =
-							    static_cast<size_t>(block_it - program.blocks.begin());
-							if (index < program.block_info.size()) {
-								const auto& info = program.block_info[index];
-								std::fprintf(stderr,
-								             "plan trace original slot=%u incoming=%u block_id=%u "
-								             "pc=[0x%08x,0x%08x) term=%u cond=%s\n",
-								             slot, incoming, info.id, info.start_pc, info.end_pc,
-								             static_cast<unsigned>(info.terminator.kind),
-								             describe(info.condition).c_str());
-							}
-						}
-					}
-				}
-			}
-			if (slot >= plan.srt_reads.size()) continue;
-			const auto  root = plan.srt_reads[slot].value.Resolve();
-			const auto* read = root.TryInstruction();
-			std::fprintf(stderr, "plan trace slot=%u root=%s\n", slot, describe(root).c_str());
-			if (read == nullptr || read->NumArgs() == 0) continue;
-			const auto  handle_value = read->Arg(0).Resolve();
-			const auto* handle       = handle_value.TryInstruction();
-			std::fprintf(stderr, "plan trace slot=%u handle=%s args=%u\n", slot,
-			             describe(handle_value).c_str(),
-			             handle == nullptr ? 0u : static_cast<unsigned>(handle->NumArgs()));
-			if (handle == nullptr) continue;
-			for (uint32_t arg = 0; arg < handle->NumArgs(); ++arg) {
-				const auto  value = handle->Arg(arg).Resolve();
-				const auto* inst  = value.TryInstruction();
-				std::fprintf(stderr, "plan trace slot=%u handle_arg=%u op=%s\n", slot, arg,
-				             describe(value).c_str());
-				if (inst == nullptr || inst->GetOpcode() != ValueOpcode::Phi) continue;
-				for (uint32_t incoming = 0; incoming < inst->NumArgs(); ++incoming) {
-					std::fprintf(stderr, "plan trace slot=%u phi_arg=%u op=%s block=%p\n", slot,
-					             incoming, describe(inst->Arg(incoming)).c_str(),
-					             static_cast<void*>(inst->PhiBlock(incoming)));
-				}
 			}
 		}
 	}
