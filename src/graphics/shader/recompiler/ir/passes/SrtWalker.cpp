@@ -336,9 +336,16 @@ bool ShaderSideUseGraph(const ResourcePlan& program, const Inst& root) {
 				return false;
 			}
 			if (BufferAccessOf(op) != BufferAccess::None ||
-			    ImageOpcodeInfoOf(op).access != ImageAccess::None ||
 			    AddressOpcodeInfoOf(op).access == AddressAccess::Write) {
 				return false;
+			}
+			if (ImageOpcodeInfoOf(op).access != ImageAccess::None) {
+				// A scalar-address SRT value may feed the ordinary texel payload of
+				// an already tracked image write.  The image resource itself and
+				// all other image operands remain host-side until their semantics are
+				// proven independently.
+				if (op != ValueOpcode::ImageWrite || use.operand != 2u) return false;
+				continue;
 			}
 			if (op == ValueOpcode::LoadAddressU32) {
 				if (!IsShaderSideScalarRoot(program, *user)) return false;

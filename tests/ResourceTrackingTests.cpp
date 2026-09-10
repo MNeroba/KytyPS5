@@ -1418,6 +1418,75 @@ void TestShaderSideEligibilityRejectsNativeConsumer() {
         "negative eligibility regression did not share the SRT slot across consumers");
 }
 
+void TestShaderSideEligibilityAllowsImageWriteData() {
+  Fixture fixture;
+  const auto table = fixture.Address(fixture.UserData(0), fixture.UserData(1), 0x1fa0);
+  MemoryInfo scalar;
+  scalar.kind = ResourceKind::ScalarAddress;
+  const auto root = fixture.Emit(
+      ValueOpcode::LoadAddressU32,
+      {table, Value(0x30u), Value(0u), Value(true)},
+      fixture.AddMemory(scalar, 0x1fa0));
+
+  const auto image = fixture.Image({Value(0u), Value(0u), Value(0u), Value(0u),
+                                    Value(0u), Value(0u), Value(0u), Value(0u)},
+                                   0x3210);
+  const auto data = fixture.Emit(ValueOpcode::CompositeConstructU32x4,
+                                 {root, Value(0u), Value(0u), Value(0u)});
+  MemoryInfo image_memory;
+  image_memory.kind = ResourceKind::Image;
+  image_memory.image_dimension = Decoder::ImageDimension::Dim2D;
+  fixture.Emit(ValueOpcode::ImageWrite,
+               {image, fixture.ImageAddress(), data, Value(true)},
+               fixture.AddMemory(image_memory, 0x3210));
+  fixture.PlanAndTrack();
+
+  uint32_t slot = UINT32_MAX;
+  for (uint32_t index = 0; index < fixture.program.srt_reads.size(); ++index) {
+    if (fixture.program.srt_reads[index].value.ResolveInstruction() == root.Instruction()) {
+      slot = index;
+      break;
+    }
+  }
+  Check(slot != UINT32_MAX && fixture.program.srt_reads[slot].shader_side,
+        "scalar SRT value in ImageWrite data was not retained shader-side");
+}
+
+void TestShaderSideEligibilityRejectsImageResourceIdentity() {
+  Fixture fixture;
+  const auto table = fixture.Address(fixture.UserData(0), fixture.UserData(1), 0x1fb0);
+  MemoryInfo scalar;
+  scalar.kind = ResourceKind::ScalarAddress;
+  const auto root = fixture.Emit(
+      ValueOpcode::LoadAddressU32,
+      {table, Value(0x30u), Value(0u), Value(true)},
+      fixture.AddMemory(scalar, 0x1fb0));
+
+  const auto image = fixture.Image({root, Value(0u), Value(0u), Value(0u),
+                                    Value(0u), Value(0u), Value(0u), Value(0u)},
+                                   0x3220);
+  MemoryInfo image_memory;
+  image_memory.kind = ResourceKind::Image;
+  image_memory.image_dimension = Decoder::ImageDimension::Dim2D;
+  fixture.Emit(ValueOpcode::ImageWrite,
+               {image, fixture.ImageAddress(),
+                fixture.Emit(ValueOpcode::CompositeConstructU32x4,
+                             {Value(0u), Value(0u), Value(0u), Value(0u)}),
+                Value(true)},
+               fixture.AddMemory(image_memory, 0x3220));
+  fixture.PlanAndTrack();
+
+  uint32_t slot = UINT32_MAX;
+  for (uint32_t index = 0; index < fixture.program.srt_reads.size(); ++index) {
+    if (fixture.program.srt_reads[index].value.ResolveInstruction() == root.Instruction()) {
+      slot = index;
+      break;
+    }
+  }
+  Check(slot != UINT32_MAX && !fixture.program.srt_reads[slot].shader_side,
+        "scalar SRT value in ImageResource identity was incorrectly retained shader-side");
+}
+
 void TestPhiValidation() {
   Fixture fixture;
   auto *left = fixture.block;
@@ -2104,6 +2173,8 @@ int main() {
     Run("direct image SRT wrappers", TestDirectImageRecognizesSrtReadWrappers);
     Run("refresh shader-side SRT eligibility", TestShaderSideEligibilityRefreshAfterTracking);
     Run("reject native shader-side SRT consumer", TestShaderSideEligibilityRejectsNativeConsumer);
+    Run("allow ImageWrite data SRT", TestShaderSideEligibilityAllowsImageWriteData);
+    Run("reject ImageResource identity SRT", TestShaderSideEligibilityRejectsImageResourceIdentity);
     Run("dead planning SRT slot", TestDeadPlanningSrtSlotDoesNotFlatten);
     Run("dynamic storage mips", TestDynamicStorageMipTracking);
     Run("invariant indirect images", TestInvariantIndirectImageMaterialization);
