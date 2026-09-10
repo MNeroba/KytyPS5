@@ -1085,6 +1085,33 @@ void TestDirectImageRecognizesSrtReadWrappers() {
         "direct image SRT wrappers were not recognized as an indirect image plan");
 }
 
+void TestDeadPlanningSrtSlotDoesNotFlatten() {
+  Fixture fixture;
+  const auto address = fixture.Address(fixture.UserData(0), fixture.UserData(1), 0x1220);
+  MemoryInfo scalar;
+  scalar.kind = ResourceKind::ScalarAddress;
+  scalar.planning_only = true;
+  const auto read = fixture.Emit(
+      ValueOpcode::LoadAddressU32,
+      {address, Value(0u), Value(0u), Value(true)}, fixture.AddMemory(scalar, 0x1220));
+  fixture.program.srt_plan_complete = true;
+  fixture.program.srt_reads.push_back({read, 0u});
+
+  auto plan = ExtractResourcePlan(fixture.program);
+  TestMemory memory;
+  memory.fail_after = 0;
+  std::array<uint32_t, 2> user_data{0x1000u, 0u};
+  SrtRuntime runtime{.user_data = user_data,
+                     .read_memory = ReadTestMemory,
+                     .userdata = &memory};
+  std::vector<DescriptorValue> descriptors;
+  std::vector<uint32_t> flat;
+  std::vector<uint8_t> active_sources;
+  Check(EvaluateRuntimeSources(plan, {}, runtime, descriptors, flat, {}, active_sources) &&
+            flat == std::vector<uint32_t>{0u} && memory.reads == 0,
+        "an unused planning-only SRT slot still forced host evaluation");
+}
+
 void TestSrtFlatteningAndRuntimeMemoization() {
   Fixture fixture;
   const auto base =
@@ -1244,6 +1271,151 @@ void TestShaderSideScalarAddressSrtRead() {
             std::all_of(snapshot.flattened_srt.begin(), snapshot.flattened_srt.end(),
                         [](uint32_t value) { return value == 0u; }),
         "shader-side scalar-address SRT reads populated host values");
+}
+
+void TestShaderSideEligibilityRefreshAfterTracking() {
+  Fixture fixture;
+  const auto table = fixture.Address(fixture.UserData(0), fixture.UserData(1), 0x1f90);
+  MemoryInfo scalar;
+  scalar.kind = ResourceKind::ScalarAddress;
+  const auto image_root = fixture.Emit(
+      ValueOpcode::LoadAddressU32,
+      {table, Value(0x30u), Value(0u), Value(true)},
+      fixture.AddMemory(scalar, 0x1f90));
+  const auto scalar_root = fixture.Emit(
+      ValueOpcode::LoadAddressU32,
+      {table, Value(0x30u), Value(0u), Value(true)},
+      fixture.AddMemory(scalar, 0x1f90));
+  const auto child_base = fixture.Address(scalar_root, Value(0u), 0x2030);
+  const auto child = fixture.Emit(
+      ValueOpcode::LoadAddressU32,
+      {child_base, Value(0u), Value(0u), Value(true)},
+      fixture.AddMemory(scalar, 0x2030));
+  fixture.Emit(ValueOpcode::ReferenceU32, {child});
+
+  std::array<Value, 8> image_words{image_root, Value(0u), Value(0u), Value(0u),
+                                   Value(0u),  Value(0u), Value(0u), Value(0u)};
+  const auto image = fixture.Image(image_words, 0x2b4c);
+  const auto sampler =
+      fixture.Sampler({Value(0u), Value(0u), Value(0u), Value(0u)}, 0x2b4c);
+  MemoryInfo sample;
+  sample.kind = ResourceKind::Image;
+  sample.image_dimension = Decoder::ImageDimension::Dim2D;
+  fixture.Emit(ValueOpcode::ImageSampleRaw,
+               {image, sampler, fixture.ImageAddress()},
+               fixture.AddMemory(sample, 0x2b4c));
+
+  BuildSrtPlan(fixture.program);
+  const auto FindSlot = [&] {
+    for (uint32_t slot = 0; slot < fixture.program.srt_reads.size(); ++slot) {
+      const auto *root = fixture.program.srt_reads[slot].value.ResolveInstruction();
+      if (root == image_root.Instruction() || root == scalar_root.Instruction()) return slot;
+    }
+    throw std::runtime_error("shared scalar/image root did not receive an SRT slot");
+  };
+  const auto slot = FindSlot();
+  Check(!fixture.program.srt_reads[slot].shader_side,
+        "pre-tracking image use was incorrectly retained shader-side");
+  const auto CollectWrappers = [&] {
+    std::vector<Inst *> result;
+    for (auto *block : fixture.program.blocks) {
+      for (auto &inst : *block) {
+        if (inst.GetOpcode() == ValueOpcode::ReadConst && inst.NumArgs() == 2u &&
+            inst.Arg(1).Resolve() == Value(slot)) {
+          result.push_back(&inst);
+        }
+      }
+    }
+    return result;
+  };
+  auto wrappers = CollectWrappers();
+  Check(wrappers.size() >= 2 &&
+            std::all_of(wrappers.begin(), wrappers.end(), [](const Inst *inst) {
+              return (inst->Flags<uint64_t>() & ShaderSideSrtReadFlag) == 0;
+            }),
+        "pre-tracking ReadConst flags were not conservative");
+
+  // Stand in for the indirect-image rewrite performed by ResourceTracking: the
+  // image no longer consumes the old scalar descriptor root, while the real
+  // scalar LoadAddressU32 path remains in the final shader graph.
+  image.Instruction()->SetArg(0, Value(0x20u));
+  TrackResources(fixture.program);
+
+  wrappers = CollectWrappers();
+  Check(fixture.program.info.images.size() == 1 &&
+            fixture.program.srt_reads[slot].shader_side && wrappers.size() >= 2 &&
+            std::all_of(wrappers.begin(), wrappers.end(), [](const Inst *inst) {
+              return (inst->Flags<uint64_t>() & ShaderSideSrtReadFlag) != 0;
+            }),
+        "post-tracking scalar-only SRT graph was not retained shader-side");
+
+  const auto plan = ExtractResourcePlan(fixture.program);
+  TestMemory memory;
+  memory.fail_after = 0;
+  ResourceSnapshot snapshot;
+  ResourceSpecialization specialization;
+  const std::array<uint32_t, 2> user_data{0x1000u, 0u};
+  Check(MaterializeResources(plan,
+                             {.user_data = user_data,
+                              .read_memory = ReadTestMemory,
+                              .userdata = &memory},
+                             snapshot, specialization) &&
+            memory.reads == 0,
+        "shader-side SRT refresh still attempted host materialization");
+}
+
+void TestShaderSideEligibilityRejectsNativeConsumer() {
+  Fixture fixture;
+  const auto table = fixture.Address(fixture.UserData(0), fixture.UserData(1), 0x1fa0);
+  MemoryInfo scalar;
+  scalar.kind = ResourceKind::ScalarAddress;
+  const auto native_root = fixture.Emit(
+      ValueOpcode::LoadAddressU32,
+      {table, Value(0x30u), Value(0u), Value(true)},
+      fixture.AddMemory(scalar, 0x1fa0));
+  const auto scalar_root = fixture.Emit(
+      ValueOpcode::LoadAddressU32,
+      {table, Value(0x30u), Value(0u), Value(true)},
+      fixture.AddMemory(scalar, 0x1fa0));
+  const auto child_base = fixture.Address(scalar_root, Value(0u), 0x2030);
+  const auto child = fixture.Emit(
+      ValueOpcode::LoadAddressU32,
+      {child_base, Value(0u), Value(0u), Value(true)},
+      fixture.AddMemory(scalar, 0x2030));
+  fixture.Emit(ValueOpcode::ReferenceU32, {child});
+
+  const auto buffer =
+      fixture.Buffer({native_root, Value(0u), Value(64u), Value(0u)}, 0x2b50);
+  MemoryInfo buffer_memory;
+  buffer_memory.kind = ResourceKind::Buffer;
+  fixture.Emit(ValueOpcode::LoadBufferU32,
+               {buffer, Value(0u), Value(0u), Value(0u), Value(true)},
+               fixture.AddMemory(buffer_memory, 0x2b50));
+  fixture.PlanAndTrack();
+
+  uint32_t slot = UINT32_MAX;
+  for (uint32_t index = 0; index < fixture.program.srt_reads.size(); ++index) {
+    const auto *root = fixture.program.srt_reads[index].value.ResolveInstruction();
+    if (root == native_root.Instruction() || root == scalar_root.Instruction()) {
+      slot = index;
+      break;
+    }
+  }
+  Check(slot != UINT32_MAX && !fixture.program.srt_reads[slot].shader_side,
+        "native buffer consumer was incorrectly retained shader-side");
+  uint32_t wrappers = 0;
+  for (auto *block : fixture.program.blocks) {
+    for (const auto &inst : *block) {
+      if (inst.GetOpcode() == ValueOpcode::ReadConst && inst.NumArgs() == 2u &&
+          inst.Arg(1).Resolve() == Value(slot)) {
+        ++wrappers;
+        Check((inst.Flags<uint64_t>() & ShaderSideSrtReadFlag) == 0,
+              "native buffer consumer retained a shader-side ReadConst flag");
+      }
+    }
+  }
+  Check(wrappers >= 2,
+        "negative eligibility regression did not share the SRT slot across consumers");
 }
 
 void TestPhiValidation() {
@@ -1930,6 +2102,9 @@ int main() {
     Run("SampleAdjust sampler scratch", TestSampleAdjustSamplerScratch);
     Run("FMASK load specialization", TestFmaskLoadSpecialization);
     Run("direct image SRT wrappers", TestDirectImageRecognizesSrtReadWrappers);
+    Run("refresh shader-side SRT eligibility", TestShaderSideEligibilityRefreshAfterTracking);
+    Run("reject native shader-side SRT consumer", TestShaderSideEligibilityRejectsNativeConsumer);
+    Run("dead planning SRT slot", TestDeadPlanningSrtSlotDoesNotFlatten);
     Run("dynamic storage mips", TestDynamicStorageMipTracking);
     Run("invariant indirect images", TestInvariantIndirectImageMaterialization);
     Run("SRT runtime", TestSrtFlatteningAndRuntimeMemoization);

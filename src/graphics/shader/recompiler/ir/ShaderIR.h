@@ -605,11 +605,15 @@ struct ResourcePlan {
 	std::vector<SrtRead>          srt_reads;
 	std::vector<BoundedSrtRead>   bounded_srt_reads;
 	std::vector<uint8_t>          clean_flat_slots;
-	bool                          requires_specialization_memory = false;
-	bool                          srt_plan_complete              = false;
-	bool                          resource_tracking_complete     = false;
-	ShaderInfo                    info;
-	UniformFillPlan               uniform_fill;
+	// SRT slots whose ReadConst wrappers still have a semantic IR user after
+	// resource rewrites.  Planning-only wrappers can be retained for diagnostics
+	// without forcing host evaluation of their raw address graphs.
+	std::vector<uint8_t> live_flat_slots;
+	bool                 requires_specialization_memory = false;
+	bool                 srt_plan_complete              = false;
+	bool                 resource_tracking_complete     = false;
+	ShaderInfo           info;
+	UniformFillPlan      uniform_fill;
 };
 
 struct Program: ResourcePlan {

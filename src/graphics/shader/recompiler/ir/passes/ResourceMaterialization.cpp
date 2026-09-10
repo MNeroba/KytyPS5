@@ -2610,6 +2610,61 @@ ResourcePlan ExtractResourcePlan(const Program& program) {
 	for (const auto& read: program.srt_reads) {
 		plan.srt_reads.push_back({Clone(read.value), read.flat_offset, read.shader_side});
 	}
+	plan.live_flat_slots.assign(plan.srt_reads.size(), 0u);
+	const auto mark_live_flat_slot = [&](Value slot) {
+		slot = slot.Resolve();
+		if (!slot.IsImmediate() || slot.GetType() != Type::U32 ||
+		    slot.U32() >= program.srt_reads.size()) {
+			return;
+		}
+		const auto flat_offset = program.srt_reads[slot.U32()].flat_offset;
+		if (flat_offset < plan.live_flat_slots.size()) plan.live_flat_slots[flat_offset] = 1u;
+	};
+	for (const auto* block: program.blocks) {
+		for (const auto& inst: *block) {
+			if (inst.GetOpcode() != ValueOpcode::ReadConst || inst.NumArgs() != 2u) continue;
+			const bool semantic_use = std::ranges::any_of(inst.Uses(), [](const Use& use) {
+				return use.user != nullptr && use.user->GetOpcode() != ValueOpcode::Reference &&
+				       use.user->GetOpcode() != ValueOpcode::ReferenceU32;
+			});
+			if (semantic_use) mark_live_flat_slot(inst.Arg(1));
+		}
+	}
+	// Block conditions and indirect targets are kept outside Inst::Uses().
+	for (const auto& info: program.block_info) {
+		for (const auto value: {info.condition, info.indirect_target}) {
+			const auto* inst = value.Resolve().TryInstruction();
+			if (inst != nullptr && inst->GetOpcode() == ValueOpcode::ReadConst &&
+			    inst->NumArgs() == 2u) {
+				mark_live_flat_slot(inst->Arg(1));
+			}
+		}
+	}
+	// Ordinary descriptor sources still expose their flattened ReadConst values
+	// to the shader/cache.  Indirect-image sources are different: their original
+	// descriptor reads were replaced by the image candidate plan, so only the
+	// plan's material/heap roots remain relevant.
+	const auto mark_descriptor_reads = [&](Value root) {
+		std::vector<Value>              pending {root};
+		std::unordered_set<const Inst*> visited;
+		while (!pending.empty()) {
+			const auto value = pending.back().Resolve();
+			pending.pop_back();
+			const auto* inst = value.TryInstruction();
+			if (inst == nullptr || !visited.insert(inst).second) continue;
+			if (inst->GetOpcode() == ValueOpcode::ReadConst && inst->NumArgs() == 2u) {
+				mark_live_flat_slot(inst->Arg(1));
+				continue;
+			}
+			for (size_t arg = 0; arg < inst->NumArgs(); ++arg)
+				pending.push_back(inst->Arg(arg));
+		}
+	};
+	for (const auto& source: program.descriptor_sources) {
+		if (source.indirect_image.has_value()) continue;
+		for (uint32_t dword = 0; dword < source.dword_count; ++dword)
+			mark_descriptor_reads(source.dwords[dword]);
+	}
 	bool       residual_phi_reported = false;
 	const auto DescribeValue         = [](Value value) {
 		value            = value.Resolve();

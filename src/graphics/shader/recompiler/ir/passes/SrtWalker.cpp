@@ -310,6 +310,51 @@ private:
 	std::unordered_set<const Inst*> m_validated_dependencies;
 };
 
+bool IsShaderSideScalarRoot(const ResourcePlan& program, const Inst& root) {
+	if (root.GetOpcode() != ValueOpcode::LoadAddressU32 || root.NumArgs() != 4u ||
+	    !IsRawRead(program, root)) {
+		return false;
+	}
+	const auto flags = root.Flags<MemoryFlags>();
+	if (flags.index >= program.memory_info.size()) return false;
+	const auto& memory = program.memory_info[flags.index];
+	return memory.kind == ResourceKind::ScalarAddress && memory.data_bits == 32u &&
+	       memory.data_dwords == 1u &&
+	       AddressOpcodeInfoOf(root.GetOpcode()).access == AddressAccess::Read;
+}
+
+bool ShaderSideUseGraph(const ResourcePlan& program, const Inst& root) {
+	std::unordered_set<const Inst*> visited;
+	const auto                      walk = [&](auto&& self, const Inst* value) -> bool {
+		if (value == nullptr || !visited.insert(value).second) return true;
+		for (const auto& use: value->Uses()) {
+			const auto* user = use.user;
+			if (user == nullptr) return false;
+			const auto op = user->GetOpcode();
+			if (op == ValueOpcode::GetBufferResource || op == ValueOpcode::GetImageResource ||
+			    op == ValueOpcode::GetSamplerResource || op == ValueOpcode::ReadConstBuffer) {
+				return false;
+			}
+			if (BufferAccessOf(op) != BufferAccess::None ||
+			    ImageOpcodeInfoOf(op).access != ImageAccess::None ||
+			    AddressOpcodeInfoOf(op).access == AddressAccess::Write) {
+				return false;
+			}
+			if (op == ValueOpcode::LoadAddressU32) {
+				if (!IsShaderSideScalarRoot(program, *user)) return false;
+			}
+			if (op == ValueOpcode::ReadConst) return false;
+			if (!self(self, user)) return false;
+		}
+		return true;
+	};
+	return walk(walk, &root);
+}
+
+bool CanRetainShaderSide(const ResourcePlan& program, const Inst& root) {
+	return IsShaderSideScalarRoot(program, root) && ShaderSideUseGraph(program, root);
+}
+
 class PlanBuilder {
 public:
 	explicit PlanBuilder(Program& program): m_program(program) {}
@@ -365,53 +410,7 @@ private:
 	// are deliberately excluded: those still require host materialization or their
 	// existing per-use BDA lowering.
 	bool CanRetainShaderSide(const Inst& root) const {
-		if (root.GetOpcode() != ValueOpcode::LoadAddressU32 || root.NumArgs() != 4u ||
-		    !IsRawRead(m_program, root)) {
-			return false;
-		}
-		const auto root_flags = root.Flags<MemoryFlags>();
-		if (root_flags.index >= m_program.memory_info.size()) return false;
-		const auto& root_memory = m_program.memory_info[root_flags.index];
-		if (root_memory.kind != ResourceKind::ScalarAddress || root_memory.data_bits != 32u ||
-		    root_memory.data_dwords != 1u ||
-		    AddressOpcodeInfoOf(root.GetOpcode()).access != AddressAccess::Read) {
-			return false;
-		}
-		std::unordered_set<const Inst*> visited;
-		const auto walk = [&](auto&& self, const Inst* value, uint32_t depth) -> bool {
-			if (value == nullptr || !visited.insert(value).second) return true;
-			for (const auto& use: value->Uses()) {
-				const auto* user = use.user;
-				if (user == nullptr) return false;
-				const auto op = user->GetOpcode();
-				if (op == ValueOpcode::GetBufferResource || op == ValueOpcode::GetImageResource ||
-				    op == ValueOpcode::GetSamplerResource || op == ValueOpcode::ReadConstBuffer) {
-					return false;
-				}
-				if (BufferAccessOf(op) != BufferAccess::None ||
-				    ImageOpcodeInfoOf(op).access != ImageAccess::None ||
-				    AddressOpcodeInfoOf(op).access == AddressAccess::Write) {
-					return false;
-				}
-				if (op == ValueOpcode::LoadAddressU32) {
-					if (user->NumArgs() != 4u) return false;
-					const auto flags = user->Flags<MemoryFlags>();
-					if (flags.index >= m_program.memory_info.size()) return false;
-					const auto& memory = m_program.memory_info[flags.index];
-					if (memory.kind != ResourceKind::ScalarAddress || memory.data_bits != 32u ||
-					    memory.data_dwords != 1u ||
-					    AddressOpcodeInfoOf(op).access != AddressAccess::Read) {
-						return false;
-					}
-				}
-				if (op == ValueOpcode::ReadConst) {
-					return false;
-				}
-				if (!self(self, user, depth + 1u)) return false;
-			}
-			return true;
-		};
-		return walk(walk, &root, 0u);
+		return ::Libs::Graphics::ShaderRecompiler::IR::CanRetainShaderSide(m_program, root);
 	}
 
 	[[noreturn]] void Fail(uint32_t pc, const std::string& message) const {
@@ -1153,9 +1152,20 @@ bool EvaluateRuntimeSourcesImpl(const ResourcePlan& program, std::span<const uin
 	Evaluator            evaluator(program, runtime, clean_flat_slots, &clean_evaluator);
 	std::vector<uint8_t> active;
 	std::vector<uint8_t> active_flat;
+	std::vector<uint8_t> live_flat;
 	if (evaluate_flat) {
 		active.assign(program.descriptor_sources.size(), 1u);
-		active_flat.assign(program.srt_reads.size(), 1u);
+		// Resource tracking can retain a ReadConst wrapper for a raw read that
+		// was later rewired into an indirect resource plan.  A wrapper with no
+		// semantic users is not shader-visible and must not force host evaluation
+		// of its old address graph.
+		live_flat = program.live_flat_slots;
+		if (live_flat.size() != program.srt_reads.size()) {
+			// Program objects used before plan extraction do not carry the
+			// liveness side table.  Preserve their historical conservative behavior.
+			live_flat.assign(program.srt_reads.size(), 1u);
+		}
+		active_flat = live_flat;
 	}
 	if (evaluate_flat && !program.control_flow.empty()) {
 		for (const auto& block: program.control_flow) {
@@ -1163,7 +1173,7 @@ bool EvaluateRuntimeSourcesImpl(const ResourcePlan& program, std::span<const uin
 				active.at(source) = 0u;
 			}
 			for (const auto slot: block.flat_slots) {
-				active_flat.at(slot) = 0u;
+				if (slot < live_flat.size() && live_flat[slot] != 0u) active_flat[slot] = 0u;
 			}
 		}
 		std::vector<uint8_t>  visited(program.control_flow.size());
@@ -1180,7 +1190,7 @@ bool EvaluateRuntimeSourcesImpl(const ResourcePlan& program, std::span<const uin
 				active[source] = 1u;
 			}
 			for (const auto slot: block.flat_slots) {
-				active_flat[slot] = 1u;
+				if (slot < live_flat.size() && live_flat[slot] != 0u) active_flat[slot] = 1u;
 			}
 			uint32_t condition = 0;
 			// A missing clean reader must never fall through to the evaluator's raw-memory path.
@@ -1943,6 +1953,42 @@ void BuildSrtPlan(Program& program) {
 	program.srt_plan_complete = false;
 	PlanBuilder(program).Run();
 	program.srt_plan_complete = true;
+}
+
+void RefreshShaderSideSrtEligibility(Program& program, uint32_t slot_count) {
+	const auto                      limit = std::min<size_t>(slot_count, program.srt_reads.size());
+	std::vector<std::vector<Inst*>> wrappers(limit);
+	std::vector<uint8_t>            eligible(limit, 1u);
+	std::vector<uint8_t>            found(limit, 0u);
+	for (auto* block: program.blocks) {
+		for (auto& inst: *block) {
+			if (inst.GetOpcode() != ValueOpcode::ReadConst || inst.NumArgs() != 2u) continue;
+			const auto slot = inst.Arg(1).Resolve();
+			if (!slot.IsImmediate() || slot.GetType() != Type::U32 || slot.U32() >= limit) continue;
+			const auto index = slot.U32();
+			found[index]     = 1u;
+			wrappers[index].push_back(&inst);
+			if (!ShaderSideUseGraph(program, inst)) eligible[index] = 0u;
+		}
+	}
+	for (size_t slot = 0; slot < limit; ++slot) {
+		const auto* root = program.srt_reads[slot].value.Resolve().TryInstruction();
+		// The original root has already had its semantic users rewired through
+		// ReadConst wrappers by BuildSrtPlan.  Validate only its raw scalar shape
+		// here; the final transitive semantics are proven from every wrapper above.
+		const bool shader_side = found[slot] != 0u && root != nullptr &&
+		                         IsShaderSideScalarRoot(program, *root) && eligible[slot] != 0u;
+		program.srt_reads[slot].shader_side = shader_side;
+		for (auto* wrapper: wrappers[slot]) {
+			auto flags = wrapper->Flags<uint64_t>();
+			if (shader_side) {
+				flags |= ShaderSideSrtReadFlag;
+			} else {
+				flags &= ~ShaderSideSrtReadFlag;
+			}
+			wrapper->SetFlags<uint64_t>(flags);
+		}
+	}
 }
 
 bool EvaluateUniformValues(const ResourcePlan& program, std::span<const Value> values,

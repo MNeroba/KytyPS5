@@ -65,6 +65,11 @@ bool EvaluateBoundedDescriptorSource(const ResourcePlan& program, uint32_t sourc
 // Collects reachable ReadConst values. Immediate offsets receive compact flat-buffer slots;
 // dynamic offsets remain explicit and are never assigned a fake slot.
 void BuildSrtPlan(Program& program);
+// Re-evaluates the scalar-address shader-side predicate after resource tracking
+// has rewritten indirect resource users. Only slots below slot_count are
+// considered; callers use this to exclude SRT slots introduced by later bounded
+// planning passes.
+void RefreshShaderSideSrtEligibility(Program& program, uint32_t slot_count);
 bool ValidateRuntimeValue(const ResourcePlan& program, Value value,
                           RuntimeValueType type = RuntimeValueType::Any);
 bool EvaluateUniformValues(const ResourcePlan& program, std::span<const Value> values,

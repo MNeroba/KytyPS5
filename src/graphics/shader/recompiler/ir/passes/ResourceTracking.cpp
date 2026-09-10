@@ -106,6 +106,10 @@ public:
 		if (!m_program.srt_plan_complete) {
 			Fail(0, "SRT plan is not ready");
 		}
+		// BuildSrtPlan runs before this pass and records shader-side eligibility
+		// against the pre-rewrite graph. Preserve the original slot boundary so
+		// SRT entries introduced later by bounded planning are not promoted here.
+		const auto shader_side_slot_count = static_cast<uint32_t>(m_program.srt_reads.size());
 		if (trace_problem_shader)
 			LOGF("ResourceTracking trace hash=0x%016llx ForwardPrivateSharedReads begin\n",
 			     static_cast<unsigned long long>(m_program.shader_hash));
@@ -204,6 +208,7 @@ public:
 				                   return std::ranges::find(plan.reads, inst) != plan.reads.end();
 			                   });
 		});
+		RefreshShaderSideSrtEligibility(m_program, shader_side_slot_count);
 		m_program.descriptor_sources         = std::move(m_sources);
 		m_program.info                       = std::move(m_info);
 		m_program.resource_tracking_complete = true;
