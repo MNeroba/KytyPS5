@@ -2608,7 +2608,7 @@ ResourcePlan ExtractResourcePlan(const Program& program) {
 	}
 	plan.srt_reads.reserve(program.srt_reads.size());
 	for (const auto& read: program.srt_reads) {
-		plan.srt_reads.push_back({Clone(read.value), read.flat_offset});
+		plan.srt_reads.push_back({Clone(read.value), read.flat_offset, read.shader_side});
 	}
 	bool       residual_phi_reported = false;
 	const auto DescribeValue         = [](Value value) {

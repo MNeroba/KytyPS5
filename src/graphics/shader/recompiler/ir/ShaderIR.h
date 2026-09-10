@@ -544,6 +544,9 @@ struct BoundedSrtRead {
 struct SrtRead {
 	Value    value;
 	uint32_t flat_offset = 0;
+	// The original scalar-address load is retained and emitted through the shader-side BDA path;
+	// no host snapshot is required for this slot.
+	bool shader_side = false;
 
 	bool operator==(const SrtRead& other) const = default;
 };

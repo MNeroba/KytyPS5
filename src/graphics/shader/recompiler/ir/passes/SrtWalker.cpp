@@ -360,6 +360,60 @@ private:
 		bool     keep = false;
 	};
 
+	// A planning-only scalar address read can stay entirely in the shader when every
+	// transitive user remains in the scalar-address graph.  Descriptor/resource users
+	// are deliberately excluded: those still require host materialization or their
+	// existing per-use BDA lowering.
+	bool CanRetainShaderSide(const Inst& root) const {
+		if (root.GetOpcode() != ValueOpcode::LoadAddressU32 || root.NumArgs() != 4u ||
+		    !IsRawRead(m_program, root)) {
+			return false;
+		}
+		const auto root_flags = root.Flags<MemoryFlags>();
+		if (root_flags.index >= m_program.memory_info.size()) return false;
+		const auto& root_memory = m_program.memory_info[root_flags.index];
+		if (root_memory.kind != ResourceKind::ScalarAddress || root_memory.data_bits != 32u ||
+		    root_memory.data_dwords != 1u ||
+		    AddressOpcodeInfoOf(root.GetOpcode()).access != AddressAccess::Read) {
+			return false;
+		}
+		std::unordered_set<const Inst*> visited;
+		const auto walk = [&](auto&& self, const Inst* value, uint32_t depth) -> bool {
+			if (value == nullptr || !visited.insert(value).second) return true;
+			for (const auto& use: value->Uses()) {
+				const auto* user = use.user;
+				if (user == nullptr) return false;
+				const auto op = user->GetOpcode();
+				if (op == ValueOpcode::GetBufferResource || op == ValueOpcode::GetImageResource ||
+				    op == ValueOpcode::GetSamplerResource || op == ValueOpcode::ReadConstBuffer) {
+					return false;
+				}
+				if (BufferAccessOf(op) != BufferAccess::None ||
+				    ImageOpcodeInfoOf(op).access != ImageAccess::None ||
+				    AddressOpcodeInfoOf(op).access == AddressAccess::Write) {
+					return false;
+				}
+				if (op == ValueOpcode::LoadAddressU32) {
+					if (user->NumArgs() != 4u) return false;
+					const auto flags = user->Flags<MemoryFlags>();
+					if (flags.index >= m_program.memory_info.size()) return false;
+					const auto& memory = m_program.memory_info[flags.index];
+					if (memory.kind != ResourceKind::ScalarAddress || memory.data_bits != 32u ||
+					    memory.data_dwords != 1u ||
+					    AddressOpcodeInfoOf(op).access != AddressAccess::Read) {
+						return false;
+					}
+				}
+				if (op == ValueOpcode::ReadConst) {
+					return false;
+				}
+				if (!self(self, user, depth + 1u)) return false;
+			}
+			return true;
+		};
+		return walk(walk, &root, 0u);
+	}
+
 	[[noreturn]] void Fail(uint32_t pc, const std::string& message) const {
 		const auto diagnostic = Diagnostic(m_program, pc, message);
 		EXIT("shader SRT planning failed: %s", diagnostic.c_str());
@@ -418,6 +472,19 @@ private:
 	}
 
 	void PatchReads() {
+		std::vector<uint8_t> shader_side_slots(m_program.srt_reads.size(), 1u);
+		std::vector<uint8_t> shader_side_seen(m_program.srt_reads.size(), 0u);
+		for (const auto& patch: m_patches) {
+			if (patch.slot >= shader_side_slots.size()) continue;
+			const bool eligible = patch.keep && CanRetainShaderSide(*patch.inst);
+			if (!shader_side_seen[patch.slot]) {
+				shader_side_slots[patch.slot] = eligible ? 1u : 0u;
+				shader_side_seen[patch.slot]  = 1u;
+			} else {
+				shader_side_slots[patch.slot] =
+				    shader_side_slots[patch.slot] && (eligible ? 1u : 0u);
+			}
+		}
 		for (const auto& patch: m_patches) {
 			auto* block = patch.inst->Parent();
 			auto& list  = block->Instructions();
@@ -425,8 +492,13 @@ private:
 			    std::ranges::find_if(list, [&](const Inst& inst) { return &inst == patch.inst; });
 			const auto resource =
 			    Value(&*block->PrependNewInst(where, ValueOpcode::GetSrtResource));
-			const auto flat = Value(&*block->PrependNewInst(where, ValueOpcode::ReadConst,
-			                                                {resource, Value(patch.slot)}));
+			const bool shader_side =
+			    patch.slot < shader_side_slots.size() && shader_side_slots[patch.slot] != 0u;
+			if (patch.slot < m_program.srt_reads.size())
+				m_program.srt_reads[patch.slot].shader_side = shader_side;
+			const auto flat = Value(&*block->PrependNewInst(
+			    where, ValueOpcode::ReadConst, {resource, Value(patch.slot)},
+			    shader_side ? ShaderSideSrtReadFlag : 0u));
 			const auto uses = patch.inst->Uses();
 			for (const auto& use: uses) {
 				use.user->SetArg(use.operand, flat);
@@ -1151,6 +1223,7 @@ bool EvaluateRuntimeSourcesImpl(const ResourcePlan& program, std::span<const uin
 		flattened.resize(program.srt_reads.size());
 		for (const auto& read: program.srt_reads) {
 			if (read.flat_offset >= flattened.size()) return false;
+			if (read.shader_side) continue;
 			// Descriptor evaluation already follows reachable blocks. Apply the same
 			// reachability to shader constants, leaving unused slots at zero.
 			if (!active_flat[read.flat_offset]) continue;

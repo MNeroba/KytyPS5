@@ -1177,6 +1177,45 @@ void TestDynamicSrtReadRemainsExplicit() {
         "unified memory-offset layout is inconsistent");
 }
 
+void TestShaderSideScalarAddressSrtRead() {
+  Fixture fixture;
+  const auto base = fixture.Address(fixture.UserData(0), fixture.UserData(1), 0x1f90);
+  MemoryInfo scalar;
+  scalar.kind = ResourceKind::ScalarAddress;
+  const auto root = fixture.Emit(
+      ValueOpcode::LoadAddressU32,
+      {base, Value(0x30u), Value(0u), Value(true)},
+      fixture.AddMemory(scalar, 0x1f90));
+  const auto child_base = fixture.Address(root, Value(0u), 0x2030);
+  const auto child = fixture.Emit(
+      ValueOpcode::LoadAddressU32,
+      {child_base, Value(0u), Value(0u), Value(true)},
+      fixture.AddMemory(scalar, 0x2030));
+  fixture.Emit(ValueOpcode::ReferenceU32, {child});
+  fixture.PlanAndTrack();
+
+  Check(!fixture.program.srt_reads.empty() &&
+            std::all_of(fixture.program.srt_reads.begin(), fixture.program.srt_reads.end(),
+                        [](const SrtRead& read) { return read.shader_side; }),
+        "a pure scalar-address SRT chain was not retained for shader-side BDA");
+  Check(std::all_of(fixture.program.memory_info.begin(), fixture.program.memory_info.end(),
+                    [](const MemoryInfo& memory) { return memory.planning_only; }),
+        "shader-side scalar-address roots were not marked planning-only");
+
+  const auto plan = ExtractResourcePlan(fixture.program);
+  std::vector<DescriptorValue> descriptors;
+  ResourceSnapshot              snapshot;
+  ResourceSpecialization        specialization;
+  std::array<uint32_t, 2> user_data{0u, 0u};
+  const SrtRuntime runtime{.user_data = user_data};
+  Check(MaterializeResources(plan, runtime, snapshot, specialization),
+        "shader-side scalar-address SRT reads still required host memory");
+  Check(snapshot.flattened_srt.size() == plan.srt_reads.size() &&
+            std::all_of(snapshot.flattened_srt.begin(), snapshot.flattened_srt.end(),
+                        [](uint32_t value) { return value == 0u; }),
+        "shader-side scalar-address SRT reads populated host values");
+}
+
 void TestPhiValidation() {
   Fixture fixture;
   auto *left = fixture.block;
@@ -1864,6 +1903,7 @@ int main() {
     Run("invariant indirect images", TestInvariantIndirectImageMaterialization);
     Run("SRT runtime", TestSrtFlatteningAndRuntimeMemoization);
     Run("dynamic SRT", TestDynamicSrtReadRemainsExplicit);
+    Run("shader-side scalar-address SRT", TestShaderSideScalarAddressSrtRead);
     Run("phi validation", TestPhiValidation);
     Run("runtime-rooted loop", TestLoopCycleEnteredThroughRuntimeValue);
     Run("invariant loop phi", TestInvariantLoopPhi);
