@@ -1487,6 +1487,150 @@ void TestShaderSideEligibilityRejectsImageResourceIdentity() {
         "scalar SRT value in ImageResource identity was incorrectly retained shader-side");
 }
 
+void TestShaderSideEligibilityAllowsImageSampleAddress() {
+  Fixture fixture;
+  const auto table = fixture.Address(fixture.UserData(0), fixture.UserData(1), 0x3230);
+  MemoryInfo scalar;
+  scalar.kind = ResourceKind::ScalarAddress;
+  const auto root = fixture.Emit(
+      ValueOpcode::LoadAddressU32,
+      {table, Value(0x30u), Value(0u), Value(true)},
+      fixture.AddMemory(scalar, 0x3230));
+  const auto coordinate = fixture.Emit(ValueOpcode::IAdd32, {root, Value(4u)});
+  auto address = fixture.ImageAddress();
+  address.Instruction()->SetArg(0, coordinate);
+
+  const auto image = fixture.Image({Value(0u), Value(0u), Value(0u), Value(0u),
+                                    Value(0u), Value(0u), Value(0u), Value(0u)},
+                                   0x3234);
+  const auto sampler = fixture.Sampler({Value(0u), Value(0u), Value(0u), Value(0u)},
+                                       0x3234);
+  MemoryInfo image_memory;
+  image_memory.kind = ResourceKind::Image;
+  image_memory.image_dimension = Decoder::ImageDimension::Dim2D;
+  const auto sample = fixture.Emit(ValueOpcode::ImageSampleRaw,
+                                   {image, sampler, address},
+                                   fixture.AddMemory(image_memory, 0x3234));
+  fixture.Emit(ValueOpcode::ReferenceU32,
+               {fixture.Emit(ValueOpcode::CompositeExtractU32x4,
+                             {sample, Value(0u)})});
+  fixture.PlanAndTrack();
+
+  uint32_t slot = UINT32_MAX;
+  for (uint32_t index = 0; index < fixture.program.srt_reads.size(); ++index) {
+    if (fixture.program.srt_reads[index].value.ResolveInstruction() == root.Instruction()) {
+      slot = index;
+      break;
+    }
+  }
+  Check(slot != UINT32_MAX && fixture.program.srt_reads[slot].shader_side,
+        "scalar SRT value in ImageSampleRaw address was not retained shader-side");
+}
+
+void TestShaderSideEligibilityRejectsImageSampleIdentity() {
+  Fixture fixture;
+  const auto table = fixture.Address(fixture.UserData(0), fixture.UserData(1), 0x3240);
+  MemoryInfo scalar;
+  scalar.kind = ResourceKind::ScalarAddress;
+  const auto root = fixture.Emit(
+      ValueOpcode::LoadAddressU32,
+      {table, Value(0x30u), Value(0u), Value(true)},
+      fixture.AddMemory(scalar, 0x3240));
+  const auto image = fixture.Image({root, Value(0u), Value(0u), Value(0u),
+                                    Value(0u), Value(0u), Value(0u), Value(0u)},
+                                   0x3244);
+  const auto sampler = fixture.Sampler({Value(0u), Value(0u), Value(0u), Value(0u)},
+                                       0x3244);
+  MemoryInfo image_memory;
+  image_memory.kind = ResourceKind::Image;
+  image_memory.image_dimension = Decoder::ImageDimension::Dim2D;
+  const auto sample = fixture.Emit(ValueOpcode::ImageSampleRaw,
+                                   {image, sampler, fixture.ImageAddress()},
+                                   fixture.AddMemory(image_memory, 0x3244));
+  fixture.Emit(ValueOpcode::ReferenceU32,
+               {fixture.Emit(ValueOpcode::CompositeExtractU32x4,
+                             {sample, Value(0u)})});
+  fixture.PlanAndTrack();
+
+  uint32_t slot = UINT32_MAX;
+  for (uint32_t index = 0; index < fixture.program.srt_reads.size(); ++index) {
+    if (fixture.program.srt_reads[index].value.ResolveInstruction() == root.Instruction()) {
+      slot = index;
+      break;
+    }
+  }
+  Check(slot != UINT32_MAX && !fixture.program.srt_reads[slot].shader_side,
+        "scalar SRT value in ImageSampleRaw resource identity was retained shader-side");
+}
+
+void TestShaderSideEligibilityAllowsReadConstBufferOffset() {
+  Fixture fixture;
+  const auto table = fixture.Address(fixture.UserData(0), fixture.UserData(1), 0x3250);
+  MemoryInfo scalar;
+  scalar.kind = ResourceKind::ScalarAddress;
+  const auto root = fixture.Emit(
+      ValueOpcode::LoadAddressU32,
+      {table, Value(0x30u), Value(0u), Value(true)},
+      fixture.AddMemory(scalar, 0x3250));
+  const auto offset = fixture.Emit(ValueOpcode::IMul32, {root, Value(4u)});
+  const auto buffer = fixture.Buffer({fixture.UserData(2), fixture.UserData(3),
+                                      Value(64u), Value(0u)}, 0x3254);
+  MemoryInfo scalar_buffer;
+  scalar_buffer.kind = ResourceKind::ScalarBuffer;
+  const auto read = fixture.Emit(ValueOpcode::ReadConstBuffer, {buffer, offset},
+                                 fixture.AddMemory(scalar_buffer, 0x3254));
+  fixture.Emit(ValueOpcode::ReferenceU32, {read});
+  fixture.PlanAndTrack();
+
+  uint32_t slot = UINT32_MAX;
+  for (uint32_t index = 0; index < fixture.program.srt_reads.size(); ++index) {
+    if (fixture.program.srt_reads[index].value.ResolveInstruction() == root.Instruction()) {
+      slot = index;
+      break;
+    }
+  }
+  Check(slot != UINT32_MAX && fixture.program.srt_reads[slot].shader_side,
+        "scalar SRT value in ReadConstBuffer offset was not retained shader-side");
+}
+
+void TestShaderSideEligibilityRejectsTransitiveReadConstBufferResource() {
+  Fixture fixture;
+  const auto table = fixture.Address(fixture.UserData(0), fixture.UserData(1), 0x3260);
+  MemoryInfo scalar;
+  scalar.kind = ResourceKind::ScalarAddress;
+  const auto root = fixture.Emit(
+      ValueOpcode::LoadAddressU32,
+      {table, Value(0x30u), Value(0u), Value(true)},
+      fixture.AddMemory(scalar, 0x3260));
+  const auto offset = fixture.Emit(ValueOpcode::IMul32, {root, Value(4u)});
+  const auto scalar_buffer = fixture.Buffer({fixture.UserData(2), fixture.UserData(3),
+                                             Value(64u), Value(0u)}, 0x3264);
+  MemoryInfo scalar_memory;
+  scalar_memory.kind = ResourceKind::ScalarBuffer;
+  const auto read = fixture.Emit(ValueOpcode::ReadConstBuffer,
+                                 {scalar_buffer, offset},
+                                 fixture.AddMemory(scalar_memory, 0x3264));
+  const auto descriptor_word = fixture.Emit(ValueOpcode::IAdd32, {read, Value(0u)});
+  const auto buffer = fixture.Buffer({descriptor_word, Value(0u), Value(64u), Value(0u)},
+                                     0x3268);
+  MemoryInfo buffer_memory;
+  buffer_memory.kind = ResourceKind::Buffer;
+  fixture.Emit(ValueOpcode::LoadBufferU32,
+               {buffer, Value(0u), Value(0u), Value(0u), Value(true)},
+               fixture.AddMemory(buffer_memory, 0x3268));
+  fixture.PlanAndTrack();
+
+  uint32_t slot = UINT32_MAX;
+  for (uint32_t index = 0; index < fixture.program.srt_reads.size(); ++index) {
+    if (fixture.program.srt_reads[index].value.ResolveInstruction() == root.Instruction()) {
+      slot = index;
+      break;
+    }
+  }
+  Check(slot != UINT32_MAX && !fixture.program.srt_reads[slot].shader_side,
+        "ReadConstBuffer result feeding a resource descriptor was retained shader-side");
+}
+
 void TestPhiValidation() {
   Fixture fixture;
   auto *left = fixture.block;
@@ -2175,6 +2319,11 @@ int main() {
     Run("reject native shader-side SRT consumer", TestShaderSideEligibilityRejectsNativeConsumer);
     Run("allow ImageWrite data SRT", TestShaderSideEligibilityAllowsImageWriteData);
     Run("reject ImageResource identity SRT", TestShaderSideEligibilityRejectsImageResourceIdentity);
+    Run("allow ImageSampleRaw address SRT", TestShaderSideEligibilityAllowsImageSampleAddress);
+    Run("reject ImageSampleRaw identity SRT", TestShaderSideEligibilityRejectsImageSampleIdentity);
+    Run("allow ReadConstBuffer offset SRT", TestShaderSideEligibilityAllowsReadConstBufferOffset);
+    Run("reject transitive ReadConstBuffer resource SRT",
+        TestShaderSideEligibilityRejectsTransitiveReadConstBufferResource);
     Run("dead planning SRT slot", TestDeadPlanningSrtSlotDoesNotFlatten);
     Run("dynamic storage mips", TestDynamicStorageMipTracking);
     Run("invariant indirect images", TestInvariantIndirectImageMaterialization);

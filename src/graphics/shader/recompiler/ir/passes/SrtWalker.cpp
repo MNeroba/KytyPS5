@@ -332,8 +332,15 @@ bool ShaderSideUseGraph(const ResourcePlan& program, const Inst& root) {
 			if (user == nullptr) return false;
 			const auto op = user->GetOpcode();
 			if (op == ValueOpcode::GetBufferResource || op == ValueOpcode::GetImageResource ||
-			    op == ValueOpcode::GetSamplerResource || op == ValueOpcode::ReadConstBuffer) {
+			    op == ValueOpcode::GetSamplerResource) {
 				return false;
+			}
+			if (op == ValueOpcode::ReadConstBuffer) {
+				// The buffer descriptor remains host-tracked; only the byte offset is
+				// supplied by the shader-side scalar expression.  Continue through the
+				// result so a later descriptor/resource use is still rejected.
+				if (use.operand != 1u || !self(self, user)) return false;
+				continue;
 			}
 			if (BufferAccessOf(op) != BufferAccess::None ||
 			    AddressOpcodeInfoOf(op).access == AddressAccess::Write) {
@@ -344,8 +351,18 @@ bool ShaderSideUseGraph(const ResourcePlan& program, const Inst& root) {
 				// an already tracked image write.  The image resource itself and
 				// all other image operands remain host-side until their semantics are
 				// proven independently.
-				if (op != ValueOpcode::ImageWrite || use.operand != 2u) return false;
-				continue;
+				if (op == ValueOpcode::ImageWrite && use.operand == 2u) {
+					continue;
+				}
+				// ImageSampleRaw keeps its ImageResource and SamplerResource operands
+				// separately tracked; operand two is only the runtime ImageAddress.
+				// This is an allowed edge, not a terminal sink, because the sample
+				// result may flow into another unsupported resource use.
+				if (op == ValueOpcode::ImageSampleRaw && use.operand == 2u) {
+					if (!self(self, user)) return false;
+					continue;
+				}
+				return false;
 			}
 			if (op == ValueOpcode::LoadAddressU32) {
 				if (!IsShaderSideScalarRoot(program, *user)) return false;
