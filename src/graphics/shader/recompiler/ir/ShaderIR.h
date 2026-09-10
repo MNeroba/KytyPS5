@@ -548,6 +548,11 @@ struct SrtRead {
 	bool operator==(const SrtRead& other) const = default;
 };
 
+// Per-use marker for a ReadConst clone whose shader emission should retain the
+// original dynamic address expression instead of reading the flattened host SRT.
+// The bit is intentionally outside the normal ReadConst flags used by the IR.
+constexpr uint64_t ShaderSideSrtReadFlag = 1ull << 63u;
+
 struct ResourceBlock {
 	// Conditional successors are ordered true, false; an empty condition follows every edge.
 	Value                 condition;

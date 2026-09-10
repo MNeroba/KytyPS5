@@ -8,7 +8,10 @@
 #include <algorithm>
 #include <fmt/format.h>
 #include <functional>
+#include <iterator>
+#include <optional>
 #include <span>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 
@@ -2105,6 +2108,322 @@ private:
 		m_memory_patches.push_back({index, resource, sampler, has_sampler});
 	}
 
+	bool IsShaderSideRawRead(Value value) const {
+		value            = value.Resolve();
+		const auto* inst = value.TryInstruction();
+		if (inst == nullptr || inst->GetOpcode() != ValueOpcode::LoadAddressU32 ||
+		    inst->NumArgs() != 4u) {
+			return false;
+		}
+		const auto flags = inst->Flags<MemoryFlags>();
+		if (flags.index >= m_program.memory_info.size()) return false;
+		const auto& memory = m_program.memory_info[flags.index];
+		const auto* handle = inst->Arg(0).ResolveInstruction();
+		return memory.kind == ResourceKind::ScalarAddress && memory.data_bits == 32u &&
+		       memory.data_dwords == 1u && handle != nullptr &&
+		       handle->GetOpcode() == ValueOpcode::GetAddressResource && handle->NumArgs() == 2u;
+	}
+
+	static bool IsRawScalarBufferMemory(const MemoryInfo& memory) {
+		const bool valid_group_width =
+		    memory.component_count == 1u || memory.component_count == 2u ||
+		    memory.component_count == 4u || memory.component_count == 8u ||
+		    memory.component_count == 16u;
+		return memory.kind == ResourceKind::ScalarBuffer && memory.data_bits == 32u &&
+		       memory.data_dwords == 1u && valid_group_width &&
+		       memory.component_index < memory.component_count && !memory.typed &&
+		       !memory.formatted && !memory.glc && !memory.slc && !memory.idxen && !memory.offen &&
+		       memory.secondary_offset == 0u && memory.data_format == 0u &&
+		       memory.number_format == 0u && (memory.offset & 3u) == 0u;
+	}
+
+	bool IsShaderBdaBufferHandle(const Inst& handle) const {
+		if (handle.GetOpcode() != ValueOpcode::GetBufferResource || handle.NumArgs() != 4u) {
+			return false;
+		}
+		for (const auto& use: handle.Uses()) {
+			const auto* user = use.user;
+			if (user == nullptr || user->GetOpcode() != ValueOpcode::ReadConstBuffer) {
+				return false;
+			}
+			const auto flags = user->Flags<MemoryFlags>();
+			if (flags.index >= m_program.memory_info.size() ||
+			    !IsRawScalarBufferMemory(m_program.memory_info[flags.index])) {
+				return false;
+			}
+		}
+		return !handle.Uses().empty();
+	}
+
+	// Clone only the arithmetic envelope of a descriptor dword.  ReadConst nodes
+	// that name raw address reads are replaced by a shader-side ReadConst clone;
+	// all other values remain shared.  This keeps a slot that is also consumed by
+	// an image or host descriptor on the ordinary flattened path while giving the
+	// BDA handle a per-use expression.  PHIs and memory operations are not cloned
+	// here; a descriptor containing either needs a separate structured lowering.
+	std::optional<Value> CloneBdaExpression(Value value, Block& block, Block::iterator where,
+	                                        std::unordered_map<const Inst*, Value>& cache,
+	                                        std::unordered_set<const Inst*>&        visiting,
+	                                        bool&                                   changed) {
+		value = value.Resolve();
+		if (value.IsImmediate()) return value;
+		const auto* inst = value.TryInstruction();
+		if (inst == nullptr) return std::nullopt;
+		if (inst->GetOpcode() == ValueOpcode::ReadConst) {
+			if (inst->NumArgs() != 2u) return value;
+			const auto slot = inst->Arg(1).Resolve();
+			if (slot.IsImmediate() && slot.GetType() == Type::U32 &&
+			    slot.U32() < m_program.srt_reads.size() &&
+			    IsShaderSideRawRead(m_program.srt_reads[slot.U32()].value)) {
+				changed = true;
+				const auto clone =
+				    block.PrependNewInst(where, ValueOpcode::ReadConst,
+				                         {inst->Arg(0), inst->Arg(1)}, ShaderSideSrtReadFlag);
+				const auto result = Value(&*clone);
+				cache.emplace(inst, result);
+				return result;
+			}
+			return value;
+		}
+		if (const auto it = cache.find(inst); it != cache.end()) return it->second;
+		if (!visiting.insert(inst).second) return std::nullopt;
+		std::vector<Value> args;
+		args.reserve(inst->NumArgs());
+		bool local_changed = false;
+		for (uint32_t index = 0; index < inst->NumArgs(); ++index) {
+			bool       arg_changed = false;
+			const auto arg =
+			    CloneBdaExpression(inst->Arg(index), block, where, cache, visiting, arg_changed);
+			if (!arg.has_value()) {
+				visiting.erase(inst);
+				return std::nullopt;
+			}
+			args.push_back(*arg);
+			local_changed = local_changed || arg_changed;
+		}
+		visiting.erase(inst);
+		if (!local_changed) {
+			cache.emplace(inst, value);
+			return value;
+		}
+		// A PHI carries predecessor metadata that cannot be reconstructed from a
+		// plain argument list.  The same applies to resource/memory instructions.
+		if (inst->GetOpcode() == ValueOpcode::Phi ||
+		    inst->GetOpcode() == ValueOpcode::GetBufferResource ||
+		    inst->GetOpcode() == ValueOpcode::GetImageResource ||
+		    inst->GetOpcode() == ValueOpcode::LoadAddressU32 ||
+		    inst->GetOpcode() == ValueOpcode::ReadConstBuffer || args.size() > 8u) {
+			return std::nullopt;
+		}
+		Inst* clone = nullptr;
+		switch (args.size()) {
+			case 0:
+				clone =
+				    &*block.PrependNewInst(where, inst->GetOpcode(), {}, inst->Flags<uint64_t>());
+				break;
+			case 1:
+				clone = &*block.PrependNewInst(where, inst->GetOpcode(), {args[0]},
+				                               inst->Flags<uint64_t>());
+				break;
+			case 2:
+				clone = &*block.PrependNewInst(where, inst->GetOpcode(), {args[0], args[1]},
+				                               inst->Flags<uint64_t>());
+				break;
+			case 3:
+				clone = &*block.PrependNewInst(
+				    where, inst->GetOpcode(), {args[0], args[1], args[2]}, inst->Flags<uint64_t>());
+				break;
+			case 4:
+				clone = &*block.PrependNewInst(where, inst->GetOpcode(),
+				                               {args[0], args[1], args[2], args[3]},
+				                               inst->Flags<uint64_t>());
+				break;
+			case 5:
+				clone = &*block.PrependNewInst(where, inst->GetOpcode(),
+				                               {args[0], args[1], args[2], args[3], args[4]},
+				                               inst->Flags<uint64_t>());
+				break;
+			case 6:
+				clone =
+				    &*block.PrependNewInst(where, inst->GetOpcode(),
+				                           {args[0], args[1], args[2], args[3], args[4], args[5]},
+				                           inst->Flags<uint64_t>());
+				break;
+			case 7:
+				clone = &*block.PrependNewInst(
+				    where, inst->GetOpcode(),
+				    {args[0], args[1], args[2], args[3], args[4], args[5], args[6]},
+				    inst->Flags<uint64_t>());
+				break;
+			case 8:
+				clone = &*block.PrependNewInst(
+				    where, inst->GetOpcode(),
+				    {args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7]},
+				    inst->Flags<uint64_t>());
+				break;
+			default: return std::nullopt;
+		}
+		const auto result = Value(clone);
+		cache.emplace(inst, result);
+		changed = true;
+		return result;
+	}
+
+	bool ContainsLaneDependentAddress(Value                            value,
+	                                  std::unordered_set<const Inst*>& visiting) const {
+		value            = value.Resolve();
+		const auto* inst = value.TryInstruction();
+		if (inst == nullptr || !visiting.insert(inst).second) return false;
+		const auto finish = [&](bool result) {
+			visiting.erase(inst);
+			return result;
+		};
+		if (inst->GetOpcode() == ValueOpcode::ReadLane) return finish(true);
+		if (inst->GetOpcode() == ValueOpcode::GetBuiltin && inst->NumArgs() >= 2u) {
+			const auto kind = inst->Arg(0).Resolve();
+			if (kind.IsImmediate() && kind.GetType() == Type::U32 &&
+			    (kind.U32() == static_cast<uint32_t>(StageInputKind::LocalInvocationId) ||
+			     kind.U32() == static_cast<uint32_t>(StageInputKind::LocalInvocationIndex))) {
+				return finish(true);
+			}
+		}
+		for (uint32_t index = 0; index < inst->NumArgs(); ++index) {
+			if (ContainsLaneDependentAddress(inst->Arg(index), visiting)) return finish(true);
+		}
+		return finish(false);
+	}
+
+	bool HasLaneDependentRawRead(Value value, std::unordered_set<const Inst*>& visiting) const {
+		value            = value.Resolve();
+		const auto* inst = value.TryInstruction();
+		if (inst == nullptr || !visiting.insert(inst).second) return false;
+		const auto finish = [&](bool result) {
+			visiting.erase(inst);
+			return result;
+		};
+		if (inst->GetOpcode() == ValueOpcode::ReadConst && inst->NumArgs() == 2u) {
+			const auto slot = inst->Arg(1).Resolve();
+			if (slot.IsImmediate() && slot.GetType() == Type::U32 &&
+			    slot.U32() < m_program.srt_reads.size() &&
+			    IsShaderSideRawRead(m_program.srt_reads[slot.U32()].value)) {
+				std::unordered_set<const Inst*> address_visiting;
+				return finish(ContainsLaneDependentAddress(m_program.srt_reads[slot.U32()].value,
+				                                           address_visiting));
+			}
+		}
+		for (uint32_t index = 0; index < inst->NumArgs(); ++index) {
+			if (HasLaneDependentRawRead(inst->Arg(index), visiting)) return finish(true);
+		}
+		return finish(false);
+	}
+
+	bool LowerScalarBufferReadToBda(Inst& read, const MemoryInfo& memory, uint32_t pc) {
+		if (read.GetOpcode() != ValueOpcode::ReadConstBuffer || !IsRawScalarBufferMemory(memory)) {
+			return false;
+		}
+		if (read.NumArgs() != 2u || read.Parent() == nullptr) return false;
+		auto* handle = read.Arg(0).ResolveInstruction();
+		if (handle == nullptr || !IsShaderBdaBufferHandle(*handle)) {
+			return false;
+		}
+		if (handle->Arg(0).GetType() != Type::U32 || handle->Arg(1).GetType() != Type::U32 ||
+		    handle->Arg(2).GetType() != Type::U32) {
+			return false;
+		}
+		std::unordered_set<const Inst*> raw_visiting;
+		bool                            has_lane_dependent_raw = false;
+		for (uint32_t word = 0; word < 3u; ++word) {
+			has_lane_dependent_raw =
+			    has_lane_dependent_raw || HasLaneDependentRawRead(handle->Arg(word), raw_visiting);
+		}
+		if (!has_lane_dependent_raw) return false;
+		const bool already_lowered = m_shader_bda_handles.contains(handle);
+		if (!already_lowered) {
+			if (handle->Parent() == nullptr) return false;
+			auto where = std::ranges::find_if(handle->Parent()->Instructions(),
+			                                  [&](const Inst& inst) { return &inst == handle; });
+			if (where == handle->Parent()->Instructions().end()) return false;
+			std::unordered_map<const Inst*, Value> cache;
+			std::unordered_set<const Inst*>        visiting;
+			bool                                   any_raw_word = false;
+			for (uint32_t word = 0; word < 3u; ++word) {
+				bool       changed = false;
+				const auto clone   = CloneBdaExpression(handle->Arg(word), *handle->Parent(), where,
+				                                        cache, visiting, changed);
+				if (!clone.has_value()) return false;
+				if (changed) handle->SetArg(word, *clone);
+				any_raw_word = any_raw_word || changed;
+			}
+			// Keep ordinary scalar descriptors on the existing host-materialized path.
+			if (!any_raw_word) return false;
+		}
+
+		auto& block = *read.Parent();
+		auto  where = std::ranges::find_if(block.Instructions(),
+		                                   [&](const Inst& inst) { return &inst == &read; });
+		if (where == block.Instructions().end()) return false;
+		auto insert = [&](ValueOpcode opcode, std::initializer_list<Value> args) {
+			const auto it = block.PrependNewInst(where, opcode, args);
+			where         = std::next(it);
+			return Value(&*it);
+		};
+
+		const auto descriptor_high = handle->Arg(1);
+		const auto stride_shifted =
+		    insert(ValueOpcode::ShiftRightLogical32, {descriptor_high, Value(16u)});
+		const auto stride = insert(ValueOpcode::BitwiseAnd32, {stride_shifted, Value(0x3fffu)});
+		const auto stride_zero = insert(ValueOpcode::IEqual32, {stride, Value(0u)});
+		const auto effective_stride =
+		    insert(ValueOpcode::SelectU32, {stride_zero, Value(1u), stride});
+		const auto stride_u64 =
+		    insert(ValueOpcode::CompositeConstructU64, {effective_stride, Value(0u)});
+		const auto records_u64 =
+		    insert(ValueOpcode::CompositeConstructU64, {handle->Arg(2), Value(0u)});
+		const auto size_u64 = insert(ValueOpcode::IMul64, {stride_u64, records_u64});
+		const auto offset_aligned =
+		    insert(ValueOpcode::BitwiseAnd32, {read.Arg(1), Value(~uint32_t {3u})});
+		const auto effective_offset =
+		    memory.offset == 0u
+		        ? offset_aligned
+		        : insert(ValueOpcode::IAdd32, {offset_aligned, Value(memory.offset)});
+		const auto offset_u64 =
+		    insert(ValueOpcode::CompositeConstructU64, {effective_offset, Value(0u)});
+		const auto size_at_least_word =
+		    insert(ValueOpcode::UGreaterThan64, {size_u64, Value(uint64_t {3u})});
+		const auto size_minus_word = insert(ValueOpcode::ISub64, {size_u64, Value(uint64_t {4u})});
+		const auto end_exclusive =
+		    insert(ValueOpcode::IAdd64, {size_minus_word, Value(uint64_t {1u})});
+		const auto offset_in_bounds = insert(ValueOpcode::ULessThan64, {offset_u64, end_exclusive});
+		const auto in_bounds =
+		    insert(ValueOpcode::LogicalAnd, {size_at_least_word, offset_in_bounds});
+
+		const auto base_high = insert(ValueOpcode::BitwiseAnd32, {descriptor_high, Value(0xffffu)});
+		const auto address   = insert(ValueOpcode::GetAddressResource, {handle->Arg(0), base_high});
+		MemoryInfo address_memory      = memory;
+		address_memory.kind            = ResourceKind::ScalarAddress;
+		address_memory.resource        = 0u;
+		address_memory.sampler         = 0u;
+		address_memory.address_is_full = false;
+		address_memory.planning_only   = false;
+		const auto address_index       = static_cast<uint32_t>(m_program.memory_info.size());
+		m_program.memory_info.push_back(address_memory);
+		MemoryFlags address_flags {address_index, pc};
+		const auto  load_it = block.PrependNewInst(where, ValueOpcode::LoadAddressU32,
+		                                           {address, read.Arg(1), Value(0u), in_bounds});
+		where               = std::next(load_it);
+		auto& load          = *load_it;
+		load.SetFlags(address_flags);
+		read.ReplaceUsesWith(Value(&load));
+		m_info.uses_dma = true;
+		if (m_shader_bda_handles.insert(handle).second) {
+			LOGF("ResourceTracking shader-side BDA scalar buffer hash=0x%016llx source_handle=%p "
+			     "pc=0x%08x base=(dword0,dword1[15:0]) stride=dword1[29:16] records=dword2\n",
+			     static_cast<unsigned long long>(m_program.shader_hash), static_cast<void*>(handle),
+			     pc);
+		}
+		return true;
+	}
+
 	void Collect(Inst& inst) {
 		if (BoundedRead(&inst) != nullptr ||
 		    std::ranges::find(m_bounded_root_reads, &inst) != m_bounded_root_reads.end()) {
@@ -2126,6 +2445,14 @@ private:
 			Fail(flags.pc, "memory operation has no resource handle");
 		}
 		const auto& memory = m_program.memory_info[flags.index];
+		// A scalar-buffer read that was retained as a planning root can still be
+		// lowered when its descriptor has shader-side SRT dwords.  Try that path
+		// before the generic planning-only early return; ordinary planning reads
+		// remain host-materialized below.
+		if (buffer != BufferAccess::None && op == ValueOpcode::ReadConstBuffer &&
+		    LowerScalarBufferReadToBda(inst, memory, flags.pc)) {
+			return;
+		}
 		if (memory.planning_only || IsIndirectPlanningMemory(flags.index)) {
 			return;
 		}
@@ -2244,6 +2571,7 @@ private:
 	std::vector<MemoryPatch>                  m_memory_patches;
 	std::vector<IndirectImagePlan>            m_indirect_images;
 	std::vector<std::pair<Inst*, uint32_t>>   m_indirect_buffers;
+	std::unordered_set<Inst*>                 m_shader_bda_handles;
 	uint32_t                                  m_trace_buffer_handles = 0;
 	std::array<uint32_t, 3>                   m_local_size;
 	uint32_t                                  m_shared_bytes;

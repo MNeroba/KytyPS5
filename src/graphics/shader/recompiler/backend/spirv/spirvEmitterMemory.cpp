@@ -1160,6 +1160,16 @@ bool EmitValueMemory(ValueEmitContext& ctx, const IR::Inst& inst) {
 		return true;
 	}
 	if (op == IR::ValueOpcode::ReadConst) {
+		const auto slot        = inst.Arg(1).Resolve();
+		const bool shader_side = (inst.Flags<uint64_t>() & IR::ShaderSideSrtReadFlag) != 0;
+		if (slot.IsImmediate() && slot.GetType() == IR::Type::U32 &&
+		    slot.U32() < state.program.srt_reads.size() && shader_side) {
+			// This slot names a raw scalar read that cannot be snapshotted by the
+			// host.  Keep the original shader-side expression and bypass the
+			// flattened SRT storage for this one value.
+			ctx.Define(inst, ctx.Def(state.program.srt_reads[slot.U32()].value));
+			return true;
+		}
 		if (state.flattened_srt_variable == 0) {
 			ctx.Fail(inst, "requires the flattened SRT descriptor");
 			return true;
