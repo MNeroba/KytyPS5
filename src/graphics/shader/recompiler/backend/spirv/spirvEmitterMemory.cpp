@@ -6,6 +6,29 @@
 namespace Libs::Graphics::ShaderRecompiler::Spirv::Emitter {
 namespace {
 
+// SRT planning normally replaces a raw address read with a flattened ReadConst and
+// marks the original operation as planning-only.  Shader-side BDA reads deliberately
+// keep that original expression instead.  In that case the planning-only operation is
+// a real producer for the shader-side clone and must not be silently omitted.
+bool IsShaderSideSrtRoot(const IR::Program& program, const IR::Inst& root) {
+	for (const auto* block: program.blocks) {
+		for (const auto& inst: *block) {
+			if (inst.GetOpcode() != IR::ValueOpcode::ReadConst ||
+			    (inst.Flags<uint64_t>() & IR::ShaderSideSrtReadFlag) == 0 || inst.NumArgs() != 2u) {
+				continue;
+			}
+			const auto slot = inst.Arg(1).Resolve();
+			if (!slot.IsImmediate() || slot.GetType() != IR::Type::U32 ||
+			    slot.U32() >= program.srt_reads.size()) {
+				continue;
+			}
+			const auto* source = program.srt_reads[slot.U32()].value.Resolve().TryInstruction();
+			if (source == &root) return true;
+		}
+	}
+	return false;
+}
+
 uint32_t AndCondition(EmitterState& state, uint32_t lhs, uint32_t rhs) {
 	return Binary(state, OpLogicalAnd, TypeBool(state), lhs, rhs);
 }
@@ -1028,9 +1051,10 @@ void DefineGetBdaPointer(EmitterState& state) {
 bool EmitValueMemory(ValueEmitContext& ctx, const IR::Inst& inst) {
 	auto&      state = ctx.state;
 	const auto op    = inst.GetOpcode();
-	// Planning reads have no runtime buffer binding to look up.
+	// Planning reads have no runtime buffer binding to look up unless a retained
+	// shader-side SRT clone still needs the original address producer.
 	if ((op == IR::ValueOpcode::LoadAddressU32 || op == IR::ValueOpcode::ReadConstBuffer) &&
-	    ctx.Memory(inst).planning_only) {
+	    ctx.Memory(inst).planning_only && !IsShaderSideSrtRoot(state.program, inst)) {
 		return true;
 	}
 	if (IR::BufferAccessOf(op) != IR::BufferAccess::None && ctx.memory_override == nullptr) {
