@@ -1,282 +1,136 @@
-# KytyPS5 Project Memory
+# KytyPS5 project memory
 
-This is durable, non-chronological project knowledge for fast continuation by a fresh Codex session. The project copy is canonical:
+Durable, non-chronological facts that are expensive to rediscover. Read `CURRENT_STATE.md` first. Put current milestones, P0, worktree, executable, and next action there; stable mechanisms live in `REFERENCE.md`.
 
-`G:/KytyPS5/repo/docs/kyty-blocker-debugging/PROJECT_MEMORY.md`
+## Environment and baselines
 
-Keep the active milestone, P0 blocker, and next action in `CURRENT_STATE.md`. Use confidence labels when a fact is not fully proven.
+- **PROVEN:** Main repository is `G:/KytyPS5/repo`; the fork is `MNeroba/KytyPS5`. The normal installed executable is `G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.exe`.
+  Evidence: repository, build, and runtime inspection on 2026-09-10.
+- **PROVEN:** Primary host is Windows 11 Pro, Intel i9-12900K, 32 GB RAM, NVIDIA RTX 3090 24 GB. The active Windows build uses CMake/Ninja with `clang-cl`; do not assume the MSVC frontend.
+  Evidence: host and CMake inspection on 2026-09-10. See `REFERENCE.md § Build and runtime boundary`.
+- **STRONG EVIDENCE:** Secondary validation host is Apple M1 Max with 32 GB RAM.
+- **PROVEN:** ASTRO BOT EU is `PPSA21567`; its extraction is already solved. Do not mix Japan `PPSA21559` content into this baseline.
+  Evidence: existing extracted game root and project setup records.
+- **PROVEN:** Relevant focused suites are `resource_materialization_tests`, `resource_tracking_tests`, `shader_cfg_tests`, `shader_recompiler_compute_tests`, and `scalar_provenance_tests`. `resource_tracking_tests / dynamic storage mips` is a known unrelated failure. An older aggregate `kyty_tests` failure involved obsolete `Log` symbol linkage.
+  Evidence: repeated focused runs through `dfc7203`.
 
-## Project mission
+## Durable semantic findings
 
-### Execution progress — PROVEN
+### Resource identity and operand roles — PROVEN
 
-FACT: The engineering objective is to move the real target game along its execution path as quickly as possible while keeping fixes generic and semantically defensible.
+Fact: `GetBufferResource`, `GetImageResource`, and `GetSamplerResource` carry resource identity and remain a hard safety boundary. Payload data, image coordinates, and byte offsets are separate roles and can be shader-side only when a dedicated path supports them.
 
-WHY IT MATTERS: Optimize for time to the next observable game milestone; use proven blockers cleared per wall-clock time as the secondary metric.
+Evidence: slot241 fail-before/pass-after regressions and runtime progression. Proven safe cases are `ImageWrite` operand 2, `ImageSampleRaw` operand 2, and `ReadConstBuffer` operand 1.
 
-EVIDENCE: `SKILL.md` GAME PROGRESS STRATEGY and the milestone checkpoint in `CURRENT_STATE.md`.
+Why it matters: never broaden an opcode or `ShaderSideUseGraph` because a sibling operand is safe. See `REFERENCE.md § Resource identity and operand roles`.
 
-## Environment and durable paths
+### Global versus per-use state — PROVEN
 
-### Primary development environment — PROVEN
+Fact: global SRT slot eligibility and per-use shader-side/BDA lowering are distinct. A slot may retain an ordinary host consumer while one explicitly tracked BDA clone remains shader-side.
 
-FACT: The primary machine is Windows 11 Pro on an Intel i9-12900K with 32 GB RAM and an NVIDIA RTX 3090 24 GB. The build toolchain is CMake + Ninja with `clang-cl`; do not assume the `cl.exe`/MSVC frontend.
+Evidence: BDA-only and mixed-use regressions committed in `09d5e94`.
 
-WHY IT MATTERS: Build and runtime provenance must use the intended compiler and install tree.
+Why it matters: refresh passes must preserve provenance-tagged per-use clones without promoting the whole slot. See `REFERENCE.md § Global and per-use state`.
 
-EVIDENCE: Host inspection on 2026-09-10 and project setup records.
+### PHI boundary — PROVEN
 
-RELATED CODE/COMMIT: `G:/KytyPS5/AGENTS.md`, `REFERENCE.md` build workflow.
+Fact: a finite acyclic branch/diamond PHI may lower to a runtime select; a loop-carried PHI containing ReadLane, lane ID, BVH, or other guest execution state is not a host invariant.
 
-STRONG EVIDENCE: A secondary validation machine is Apple M1 Max with 32 GB RAM.
+Evidence: `3b52034` and the slot241/245 traces.
 
-### Repository and target paths — PROVEN
+Why it matters: lane-zero substitution, first-incoming selection, host fixed points, and arbitrary iteration caps change shader semantics. See `REFERENCE.md § Runtime PHI classes`.
 
-FACT: The working fork is `MNeroba/KytyPS5`; the main repository is `G:/KytyPS5/repo`. Canonical project debugging documents are under `G:/KytyPS5/repo/docs/kyty-blocker-debugging/`.
+### Bounded-plan lifetime — PROVEN
 
-FACT: The target baseline is ASTRO BOT EU, title ID `PPSA21567`, rooted at `G:/PS5 Games/PPSA21567/`. The normally used installed emulator is `G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.exe`.
+Fact: bounded/indirect plans can hold IR values outside ordinary use edges. After a rewrite removes original users, DCE may invalidate descriptor-source producers before ResourcePlan extraction.
 
-FACT: Durable investigation folders are `G:/KytyPS5/logs`, `G:/KytyPS5/captures`, `G:/KytyPS5/notes`, `G:/KytyPS5/patches`, and `G:/KytyPS5/temp`.
+Evidence: the `09d5e94` saved-shader audit and `TestBoundedDescriptorSourceSurvivesDeadCodeElimination`; it fails before and passes after `dfc7203`, including candidate `0x12345678` materialization.
 
-WHY IT MATTERS: These paths avoid repeated discovery and prevent mixing source, install, logs, and generated artifacts.
+Why it matters: retaining only the bounded read result is insufficient; address/count source roots must survive until extraction. See `REFERENCE.md § Bounded planning and lifetime`.
 
-EVIDENCE: `AGENTS.md`, `REFERENCE.md`, and verified path checks on 2026-09-10.
+### Structured CFG loop-exit guard — PROVEN
 
-### Game extraction — STRONG EVIDENCE
+FACT: A conditional inside an innermost loop cannot be emitted as loop control when one edge leaves the loop through a block that is neither that loop's merge nor continue target. The structured emitter would omit the required selection merge, so the generic safe action is to use the existing dispatcher fallback.
 
-FACT: EU extraction is already solved. MkPFS is used for archive inspection/unpack. Do not mix Japan `PPSA21559` DLC or packages into the EU `PPSA21567` baseline.
+WHY IT MATTERS: This keeps SPIR-V structured-control-flow rules separate from guest branch semantics and avoids target-specific CFG exceptions.
 
-WHY IT MATTERS: Reopening extraction or mixing packages changes the runtime input and invalidates blocker comparisons.
+EVIDENCE: Target shader `0x78af8e269b528b5c` mapped to block 51 with an outside edge through block 52 while the loop merge/continue were 153/197. The pre-fix artifact failed `spirv-val` with `Selection must be structured`; the post-check diagnostic run reached dispatcher emission.
 
-EVIDENCE: Project setup record and existing game root.
+RELATED CODE/COMMIT: `ShaderRecompiler.cpp` (`ValidateStructuredLoopControl`), semantic commit `1161113`.
 
-### Provenance anchor — PROVEN
+### Dispatcher value boundary — PROVEN
 
-FACT: `CURRENT_STATE.md` is authoritative for current HEAD, dirty state, executable, and runtime evidence. A runtime `Source build ...` label that does not match the intended source revision cannot validate that revision.
+FACT: Dispatcher spill slots may contain native SPIR-V values only. SRT/resource handles (`SrtResource`, buffer/image/sampler resources, and `ImageAddress`) are metadata resolved by their consumers. Planning-only scalar reads are not runtime values unless a shader-side SRT wrapper retains that producer. A shader-side `ReadConst` wrapper aliases `program.srt_reads[slot].value`; cross-block analysis must spill the retained producer rather than the wrapper.
 
-WHY IT MATTERS: Historical logs from `c94816c-dirty` must not be treated as a clean runtime result for local `09d5e94`.
+WHY IT MATTERS: Spilling metadata wrappers can create an undefined or forward-referenced SPIR-V ID at a dispatcher edge even though the underlying producer is valid.
 
-EVIDENCE: `CURRENT_STATE.md` audit and `AGENTS.md` provenance rule.
+EVIDENCE: The pre-fix target module in `ASTRO_DISPATCH_SRT_20260910_2320_debug` stored undefined `%28241` into `%1011`. After the generic metadata/alias handling, `ASTRO_DISPATCH_SRT_20260911_0050_debug` emitted the 941,496-byte target module; `spirv-val --target-env vulkan1.3` passed and a numeric scan found 45,225 definitions, 45,225 references, and zero missing IDs. The runtime reached the target wave64 compute; a clean pipeline/submission result is still unverified.
 
-## Known baseline failures
-
-### Focused test baseline — PROVEN
-
-FACT: The relevant focused suites are `resource_materialization_tests`, `resource_tracking_tests`, `shader_cfg_tests`, `shader_recompiler_compute_tests`, and `scalar_provenance_tests`.
-
-FACT: `resource_tracking_tests / dynamic storage mips` is a known unrelated baseline failure. An older aggregate `kyty_tests` issue involved obsolete `Log` symbol linking.
-
-WHY IT MATTERS: Do not spend P0 time on these failures unless current changes alter them or new evidence connects them to the target path.
-
-EVIDENCE: `CURRENT_STATE.md` and project history.
-
-## Important checkpoints
-
-### Semantic commit chain — PROVEN
-
-FACT: Important checkpoints in the current blocker family are:
-
-- `3b52034` — runtime PHI resource selects with finite CFG context.
-- `4320bf5` — retain producers for shader-side SRT reads.
-- `c1f0dde` — retain pure scalar SRT reads in BDA.
-- `f23d6f6` — recover SRT image reads for indirect planning.
-- `28cce31` — refresh shader-side eligibility after tracking.
-- `53081ec` — allow scalar SRT values in ImageWrite data.
-- `c94816c` — allow scalar SRT values in runtime resource operands.
-- `09d5e94` — preserve per-use BDA SRT clones across tracking.
-
-WHY IT MATTERS: Start from the revision in `CURRENT_STATE.md`; use this list to understand which generic invariant a checkpoint established without inferring the current checkout from history.
-
-EVIDENCE: `git log` and `CURRENT_STATE.md` blocker history.
-
-RELATED CODE/COMMIT: `ResourceTracking.cpp`, `SrtWalker.cpp`, `ResourceMaterialization.cpp`, and `tests/ResourceTrackingTests.cpp`.
-
-## Proven architecture boundaries
-
-### Pipeline and host materialization — PROVEN
-
-FACT: The execution pipeline is decode → CFG/IR → SRT planning → resource tracking/rewrites → descriptor source planning → eligibility refresh → ResourcePlan extraction → runtime materialization → SPIR-V → `spirv-val` → Vulkan pipeline/dispatch → GPU execution.
-
-WHY IT MATTERS: A later failure can be caused by a decision several passes earlier. Trace backward, then hand off explicitly when the stage changes.
-
-EVIDENCE: `REFERENCE.md` and source pass ordering.
-
-### Resource identity versus runtime data — PROVEN
-
-FACT: `GetBufferResource`, `GetImageResource`, and `GetSamplerResource` carry resource identity and remain a hard safety boundary. Payload data, coordinates, and byte offsets are separate operand roles and may be shader-side when a dedicated path supports them.
-
-WHY IT MATTERS: Never broaden an entire opcode or `ShaderSideUseGraph` because a sibling operand is safe. The proven safe examples are ImageWrite operand 2, ImageSampleRaw operand 2, and ReadConstBuffer operand 1.
-
-EVIDENCE: Slot241 analysis, focused regressions, and `REFERENCE.md`.
-
-RELATED CODE/COMMIT: `53081ec`, `c94816c`, `ShaderSideUseGraph`, `RefreshShaderSideSrtEligibility`.
-
-### Global versus per-use shader-side state — PROVEN
-
-FACT: Global SRT slot eligibility and per-use shader-side/BDA lowering are distinct. One slot may keep an ordinary host consumer while a specific BDA use remains shader-side.
-
-WHY IT MATTERS: Refresh passes must not clear a provenance-tagged BDA clone merely because the original slot remains host-live.
-
-EVIDENCE: BDA-only and mixed-use regressions in `09d5e94`; slot245/246 investigation.
-
-RELATED CODE/COMMIT: `ShaderSideSrtReadFlag`, `m_bda_srt_clones`, `LowerScalarBufferReadToBda`, `09d5e94`.
-
-### Scalar-buffer BDA boundary — PROVEN
-
-FACT: `LowerScalarBufferReadToBda` is intentionally narrow: raw `ResourceKind::ScalarBuffer`, 32-bit access, supported grouping, untyped/unformatted data, no GLC/SLC, IDXEN/OFFEN, secondary offset, and aligned supported offsets.
-
-WHY IT MATTERS: Reuse this path before inventing descriptor architecture; do not broaden semantics because one game case is inconvenient.
-
-EVIDENCE: `REFERENCE.md`, BDA guards, and the source22 investigation.
-
-RELATED CODE/COMMIT: `LowerScalarBufferReadToBda`, `IsRawScalarBufferMemory`, `CloneBdaExpression`.
-
-### PHI and loop-carried state — PROVEN
-
-FACT: A finite structural CFG/diamond PHI may be lowered to a runtime select. A loop-carried PHI containing ReadLane/LaneId/BVH or other guest execution state is not a host invariant.
-
-WHY IT MATTERS: Lane-zero substitution, first-incoming selection, arbitrary fixed points, and arbitrary iteration caps change shader semantics.
-
-EVIDENCE: Runtime PHI handling and slot241/245 investigations.
-
-RELATED CODE/COMMIT: `RuntimePhiSelect`, `ResolveInvariantPhi`, `3b52034`.
-
-### Bounded plans and rewrite lifetime — PROVEN
-
-FACT: Bounded/indirect resource planning requires a finite provable candidate domain. Plans may cross tracking, rewrite, extraction, and materialization stages, so stored `Value`/`Inst*` references must be checked for replacement or invalidation before use.
-
-WHY IT MATTERS: A stale plan reference can surface as an evaluator `Void` failure even when the original bounded proof is valid. Keep the active bounded-SRT diagnosis in `CURRENT_STATE.md`; this memory stores only the reusable lifetime lesson.
-
-EVIDENCE: Fail-before audit at `09d5e94` plus the post-DCE regression and successful candidate materialization after `dfc7203`.
-
-RELATED CODE/COMMIT: `PlanBoundedReads`, `ApplyBoundedReads`, `RetainBoundedDescriptorSources`, `ExtractResourcePlan`, `MaterializeBoundedReads`, `dfc7203`.
+RELATED CODE/COMMIT: `backend/spirv/spirvEmitterProgram.cpp`, `tests/shaderCfgTests.cpp` dispatcher alias fixture, semantic commit `1161113`.
 
 ### BVH and FaultBuffer boundaries — PROVEN
 
-FACT: `--stub-bvh` is a debug progression aid that always misses; it is not semantic BVH/ray-tracing support. `FaultBuffer` is a page-fault bitmap and must not become arbitrary debug telemetry.
+Fact: `--stub-bvh` always misses and is only a downstream-progression aid. `FaultBuffer` is a page-fault bitmap.
 
-WHY IT MATTERS: Passing a decode blocker or observing a stub miss does not prove traversal, node layout, address calculation, or rendering correctness.
+Evidence: current CLI and renderer implementation.
 
-EVIDENCE: Existing CLI path and `REFERENCE.md`.
+Why it matters: neither is evidence of real BVH correctness or a general diagnostics channel. See `REFERENCE.md § BVH and fault tracking`.
 
-## Confirmed blocker history
+### Local validation source — PROVEN
 
-### BVH decode — PROVEN
+FACT: The Vulkan SDK SPIR-V tools used for target artifacts are under `G:/KytyPS5/tools/VulkanSDK/1.4.357.0/Bin/`; use `spirv-val --target-env vulkan1.3` and `spirv-dis` before investigating Vulkan or GPU behavior.
 
-FACT: MIMG opcode `0xe6` (`IMAGE_BVH_INTERSECT_RAY`) was an initial decode blocker; `0xe7` is the related BVH64 opcode.
+WHY IT MATTERS: Offline artifact validation is the cheapest handoff from shader emission to runtime pipeline debugging.
 
-WHY IT MATTERS: Work on real BVH semantics only when it becomes the current P0.
+EVIDENCE: The 2026-09-10/11 target artifact checks above and `DEBUG_REFERENCE_SOURCES.md`.
 
-EVIDENCE: Runtime decode history and `--stub-bvh` progression path.
+RELATED CODE/COMMIT: `REFERENCE.md § SPIR-V emission and validation`.
 
-### slot114 family — STRONG EVIDENCE
+## Confirmed blocker history and commits
 
-FACT: The slot114 family involved SRT producer/liveness and shader-side planning; planning-only or shader-side-rooted producers sometimes had to survive for later lowering.
+| Checkpoint | Durable result |
+|---|---|
+| `3b52034` | Lowered finite CFG-context resource PHIs to runtime selects without legalizing loop-carried execution state. |
+| `4320bf5` | Retained producers needed for shader-side SRT reads. |
+| `c1f0dde` | Retained pure scalar SRT reads used by BDA. |
+| `f23d6f6` | Recovered SRT image reads for indirect planning. |
+| `28cce31` | Refreshed shader-side SRT eligibility after tracking. |
+| `53081ec` | Allowed scalar SRT values specifically in `ImageWrite` payload data. |
+| `c94816c` | Allowed `ImageSampleRaw` coordinates and `ReadConstBuffer` byte offsets as runtime edges. |
+| `09d5e94` | Preserved BDA clone provenance and exact per-use clones across eligibility refresh. |
+| `dfc7203` | Retained bounded descriptor address/count sources through post-tracking DCE. |
 
-WHY IT MATTERS: Do not reopen it unless a regression puts it back on the critical path.
+- **BVH decode — PROVEN:** MIMG `0xe6` is `IMAGE_BVH_INTERSECT_RAY`; `0xe7` is the related BVH64 opcode. The miss stub exposed downstream work but did not implement semantics.
+- **slot114 family — STRONG EVIDENCE:** involved SRT producer/liveness and shader-side planning. Later eligibility/lifetime work moved runtime past it; reopen only if current evidence regresses.
+- **slot241 — PROVEN:** the reported `PHI is not invariant` came from safe runtime operand roles, not resource identity. `53081ec` and `c94816c` cleared it while negative identity cases remained rejected.
+- **slot245/246 B6 — PROVEN:** `CloneBdaExpression` cached only `Value`; a shared-subtree cache hit lost `changed` provenance and left stale host-side IR. The regression fails before and passes after `09d5e94`.
+- **slot245/246 R1 — PROVEN:** BDA applicability passed, but eligibility refresh treated per-use BDA clones as ordinary wrappers, cleared their flags after seeing `GetBufferResource`, and restored host evaluation of loop-carried state. Explicit `m_bda_srt_clones` provenance plus mixed-use regression fixed the generic defect in `09d5e94`.
+- **BS1 bounded source — PROVEN:** `PlanBoundedReads` saved descriptor values; `ApplyBoundedReads` removed ordinary uses; DCE invalidated `GetUserData` producers; extraction copied `Void`; materialization failed before base-address formation or candidate reads. `RetainBoundedDescriptorSources` uses side-effecting `ReferenceU32` lifetime markers. `dfc7203` passed offline regression and the later target run reached SPIR-V emission.
 
-EVIDENCE: Runtime progression and the `4320bf5`–`28cce31` sequence.
+## Known negative evidence
 
-### slot241 — PROVEN
+Do not retry these without contradictory current source, regression, or runtime evidence:
 
-FACT: The apparent `PHI is not invariant` symptom came from safe runtime operand roles: ImageWrite payload, ImageSampleRaw coordinates, and ReadConstBuffer byte offset. Resource identity did not need to be relaxed.
+- “slot245 means BDA applicability failed” is false; its guards passed.
+- “B6 alone explains slot245” is incomplete; refresh lifetime was a separate R1 defect.
+- Allowing `GetBufferResource` shader-side does not solve dynamic identity safely.
+- Source22 loop-carried state cannot be made host-invariant by choosing lane 0, an incoming PHI edge, or a host fixed point.
+- Promoting a whole SRT slot loses mixed-use semantics.
+- Arbitrary candidate caps, guest-memory scans, zero/dummy/null descriptors, and game/hash/slot/PC exceptions lack semantic proof.
+- A `c94816c-dirty` runtime label does not validate later revisions; provenance must be captured for each run.
+- Repeated game runs without a source change or one stated discriminating observation are expensive and non-informative.
 
-WHY IT MATTERS: Role-specific eligibility cleared slot241 while preserving the negative resource-identity boundary.
+## High-value code and evidence locations
 
-EVIDENCE: Focused fail-before/pass-after tests and runtime progression to slot245.
+```text
+src/graphics/shader/recompiler/ir/passes/ResourceTracking.cpp
+src/graphics/shader/recompiler/ir/passes/ResourceMaterialization.cpp
+src/graphics/shader/recompiler/ir/passes/SrtWalker.cpp
+src/graphics/shader/recompiler/ir/Value.cpp
+src/graphics/shader/recompiler/ShaderRecompiler.cpp
+src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
+G:/KytyPS5/logs/
+G:/KytyPS5/notes/
+```
 
-RELATED CODE/COMMIT: `53081ec`, `c94816c`.
-
-### slot245/246 R1 path — STRONG EVIDENCE
-
-FACT: BDA applicability passed, but a later eligibility refresh treated per-use BDA clones as ordinary wrappers, rejected their `GetBufferResource` path, cleared their shader-side flags, and made host evaluation reach loop-carried PHI state.
-
-WHY IT MATTERS: The fix is explicit per-use clone provenance, not broader resource identity or host PHI evaluation. The previous slot245 blocker disappeared on the inherited labeled runtime path; revalidate any claim against the HEAD in `CURRENT_STATE.md`.
-
-EVIDENCE: Lifetime tracing and BDA-only/mixed-use regressions.
-
-RELATED CODE/COMMIT: `m_bda_srt_clones`, `RefreshShaderSideSrtEligibility`, `09d5e94`.
-
-## Proven generic bug roots
-
-### B6 clone-cache provenance — PROVEN
-
-FACT: `CloneBdaExpression` originally cached only `Value`. A shared-subtree cache hit lost the `changed`/shader-side provenance, leaving part of a descriptor connected to original host-side IR.
-
-WHY IT MATTERS: Any transformed-IR cache must preserve semantic/provenance metadata as well as the value.
-
-EVIDENCE: Shared descriptor subtree fail-before/pass-after regression.
-
-RELATED CODE/COMMIT: `CloneBdaExpression`, `BdaCloneResult { value, changed }`, `09d5e94`.
-
-### R1 refresh lifetime — PROVEN
-
-FACT: Per-use BDA-created `ReadConst` clones need explicit tracking across global eligibility refresh. Ordinary global wrappers and special BDA clones cannot be identified solely by a shared flag.
-
-WHY IT MATTERS: This preserves mixed-use semantics: global slot state may stay host-side while the BDA clone stays shader-side.
-
-EVIDENCE: BDA-only and mixed-use regressions.
-
-RELATED CODE/COMMIT: `m_bda_srt_clones`, `RefreshShaderSideSrtEligibility`, `09d5e94`.
-
-### Bounded descriptor-source DCE lifetime — PROVEN
-
-FACT: `PlanBoundedReads` stores address/count `DescriptorSource` values outside ordinary IR uses. After `ApplyBoundedReads` removes the original read users, post-tracking DCE can invalidate those producers before `ExtractResourcePlan` clones them.
-
-WHY IT MATTERS: Retaining only the bounded read result is insufficient; materialization must still evaluate the descriptor source. `RetainBoundedDescriptorSources` emits side-effecting `ReferenceU32` lifetime markers for the final address/count roots before the sources leave `Tracker`.
-
-EVIDENCE: `TestBoundedDescriptorSourceSurvivesDeadCodeElimination` fails before the fix and passes after `dfc7203`, including `MaterializeResources` reading candidate `0x12345678`. The fix is generic and leaves BDA/R1 and bounded-read semantics unchanged.
-
-RELATED CODE/COMMIT: `ResourceTracking.cpp`, `ResourceMaterialization.cpp`, `tests/ResourceTrackingTests.cpp`, `dfc7203`.
-
-## Disproven approaches and unsafe retries
-
-Do not retry these without new source, regression, or runtime evidence:
-
-- host fixed-point evaluation of genuine loop-carried shader state;
-- lane 0, first PHI incoming, arbitrary PHI choice, or arbitrary loop iteration caps;
-- arbitrary descriptor candidate caps, guest-memory scans, zero/dummy/null descriptors;
-- broad allow-all resource eligibility or allowing `GetBufferResource` merely to clear a blocker;
-- promoting a whole SRT slot when only one use is shader-side;
-- game/shader hash exceptions, hard-coded SRT slots or PCs;
-- treating the BVH miss stub as real BVH support;
-- repurposing `FaultBuffer` for diagnostics;
-- repeated game runs without a source change or a hypothesis that can change the observed result.
-
-Previously disproven conclusions:
-
-- “slot245 means BDA applicability failed” — false; guards passed.
-- “B6 alone explains slot245” — incomplete; B6 was real, but refresh lifetime was a separate R1 defect.
-- “GetBufferResource should simply be allowed shader-side” — false without new resource-identity semantics.
-- “source22 loop-carried state can be solved by host PHI evaluation” — false.
-
-## Useful existing mechanisms
-
-Prefer these before designing parallel systems:
-
-`LowerScalarBufferReadToBda`, `IsRawScalarBufferMemory`, `CloneBdaExpression`, `ShaderSideSrtReadFlag`, `m_bda_srt_clones`, `RefreshShaderSideSrtEligibility`, `PlanBoundedReads`, `ReadBoundedSrtU32`, `MakeIndirectBuffer`, `RuntimePhiSelect`, `EvaluateDescriptorSource`, `ExtractResourcePlan`, and `MaterializeResources`.
-
-High-value source locations:
-
-- `src/graphics/shader/recompiler/ir/passes/ResourceTracking.cpp`
-- `src/graphics/shader/recompiler/ir/passes/ResourceMaterialization.cpp`
-- `src/graphics/shader/recompiler/ir/passes/SrtWalker.cpp`
-- `src/graphics/shader/recompiler/ir/Value.cpp`
-- `src/graphics/shader/recompiler/ShaderRecompiler.cpp`
-- `src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp`
-
-## Validated external/reference sources
-
-### Corroboration inventory — STRONG EVIDENCE
-
-FACT: The project has identified AMD RDNA2 ISA, LLVM/Clang AMDGPU BVH builtins, AMD GPUOpen GPURT/PAL, Mesa/RADV, Vulkan and SPIR-V specifications/tools, and the Prosperity emulator as useful corroborating references.
-
-WHY IT MATTERS: Use primary ISA/specification and Kyty source to establish semantics; use other emulators/drivers as corroboration, not authority. Do not re-research a source unless the current implementation needs a specific semantic detail.
-
-EVIDENCE: `REFERENCE.md` external evidence priority and prior investigations.
-
-## Maintenance boundary
-
-This file is not a diary. Do not store current milestone/P0 details, temporary speculation, transient pointer values, giant IR dumps, every command, or every encountered slot here. Put volatile checkpoint and next-action data in `CURRENT_STATE.md`; put stable architecture details in `REFERENCE.md`; put reusable process rules in `SKILL.md`.
-
-If this memory already answers an architectural question, reopen it only when current source, a regression, or new runtime evidence contradicts or makes it stale.
+Useful existing mechanisms: `LowerScalarBufferReadToBda`, `CloneBdaExpression`, `ShaderSideSrtReadFlag`, `m_bda_srt_clones`, `RefreshShaderSideSrtEligibility`, `PlanBoundedReads`, `ReadBoundedSrtU32`, `RuntimePhiSelect`, `ExtractResourcePlan`, and `MaterializeResources`. Their stable roles are in `REFERENCE.md`.
