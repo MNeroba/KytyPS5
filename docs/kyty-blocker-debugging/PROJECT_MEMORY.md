@@ -106,7 +106,22 @@ EVIDENCE: `src/graphics/guest_gpu/graphicsRun.cpp`; clean run `ASTRO_CLEAN_20260
 
 RELATED CODE/COMMIT: `REFERENCE.md § Build and runtime boundary`; no source commit required.
 
+### Pipeline runtime boundary — STRONG EVIDENCE
+
+FACT: On exact HEAD 2ae7feb, a printf-to-file trace emitted module 0022 (hash 0x530dcd964f29983c, shader address 0x000000050069ec00), then entered vkCreateComputePipelines and produced no completion line for more than 20 seconds. The same run had 18 successful compute and 2 successful graphics pipeline creates before this call.
+
+WHY IT MATTERS: The active target blocker is now a valid-SPIR-V Vulkan pipeline/runtime stall. It is earlier than any proven GPU submission or presentation signal; do not debug SRT/materialization or scheduler waits until this create returns or an isolated test disproves it as the bottleneck.
+
+EVIDENCE: G:/KytyPS5/logs/ASTRO_M2_TRACE_20260910_232151/runtime.log; module G:/KytyPS5/logs/ASTRO_M2_TRACE_20260910_232151/shaders/0022_new_shader_cs_530dcd964f29983c.spv passed spirv-val --target-env vulkan1.3 and a numeric scan (55,709 definitions, 55,709 references, missing 0). The process was stopped after the bounded no-growth interval. No vkQueueSubmit, Flip done, or present marker was logged.
+
+RELATED CODE/COMMIT: src/graphics/host_gpu/renderer/pipeline/shaders.cpp CreatePipelineInternal(compute); src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp; runtime trace instrumentation already present at the Vulkan pipeline boundary.
+
 ## Confirmed blocker history and commits
+
+The later semantic and documentation checkpoints are also durable:
+
+- 1161113 — generic structured-loop dispatcher fallback and native-value-only SRT spill handling; BDA/R1 untouched.
+- 2ae7feb — documentation/runtime checkpoint recording the first valid-SPIR-V pipeline stall.
 
 | Checkpoint | Durable result |
 |---|---|
