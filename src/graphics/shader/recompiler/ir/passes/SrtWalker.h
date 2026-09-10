@@ -7,6 +7,7 @@
 #include <optional>
 #include <span>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace Libs::Graphics::ShaderRecompiler::IR {
 
@@ -69,7 +70,8 @@ void BuildSrtPlan(Program& program);
 // has rewritten indirect resource users. Only slots below slot_count are
 // considered; callers use this to exclude SRT slots introduced by later bounded
 // planning passes.
-void RefreshShaderSideSrtEligibility(Program& program, uint32_t slot_count);
+void RefreshShaderSideSrtEligibility(Program& program, uint32_t slot_count,
+                                     const std::unordered_set<Inst*>& bda_srt_clones);
 bool ValidateRuntimeValue(const ResourcePlan& program, Value value,
                           RuntimeValueType type = RuntimeValueType::Any);
 bool EvaluateUniformValues(const ResourcePlan& program, std::span<const Value> values,

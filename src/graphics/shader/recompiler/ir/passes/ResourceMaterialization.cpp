@@ -2623,6 +2623,7 @@ ResourcePlan ExtractResourcePlan(const Program& program) {
 	for (const auto* block: program.blocks) {
 		for (const auto& inst: *block) {
 			if (inst.GetOpcode() != ValueOpcode::ReadConst || inst.NumArgs() != 2u) continue;
+			if ((inst.Flags<uint64_t>() & ShaderSideSrtReadFlag) != 0u) continue;
 			const bool semantic_use = std::ranges::any_of(inst.Uses(), [](const Use& use) {
 				return use.user != nullptr && use.user->GetOpcode() != ValueOpcode::Reference &&
 				       use.user->GetOpcode() != ValueOpcode::ReferenceU32;
@@ -2635,7 +2636,7 @@ ResourcePlan ExtractResourcePlan(const Program& program) {
 		for (const auto value: {info.condition, info.indirect_target}) {
 			const auto* inst = value.Resolve().TryInstruction();
 			if (inst != nullptr && inst->GetOpcode() == ValueOpcode::ReadConst &&
-			    inst->NumArgs() == 2u) {
+			    inst->NumArgs() == 2u && (inst->Flags<uint64_t>() & ShaderSideSrtReadFlag) == 0u) {
 				mark_live_flat_slot(inst->Arg(1));
 			}
 		}
@@ -2653,7 +2654,9 @@ ResourcePlan ExtractResourcePlan(const Program& program) {
 			const auto* inst = value.TryInstruction();
 			if (inst == nullptr || !visited.insert(inst).second) continue;
 			if (inst->GetOpcode() == ValueOpcode::ReadConst && inst->NumArgs() == 2u) {
-				mark_live_flat_slot(inst->Arg(1));
+				if ((inst->Flags<uint64_t>() & ShaderSideSrtReadFlag) == 0u) {
+					mark_live_flat_slot(inst->Arg(1));
+				}
 				continue;
 			}
 			for (size_t arg = 0; arg < inst->NumArgs(); ++arg)

@@ -208,7 +208,7 @@ public:
 				                   return std::ranges::find(plan.reads, inst) != plan.reads.end();
 			                   });
 		});
-		RefreshShaderSideSrtEligibility(m_program, shader_side_slot_count);
+		RefreshShaderSideSrtEligibility(m_program, shader_side_slot_count, m_bda_srt_clones);
 		m_program.descriptor_sources         = std::move(m_sources);
 		m_program.info                       = std::move(m_info);
 		m_program.resource_tracking_complete = true;
@@ -2225,6 +2225,11 @@ private:
 		return !handle.Uses().empty();
 	}
 
+	struct BdaCloneResult {
+		Value value;
+		bool  changed;
+	};
+
 	// Clone only the arithmetic envelope of a descriptor dword.  ReadConst nodes
 	// that name raw address reads are replaced by a shader-side ReadConst clone;
 	// all other values remain shared.  This keeps a slot that is also consumed by
@@ -2232,9 +2237,9 @@ private:
 	// BDA handle a per-use expression.  PHIs and memory operations are not cloned
 	// here; a descriptor containing either needs a separate structured lowering.
 	std::optional<Value> CloneBdaExpression(Value value, Block& block, Block::iterator where,
-	                                        std::unordered_map<const Inst*, Value>& cache,
-	                                        std::unordered_set<const Inst*>&        visiting,
-	                                        bool&                                   changed) {
+	                                        std::unordered_map<const Inst*, BdaCloneResult>& cache,
+	                                        std::unordered_set<const Inst*>& visiting,
+	                                        bool&                            changed) {
 		value = value.Resolve();
 		if (value.IsImmediate()) return value;
 		const auto* inst = value.TryInstruction();
@@ -2250,12 +2255,16 @@ private:
 				    block.PrependNewInst(where, ValueOpcode::ReadConst,
 				                         {inst->Arg(0), inst->Arg(1)}, ShaderSideSrtReadFlag);
 				const auto result = Value(&*clone);
-				cache.emplace(inst, result);
+				m_bda_srt_clones.insert(&*clone);
+				cache.emplace(inst, BdaCloneResult {result, true});
 				return result;
 			}
 			return value;
 		}
-		if (const auto it = cache.find(inst); it != cache.end()) return it->second;
+		if (const auto it = cache.find(inst); it != cache.end()) {
+			changed = changed || it->second.changed;
+			return it->second.value;
+		}
 		if (!visiting.insert(inst).second) return std::nullopt;
 		std::vector<Value> args;
 		args.reserve(inst->NumArgs());
@@ -2273,7 +2282,7 @@ private:
 		}
 		visiting.erase(inst);
 		if (!local_changed) {
-			cache.emplace(inst, value);
+			cache.emplace(inst, BdaCloneResult {value, false});
 			return value;
 		}
 		// A PHI carries predecessor metadata that cannot be reconstructed from a
@@ -2334,7 +2343,7 @@ private:
 			default: return std::nullopt;
 		}
 		const auto result = Value(clone);
-		cache.emplace(inst, result);
+		cache.emplace(inst, BdaCloneResult {result, true});
 		changed = true;
 		return result;
 	}
@@ -2413,9 +2422,9 @@ private:
 			auto where = std::ranges::find_if(handle->Parent()->Instructions(),
 			                                  [&](const Inst& inst) { return &inst == handle; });
 			if (where == handle->Parent()->Instructions().end()) return false;
-			std::unordered_map<const Inst*, Value> cache;
-			std::unordered_set<const Inst*>        visiting;
-			bool                                   any_raw_word = false;
+			std::unordered_map<const Inst*, BdaCloneResult> cache;
+			std::unordered_set<const Inst*>                 visiting;
+			bool                                            any_raw_word = false;
 			for (uint32_t word = 0; word < 3u; ++word) {
 				bool       changed = false;
 				const auto clone   = CloneBdaExpression(handle->Arg(word), *handle->Parent(), where,
@@ -2642,6 +2651,7 @@ private:
 	std::vector<IndirectImagePlan>            m_indirect_images;
 	std::vector<std::pair<Inst*, uint32_t>>   m_indirect_buffers;
 	std::unordered_set<Inst*>                 m_shader_bda_handles;
+	std::unordered_set<Inst*>                 m_bda_srt_clones;
 	uint32_t                                  m_trace_buffer_handles = 0;
 	std::array<uint32_t, 3>                   m_local_size;
 	uint32_t                                  m_shared_bytes;

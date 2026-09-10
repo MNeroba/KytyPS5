@@ -15,6 +15,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace {
@@ -1631,6 +1632,243 @@ void TestShaderSideEligibilityRejectsTransitiveReadConstBufferResource() {
         "ReadConstBuffer result feeding a resource descriptor was retained shader-side");
 }
 
+void TestShaderBdaCloneCachePreservesSharedSubtreeProvenance() {
+  Fixture fixture;
+  const auto local_index = fixture.Emit(
+      ValueOpcode::GetBuiltin,
+      {Value(static_cast<uint32_t>(StageInputKind::LocalInvocationIndex)), Value(0u)});
+  const auto table = fixture.Address(local_index, fixture.UserData(1), 0x3270);
+  MemoryInfo scalar;
+  scalar.kind = ResourceKind::ScalarAddress;
+  const auto raw_low = fixture.Emit(
+      ValueOpcode::LoadAddressU32,
+      {table, Value(0u), Value(0u), Value(true)},
+      fixture.AddMemory(scalar, 0x3270));
+  const auto raw_high = fixture.Emit(
+      ValueOpcode::LoadAddressU32,
+      {table, Value(4u), Value(0u), Value(true)},
+      fixture.AddMemory(scalar, 0x3270));
+  const auto raw_records = fixture.Emit(
+      ValueOpcode::LoadAddressU32,
+      {table, Value(8u), Value(0u), Value(true)},
+      fixture.AddMemory(scalar, 0x3270));
+
+  // Both descriptor words share this arithmetic subtree.  The first dword is
+  // visited before the second, so the second reaches it through CloneBdaExpression's
+  // cache hit rather than by recursively cloning it again.
+  const auto high_masked = fixture.Emit(ValueOpcode::BitwiseAnd32,
+                                        {raw_high, Value(0xffffu)});
+  const auto packed = fixture.Emit(ValueOpcode::CompositeConstructU64,
+                                   {raw_low, high_masked});
+  const auto shifted = fixture.Emit(ValueOpcode::ShiftLeftLogical64,
+                                    {packed, Value(32u)});
+  const auto shared = fixture.Emit(ValueOpcode::CompositeExtractU64,
+                                   {shifted, Value(0u)});
+  const auto dword1 = fixture.Emit(ValueOpcode::BitwiseOr32, {shared, Value(0u)});
+  const auto descriptor = fixture.Buffer({shared, dword1, raw_records, Value(0u)}, 0x3274);
+
+  MemoryInfo scalar_buffer;
+  scalar_buffer.kind = ResourceKind::ScalarBuffer;
+  const auto read = fixture.Emit(ValueOpcode::ReadConstBuffer,
+                                 {descriptor, Value(0u)},
+                                 fixture.AddMemory(scalar_buffer, 0x3274));
+  fixture.Emit(ValueOpcode::ReferenceU32, {read});
+  fixture.PlanAndTrack();
+
+  const auto HasReadConst = [](Value value) {
+    std::unordered_set<const Inst*> visited;
+    const auto walk = [&](auto&& self, Value current) -> bool {
+      current = current.Resolve();
+      const auto* inst = current.TryInstruction();
+      if (inst == nullptr || !visited.insert(inst).second) return false;
+      if (inst->GetOpcode() == ValueOpcode::ReadConst) return true;
+      for (uint32_t index = 0; index < inst->NumArgs(); ++index) {
+        if (self(self, inst->Arg(index))) return true;
+      }
+      return false;
+    };
+    return walk(walk, value);
+  };
+
+  const auto* handle = descriptor.Instruction();
+  Check(handle != nullptr && handle->GetOpcode() == ValueOpcode::GetBufferResource,
+        "shared-subtree BDA regression lost its buffer handle");
+  const auto Contains = [](Value value, const Inst* target) {
+    std::unordered_set<const Inst*> visited;
+    const auto walk = [&](auto&& self, Value current) -> bool {
+      current = current.Resolve();
+      const auto* inst = current.TryInstruction();
+      if (inst == nullptr || !visited.insert(inst).second) return false;
+      if (inst == target) return true;
+      for (uint32_t index = 0; index < inst->NumArgs(); ++index) {
+        if (self(self, inst->Arg(index))) return true;
+      }
+      return false;
+    };
+    return walk(walk, value);
+  };
+  const auto HasNewArithmeticClone = [](Value value, const Inst* original) {
+    const auto* inst = value.Resolve().TryInstruction();
+    return inst != nullptr && inst != original &&
+           (inst->GetOpcode() == ValueOpcode::CompositeExtractU64 ||
+            inst->GetOpcode() == ValueOpcode::IAdd32 ||
+            inst->GetOpcode() == ValueOpcode::BitwiseOr32);
+  };
+  Check(HasNewArithmeticClone(handle->Arg(0), shared.Instruction()),
+        "first descriptor dword did not receive an arithmetic clone");
+  Check(HasNewArithmeticClone(handle->Arg(1), dword1.Instruction()) &&
+            !Contains(handle->Arg(1), shared.Instruction()),
+        "cached shared descriptor dword did not receive a complete arithmetic clone");
+  Check(HasReadConst(handle->Arg(0)) && HasReadConst(handle->Arg(1)),
+        "cloned descriptor dwords lost their scalar SRT dependencies");
+
+  uint32_t bda_loads = 0;
+  for (auto* block: fixture.program.blocks) {
+    for (const auto& inst: *block) {
+      if (inst.GetOpcode() != ValueOpcode::LoadAddressU32 || inst.NumArgs() != 4u) continue;
+      const auto flags = inst.Flags<MemoryFlags>();
+      if (flags.index >= fixture.program.memory_info.size()) continue;
+      if (fixture.program.memory_info[flags.index].kind == ResourceKind::ScalarAddress &&
+          HasReadConst(inst.Arg(0))) {
+        ++bda_loads;
+      }
+    }
+  }
+  Check(bda_loads != 0,
+        "shared scalar-buffer read was not lowered through the shader-side BDA path");
+
+  const auto FindSlot = [&](Value root) {
+    for (uint32_t slot = 0; slot < fixture.program.srt_reads.size(); ++slot) {
+      if (fixture.program.srt_reads[slot].value.ResolveInstruction() ==
+          root.ResolveInstruction()) {
+        return slot;
+      }
+    }
+    return UINT32_MAX;
+  };
+  const auto slot_low     = FindSlot(raw_low);
+  const auto slot_high    = FindSlot(raw_high);
+  const auto slot_records = FindSlot(raw_records);
+  Check(slot_low != UINT32_MAX && slot_high != UINT32_MAX && slot_records != UINT32_MAX,
+        "BDA-only regression lost one of its raw SRT slots");
+
+  const auto HasSemanticUse = [](const Inst& inst) {
+    return std::ranges::any_of(inst.Uses(), [](const Use& use) {
+      return use.user != nullptr && use.user->GetOpcode() != ValueOpcode::Reference &&
+             use.user->GetOpcode() != ValueOpcode::ReferenceU32;
+    });
+  };
+  const auto CheckBdaOnlySlot = [&](uint32_t slot) {
+    bool flagged_semantic = false;
+    bool ordinary_semantic = false;
+    for (auto* block: fixture.program.blocks) {
+      for (const auto& inst: *block) {
+        if (inst.GetOpcode() != ValueOpcode::ReadConst || inst.NumArgs() != 2u ||
+            inst.Arg(1).Resolve() != Value(slot) || !HasSemanticUse(inst)) {
+          continue;
+        }
+        const bool flagged = (inst.Flags<uint64_t>() & ShaderSideSrtReadFlag) != 0u;
+        flagged_semantic |= flagged;
+        ordinary_semantic |= !flagged;
+      }
+    }
+    Check(flagged_semantic, "BDA-only consumer lost its per-use shader-side flag");
+    Check(!ordinary_semantic, "BDA-only consumer retained an ordinary semantic wrapper");
+  };
+  CheckBdaOnlySlot(slot_low);
+  CheckBdaOnlySlot(slot_high);
+  CheckBdaOnlySlot(slot_records);
+  const auto plan = ExtractResourcePlan(fixture.program);
+  for (const auto slot: {slot_low, slot_high, slot_records}) {
+    Check(slot < plan.srt_reads.size() && plan.srt_reads[slot].shader_side,
+          "BDA-only slot did not remain globally shader-side after refresh");
+    Check(slot < plan.live_flat_slots.size() && plan.live_flat_slots[slot] == 0u,
+          "BDA-only slot remained live in the host flattened SRT");
+  }
+}
+
+void TestShaderBdaCloneRefreshMixedUse() {
+  Fixture fixture;
+  const auto local_index = fixture.Emit(
+      ValueOpcode::GetBuiltin,
+      {Value(static_cast<uint32_t>(StageInputKind::LocalInvocationIndex)), Value(0u)});
+  const auto table = fixture.Address(local_index, fixture.UserData(1), 0x3280);
+  MemoryInfo scalar;
+  scalar.kind = ResourceKind::ScalarAddress;
+  const auto raw = fixture.Emit(
+      ValueOpcode::LoadAddressU32,
+      {table, Value(0u), Value(0u), Value(true)},
+      fixture.AddMemory(scalar, 0x3280));
+
+  const auto bda_descriptor = fixture.Buffer(
+      {raw, Value(0u), Value(16u), Value(0u)}, 0x3284);
+  MemoryInfo scalar_buffer;
+  scalar_buffer.kind = ResourceKind::ScalarBuffer;
+  const auto bda_read = fixture.Emit(
+      ValueOpcode::ReadConstBuffer,
+      {bda_descriptor, Value(0u)},
+      fixture.AddMemory(scalar_buffer, 0x3284));
+  fixture.Emit(ValueOpcode::ReferenceU32, {bda_read});
+
+  const auto ordinary_descriptor = fixture.Buffer(
+      {raw, Value(0u), Value(16u), Value(0u)}, 0x3288);
+  MemoryInfo ordinary_memory;
+  ordinary_memory.kind = ResourceKind::Buffer;
+  const auto ordinary_read = fixture.Emit(
+      ValueOpcode::LoadBufferU32,
+      {ordinary_descriptor, Value(0u), Value(0u), Value(0u), Value(true)},
+      fixture.AddMemory(ordinary_memory, 0x3288));
+  fixture.Emit(ValueOpcode::ReferenceU32, {ordinary_read});
+  fixture.PlanAndTrack();
+
+  uint32_t slot = UINT32_MAX;
+  for (uint32_t index = 0; index < fixture.program.srt_reads.size(); ++index) {
+    if (fixture.program.srt_reads[index].value.ResolveInstruction() == raw.Instruction()) {
+      slot = index;
+      break;
+    }
+  }
+  Check(slot != UINT32_MAX, "mixed-use regression lost its shared raw SRT slot");
+
+  bool flagged_semantic = false;
+  bool ordinary_semantic = false;
+  for (auto* block: fixture.program.blocks) {
+    for (const auto& inst: *block) {
+      if (inst.GetOpcode() != ValueOpcode::ReadConst || inst.NumArgs() != 2u ||
+          inst.Arg(1).Resolve() != Value(slot)) {
+        continue;
+      }
+      const bool semantic = std::ranges::any_of(inst.Uses(), [](const Use& use) {
+        return use.user != nullptr && use.user->GetOpcode() != ValueOpcode::Reference &&
+               use.user->GetOpcode() != ValueOpcode::ReferenceU32;
+      });
+      if (!semantic) continue;
+      const bool flagged = (inst.Flags<uint64_t>() & ShaderSideSrtReadFlag) != 0u;
+      flagged_semantic |= flagged;
+      ordinary_semantic |= !flagged;
+    }
+  }
+  Check(flagged_semantic, "mixed-use BDA clone did not retain its shader-side flag");
+  Check(ordinary_semantic, "mixed-use ordinary consumer lost its host-side wrapper");
+
+  const auto plan = ExtractResourcePlan(fixture.program);
+  Check(slot < plan.srt_reads.size() && !plan.srt_reads[slot].shader_side,
+        "mixed-use slot was incorrectly made globally shader-side");
+  Check(slot < plan.live_flat_slots.size() && plan.live_flat_slots[slot] != 0u,
+        "mixed-use ordinary consumer did not keep the host slot live");
+
+  bool bda_load = false;
+  for (auto* block: fixture.program.blocks) {
+    for (const auto& inst: *block) {
+      if (inst.GetOpcode() != ValueOpcode::LoadAddressU32 || inst.NumArgs() != 4u) continue;
+      const auto flags = inst.Flags<MemoryFlags>();
+      if (flags.index >= fixture.program.memory_info.size() || flags.pc != 0x3284u) continue;
+      bda_load |= fixture.program.memory_info[flags.index].kind == ResourceKind::ScalarAddress;
+    }
+  }
+  Check(bda_load, "mixed-use scalar-buffer consumer was not lowered through BDA");
+}
+
 void TestPhiValidation() {
   Fixture fixture;
   auto *left = fixture.block;
@@ -2324,6 +2562,9 @@ int main() {
     Run("allow ReadConstBuffer offset SRT", TestShaderSideEligibilityAllowsReadConstBufferOffset);
     Run("reject transitive ReadConstBuffer resource SRT",
         TestShaderSideEligibilityRejectsTransitiveReadConstBufferResource);
+    Run("preserve shared BDA clone provenance",
+        TestShaderBdaCloneCachePreservesSharedSubtreeProvenance);
+    Run("preserve BDA clone through refresh", TestShaderBdaCloneRefreshMixedUse);
     Run("dead planning SRT slot", TestDeadPlanningSrtSlotDoesNotFlatten);
     Run("dynamic storage mips", TestDynamicStorageMipTracking);
     Run("invariant indirect images", TestInvariantIndirectImageMaterialization);

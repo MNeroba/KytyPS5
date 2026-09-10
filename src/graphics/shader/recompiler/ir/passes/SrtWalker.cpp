@@ -1979,7 +1979,8 @@ void BuildSrtPlan(Program& program) {
 	program.srt_plan_complete = true;
 }
 
-void RefreshShaderSideSrtEligibility(Program& program, uint32_t slot_count) {
+void RefreshShaderSideSrtEligibility(Program& program, uint32_t slot_count,
+                                     const std::unordered_set<Inst*>& bda_srt_clones) {
 	const auto                      limit = std::min<size_t>(slot_count, program.srt_reads.size());
 	std::vector<std::vector<Inst*>> wrappers(limit);
 	std::vector<uint8_t>            eligible(limit, 1u);
@@ -1987,6 +1988,7 @@ void RefreshShaderSideSrtEligibility(Program& program, uint32_t slot_count) {
 	for (auto* block: program.blocks) {
 		for (auto& inst: *block) {
 			if (inst.GetOpcode() != ValueOpcode::ReadConst || inst.NumArgs() != 2u) continue;
+			if (bda_srt_clones.contains(&inst)) continue;
 			const auto slot = inst.Arg(1).Resolve();
 			if (!slot.IsImmediate() || slot.GetType() != Type::U32 || slot.U32() >= limit) continue;
 			const auto index = slot.U32();
