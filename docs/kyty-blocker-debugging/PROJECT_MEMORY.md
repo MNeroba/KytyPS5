@@ -106,22 +106,22 @@ EVIDENCE: `src/graphics/guest_gpu/graphicsRun.cpp`; clean run `ASTRO_CLEAN_20260
 
 RELATED CODE/COMMIT: `REFERENCE.md § Build and runtime boundary`; no source commit required.
 
-### Pipeline runtime boundary — STRONG EVIDENCE
+### Complete M2 command-path trace — PROVEN
 
-FACT: On exact HEAD 2ae7feb, a printf-to-file trace emitted module 0022 (hash 0x530dcd964f29983c, shader address 0x000000050069ec00), then entered vkCreateComputePipelines and produced no completion line for more than 20 seconds. The same run had 18 successful compute and 2 successful graphics pipeline creates before this call.
+FACT: The complete latest trace contains 18 vkCreateComputePipelines begin lines with 18 matching done result=Success lines. Graphics pipeline creation also succeeds. The run reaches BeginRendering, DrawComplete, QueuePoint DispatchDirect through submit=7, EndOfPipe signals/events, and guest flip/video-output work.
 
-WHY IT MATTERS: The active target blocker is now a valid-SPIR-V Vulkan pipeline/runtime stall. It is earlier than any proven GPU submission or presentation signal; do not debug SRT/materialization or scheduler waits until this create returns or an isolated test disproves it as the bottleneck.
+WHY IT MATTERS: Pipeline creation is not a proven persistent blocker. The active P0 is the first stable boundary after this command path, with command submission/timeline completion, GPU execution/wait, and host presentation still to be separated.
 
-EVIDENCE: G:/KytyPS5/logs/ASTRO_M2_TRACE_20260910_232151/runtime.log; module G:/KytyPS5/logs/ASTRO_M2_TRACE_20260910_232151/shaders/0022_new_shader_cs_530dcd964f29983c.spv passed spirv-val --target-env vulkan1.3 and a numeric scan (55,709 definitions, 55,709 references, missing 0). The process was stopped after the bounded no-growth interval. No vkQueueSubmit, Flip done, or present marker was logged.
+EVIDENCE: G:/KytyPS5/logs/ASTRO_M2_TRACE_20260910_232151/runtime.log. The final shader context is address 0x000000050069ec00, hash 0x530dcd964f29983c, SPIR-V EmitProgram words=289489, and a 1,157,956-byte module 0022 that passes spirv-val --target-env vulkan1.3 and a numeric scan (55,709 definitions, 55,709 references, missing 0). The log ends during descriptor/runtime dumping for that dispatch; no host Present result or visible frame is proven.
 
-RELATED CODE/COMMIT: src/graphics/host_gpu/renderer/pipeline/shaders.cpp CreatePipelineInternal(compute); src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp; runtime trace instrumentation already present at the Vulkan pipeline boundary.
+RELATED CODE/COMMIT: src/graphics/host_gpu/renderer/pipeline/shaders.cpp CreatePipelineInternal(compute); src/graphics/guest_gpu/graphicsRun.cpp QueuePoint/dispatch path; semantic commit 1161113.
 
 ## Confirmed blocker history and commits
 
 The later semantic and documentation checkpoints are also durable:
 
 - 1161113 — generic structured-loop dispatcher fallback and native-value-only SRT spill handling; BDA/R1 untouched.
-- 2ae7feb — documentation/runtime checkpoint recording the first valid-SPIR-V pipeline stall.
+- 2ae7feb — documentation/runtime checkpoint for valid SPIR-V and the M2 command-path trace.
 
 | Checkpoint | Durable result |
 |---|---|
