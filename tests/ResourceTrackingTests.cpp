@@ -7,6 +7,7 @@
 #include "graphics/shader/recompiler/ir/passes/ShaderInfoCollection.h"
 #include "graphics/shader/recompiler/ir/passes/SrtWalker.h"
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <cstring>
@@ -1869,6 +1870,56 @@ void TestShaderBdaCloneRefreshMixedUse() {
   Check(bda_load, "mixed-use scalar-buffer consumer was not lowered through BDA");
 }
 
+void TestBoundedDescriptorSourceSurvivesDeadCodeElimination() {
+  Fixture fixture;
+  const auto descriptor = fixture.Buffer({fixture.UserData(0), fixture.UserData(1),
+                                          fixture.UserData(2), fixture.UserData(3)},
+                                         0x3400);
+  const auto workgroup = fixture.Emit(
+      ValueOpcode::GetBuiltin,
+      {Value(static_cast<uint32_t>(StageInputKind::WorkgroupId)), Value(0u)});
+  MemoryInfo scalar_buffer;
+  scalar_buffer.kind = ResourceKind::ScalarBuffer;
+  const auto read = fixture.Emit(
+      ValueOpcode::ReadConstBuffer, {descriptor, workgroup},
+      fixture.AddMemory(scalar_buffer, 0x3404));
+  fixture.Emit(ValueOpcode::ReferenceU32, {read});
+  fixture.PlanAndTrack();
+
+  Check(fixture.program.bounded_srt_reads.size() == 1u,
+        "workgroup-indexed scalar read was not planned as bounded");
+  const auto source_index = fixture.program.bounded_srt_reads.front().address_source;
+  Check(source_index < fixture.program.descriptor_sources.size(),
+        "bounded scalar read has an invalid descriptor source");
+
+  EliminateDeadCode(fixture.program.blocks);
+  const auto plan = ExtractResourcePlan(fixture.program);
+  const auto &source = plan.descriptor_sources[source_index];
+  Check(source.dword_count == 4u &&
+            std::all_of(source.dwords.begin(), source.dwords.begin() + source.dword_count,
+                        [](Value value) { return value.Resolve().GetType() == Type::U32; }),
+        "bounded descriptor source was invalidated before resource-plan extraction");
+
+  TestMemory memory;
+  memory.base = 0x1000u;
+  memory.words[0] = 0x12345678u;
+  const std::array<uint32_t, 4> user_data{0x1000u, 4u << 16, 1u, 0u};
+  SrtRuntime runtime{.user_data = user_data,
+                     .userdata = &memory,
+                     .read_specialization_memory = ReadTestMemory};
+  runtime.workgroup_count = {1u, 1u, 1u};
+  ResourceSnapshot       snapshot;
+  ResourceSpecialization specialization;
+  Check(MaterializeResources(plan, runtime, snapshot, specialization),
+        "bounded descriptor source failed after dead-code elimination");
+  Check(specialization.bounded_srt_reads.size() == 1u,
+        "bounded scalar read did not produce a specialization layout");
+  const auto flat_offset = specialization.bounded_srt_reads.front().flat_offset;
+  Check(flat_offset < snapshot.flattened_srt.size() &&
+            snapshot.flattened_srt[flat_offset] == memory.words.front(),
+        "bounded scalar read did not materialize its candidate word");
+}
+
 void TestPhiValidation() {
   Fixture fixture;
   auto *left = fixture.block;
@@ -2565,6 +2616,8 @@ int main() {
     Run("preserve shared BDA clone provenance",
         TestShaderBdaCloneCachePreservesSharedSubtreeProvenance);
     Run("preserve BDA clone through refresh", TestShaderBdaCloneRefreshMixedUse);
+    Run("bounded descriptor source lifetime",
+        TestBoundedDescriptorSourceSurvivesDeadCodeElimination);
     Run("dead planning SRT slot", TestDeadPlanningSrtSlotDoesNotFlatten);
     Run("dynamic storage mips", TestDynamicStorageMipTracking);
     Run("invariant indirect images", TestInvariantIndirectImageMaterialization);

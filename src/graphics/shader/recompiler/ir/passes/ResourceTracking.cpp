@@ -208,6 +208,7 @@ public:
 				                   return std::ranges::find(plan.reads, inst) != plan.reads.end();
 			                   });
 		});
+		RetainBoundedDescriptorSources();
 		RefreshShaderSideSrtEligibility(m_program, shader_side_slot_count, m_bda_srt_clones);
 		m_program.descriptor_sources         = std::move(m_sources);
 		m_program.info                       = std::move(m_info);
@@ -844,6 +845,33 @@ private:
 			const auto* inst = value.Resolve().TryInstruction();
 			return inst != nullptr && inst->GetOpcode() == ValueOpcode::ReadBoundedSrtU32;
 		});
+	}
+
+	void RetainBoundedDescriptorSources() {
+		// Bounded reads are lowered to a runtime selector before the resource plan
+		// is extracted.  Their descriptor expressions live only in m_sources, so
+		// ordinary IR use tracking cannot keep those expressions alive through the
+		// post-translation dead-code pass.  Retain the source roots explicitly;
+		// ReferenceU32 is the existing side-effecting lifetime marker used for
+		// planning-only values and is ignored as a semantic resource use.
+		std::unordered_set<uint32_t> source_indices;
+		for (const auto& read: m_bounded_srt_reads) {
+			source_indices.insert(read.address_source);
+			if (read.count_source != UINT32_MAX) source_indices.insert(read.count_source);
+		}
+		std::unordered_set<Inst*> retained;
+		for (const auto source_index: source_indices) {
+			if (source_index >= m_sources.size()) continue;
+			const auto& source = m_sources[source_index];
+			for (uint32_t dword = 0; dword < source.dword_count; ++dword) {
+				const auto value = source.dwords[dword].Resolve();
+				if (value.GetType() != Type::U32 || value.IsImmediate()) continue;
+				auto* inst = value.TryInstruction();
+				if (inst == nullptr || inst->Parent() == nullptr || !retained.insert(inst).second)
+					continue;
+				inst->Parent()->AppendNewInst(ValueOpcode::ReferenceU32, {value});
+			}
+		}
 	}
 
 	uint32_t InternSource(const DescriptorSource& descriptor) {
