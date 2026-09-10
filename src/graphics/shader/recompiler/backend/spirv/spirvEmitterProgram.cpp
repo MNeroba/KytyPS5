@@ -41,6 +41,56 @@ uint32_t SpillPointerType(ValueEmitContext& ctx, IR::Type type) {
 	return value_type == 0 ? 0 : TypePointer(ctx.state, StorageClassFunction, value_type);
 }
 
+bool IsDispatcherMetadataType(IR::Type type) {
+	switch (type) {
+		case IR::Type::SrtResource:
+		case IR::Type::BufferResource:
+		case IR::Type::AddressResource:
+		case IR::Type::ImageResource:
+		case IR::Type::SamplerResource:
+		case IR::Type::ImageAddress: return true;
+		default: return false;
+	}
+}
+
+const IR::Inst* ShaderSideSrtSource(const IR::Program& program, const IR::Inst& read) {
+	if (read.GetOpcode() != IR::ValueOpcode::ReadConst ||
+	    (read.Flags<uint64_t>() & IR::ShaderSideSrtReadFlag) == 0 || read.NumArgs() != 2u) {
+		return nullptr;
+	}
+	const auto slot = read.Arg(1).Resolve();
+	if (!slot.IsImmediate() || slot.GetType() != IR::Type::U32 ||
+	    slot.U32() >= program.srt_reads.size()) {
+		return nullptr;
+	}
+	return program.srt_reads[slot.U32()].value.Resolve().TryInstruction();
+}
+
+bool IsShaderSideSrtRoot(const IR::Program& program, const IR::Inst& root) {
+	for (const auto* block: program.blocks) {
+		for (const auto& inst: *block) {
+			const auto* source = ShaderSideSrtSource(program, inst);
+			if (source == &root) return true;
+		}
+	}
+	return false;
+}
+
+bool IsDispatcherNonValue(const IR::Program& program, const IR::Inst& inst) {
+	if (IsDispatcherMetadataType(inst.GetType())) return true;
+	if (inst.GetOpcode() == IR::ValueOpcode::ReadConst &&
+	    ShaderSideSrtSource(program, inst) != nullptr) {
+		return true;
+	}
+	const auto op = inst.GetOpcode();
+	if (op != IR::ValueOpcode::LoadAddressU32 && op != IR::ValueOpcode::ReadConstBuffer) {
+		return false;
+	}
+	const auto memory_index = inst.Flags<IR::MemoryFlags>().index;
+	return memory_index < program.memory_info.size() &&
+	       program.memory_info[memory_index].planning_only && !IsShaderSideSrtRoot(program, inst);
+}
+
 struct DeferredPhiPatch {
 	DeferredPhi     phi;
 	const IR::Inst* instruction = nullptr;
@@ -72,8 +122,9 @@ void StoreDispatcherPhiEdge(ValueEmitContext& ctx, const DispatcherFunctionState
 		}
 		for (size_t index = 0; index < phi.NumArgs(); index++) {
 			if (phi.PhiBlock(index) == from) {
+				const auto value_id = ctx.Def(phi.Arg(index));
 				ctx.state.builder.AddFunction(
-				    {OpStore, dispatcher.spills[ctx.half].at(&phi), ctx.Def(phi.Arg(index))});
+				    {OpStore, dispatcher.spills[ctx.half].at(&phi), value_id});
 				break;
 			}
 		}
@@ -420,6 +471,11 @@ uint32_t ValueEmitContext::Def(IR::Value value) {
 	if (inst == nullptr) {
 		Fail("direct SPIR-V emitter received a non-value argument");
 	}
+	if (const auto* source = ShaderSideSrtSource(state.program, *inst); source != nullptr) {
+		// Shader-side ReadConst is an alias for its retained address read. Keep dispatcher
+		// lookups on the native producer so the alias does not create a use-before-definition.
+		return Def(IR::Value(const_cast<IR::Inst*>(source)));
+	}
 	if (dispatcher_spills != nullptr && state.current_block != nullptr &&
 	    inst->Parent() != state.current_block) {
 		if (const auto found = dispatcher_spills->find(inst); found != dispatcher_spills->end()) {
@@ -627,10 +683,17 @@ void EmitProgram(EmitterState& state) {
 		const auto mark_cross_block = [&](IR::Value value, const IR::Block* consumer) {
 			value                  = value.Resolve();
 			const auto* definition = value.TryInstruction();
+			if (definition != nullptr) {
+				if (const auto* source = ShaderSideSrtSource(state.program, *definition);
+				    source != nullptr) {
+					definition = source;
+				}
+			}
 			if (definition == nullptr || definition->Parent() == consumer ||
 			    definition->Parent() == program.blocks.front()) {
 				return;
 			}
+			if (IsDispatcherNonValue(state.program, *definition)) return;
 			if (SpillPointerType(ctx, definition->GetType()) == 0) {
 				ctx.Fail(*definition, "cannot be stored by the dispatcher");
 				return;

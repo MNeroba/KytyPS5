@@ -71,6 +71,54 @@ void LogDispatcherFallback(const CompileOptions& options, const CFG::Graph& cfg,
 	     static_cast<uint64_t>(cfg.back_edges.size()), reason.c_str());
 }
 
+// A conditional that leaves a loop through an arbitrary block cannot be emitted as a
+// loop-control branch. SPIR-V requires such a branch to carry an OpSelectionMerge, while
+// the loop merge/continue targets are the only legal non-selection exits. The CFG pass keeps
+// these branches unmerged for its loop-control classification; reject the unsafe shape here
+// so the existing dispatcher preserves the guest control flow instead of emitting invalid SPIR-V.
+bool ValidateStructuredLoopControl(const CFG::Graph& graph, uint32_t& failure_block,
+                                   uint32_t& failure_target, uint32_t& loop_header) {
+	const auto contains = [](const std::vector<uint32_t>& values, uint32_t value) {
+		return std::ranges::find(values, value) != values.end();
+	};
+	for (const auto& block: graph.blocks) {
+		const auto& term = block.terminator;
+		if (term.kind != CFG::TerminatorKind::ConditionalBranch || term.merge_block != UINT32_MAX) {
+			continue;
+		}
+
+		const CFG::NaturalLoop* innermost = nullptr;
+		for (const auto& loop: graph.natural_loops) {
+			if (!contains(loop.body_blocks, block.id) ||
+			    (innermost != nullptr &&
+			     loop.body_blocks.size() >= innermost->body_blocks.size())) {
+				continue;
+			}
+			innermost = &loop;
+		}
+		if (innermost == nullptr) {
+			continue;
+		}
+
+		const bool true_in_body  = contains(innermost->body_blocks, term.true_block);
+		const bool false_in_body = contains(innermost->body_blocks, term.false_block);
+		if (true_in_body == false_in_body) {
+			continue;
+		}
+
+		const auto outside_target = true_in_body ? term.false_block : term.true_block;
+		if (outside_target == innermost->merge || outside_target == innermost->continue_block) {
+			continue;
+		}
+
+		failure_block  = block.id;
+		failure_target = outside_target;
+		loop_header    = innermost->header;
+		return false;
+	}
+	return true;
+}
+
 enum class EmbeddedFetchValueType { Unknown, Constant, AttribTable, Attrib, BufferTable, Buffer };
 
 struct EmbeddedFetchSgprInfo {
@@ -574,8 +622,24 @@ TranslateResult TranslateProgram(std::span<const uint32_t> code, const CompileOp
 			cfg.failure_block      = failure_block;
 			cfg.unsupported_reason = dispatcher_reason;
 		} else {
-			LOGF("%s structured CFG success: blocks=%" PRIu64 "\n", GetDumpLabel(options),
-			     static_cast<uint64_t>(cfg.blocks.size()));
+			uint32_t failure_block  = UINT32_MAX;
+			uint32_t failure_target = UINT32_MAX;
+			uint32_t loop_header    = UINT32_MAX;
+			if (!ValidateStructuredLoopControl(cfg, failure_block, failure_target, loop_header)) {
+				dispatcher_fallback = true;
+				dispatcher_reason   = fmt::format(
+				    "structured conditional block {} exits loop {} through non-merge block {}",
+				    failure_block, loop_header, failure_target);
+				LogDispatcherFallback(options, cfg, "structured-validation", dispatcher_reason);
+				cfg                    = unstructured_cfg;
+				cfg.unsupported        = true;
+				cfg.failure_kind       = CFG::FailureKind::StructuredControlFlow;
+				cfg.failure_block      = failure_block;
+				cfg.unsupported_reason = dispatcher_reason;
+			} else {
+				LOGF("%s structured CFG success: blocks=%" PRIu64 "\n", GetDumpLabel(options),
+				     static_cast<uint64_t>(cfg.blocks.size()));
+			}
 		}
 		LOGF("%s phase end: stage=%s hash=0x%016" PRIx64 " CFG Structurize blocks=%" PRIu64
 		     " loops=%" PRIu64 " elapsed_ms=%" PRIu64 "\n",

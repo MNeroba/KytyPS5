@@ -17,6 +17,7 @@
 #include "graphics/shader/recompiler/ir/IREmitter.h"
 #include "graphics/shader/recompiler/ir/ShaderIR.h"
 #include "graphics/shader/recompiler/ir/passes/ConstantPropagation.h"
+#include "graphics/shader/recompiler/ir/passes/BindingLayout.h"
 #include "graphics/shader/recompiler/ir/passes/DeadCodeElimination.h"
 #include "graphics/shader/recompiler/ir/passes/ReadLaneElimination.h"
 #include "graphics/shader/recompiler/ir/passes/ResourceTracking.h"
@@ -8688,6 +8689,44 @@ void TestNewShaderRecompilerDispatcherSpillsU32x3() {
         "dispatcher did not use one canonical U32x3 spill slot");
 }
 
+void TestNewShaderRecompilerDispatcherShaderSideSrtAlias() {
+  using namespace ShaderRecompiler;
+  using namespace ShaderRecompiler::IR;
+
+  const uint32_t shader[] = {
+      EncodeSopp(0x05, 2),       // entry -> B, fallthrough A
+      EncodeSopp(0x02, 0),       // A -> C
+      EncodeSopp(0x05, 0xfffeu), // C -> A, fallthrough B
+      EncodeSopp(0x02, 0xfffeu), // B -> C
+      EncodeSopp(0x01),
+  };
+  auto options = MakeCompileOptions(ShaderType::Compute);
+  auto result = RecompileForTest(shader, options);
+  Check(result.program.dispatcher_fallback && result.program.blocks.size() >= 3u,
+        "shader-side SRT alias fixture did not select dispatcher mode");
+
+  auto program = std::move(result.program);
+  auto *definition_block = program.blocks[1];
+  auto *consumer_block = program.blocks[2];
+  IREmitter definition(definition_block);
+  const auto root = definition.Emit(ValueOpcode::IAdd32, {Value(7u), Value(9u)});
+  const auto srt = definition.Emit(ValueOpcode::GetSrtResource);
+  const auto slot = static_cast<uint32_t>(program.srt_reads.size());
+  const auto alias = definition.Emit(ValueOpcode::ReadConst,
+                                     {srt, Value(slot)}, ShaderSideSrtReadFlag);
+  IREmitter consumer(consumer_block);
+  consumer.Emit(ValueOpcode::IAdd32, {alias, Value(1u)});
+  program.srt_reads.push_back({root, 0u, true});
+
+  // Rebuild the native descriptor layout after adding the flattened SRT read.
+  program.bindings = {};
+  program.binding_layout_complete = false;
+  Spirv::AnalyzeProgramRequirements(program);
+  IR::AllocateBindings(program);
+  const auto spirv = Spirv::EmitProgram(program, options.input_info);
+  CheckSpirvBinaryValidates(spirv);
+}
+
 void TestNewShaderRecompilerU64PairTranslation() {
   using namespace ShaderRecompiler;
 
@@ -12810,6 +12849,7 @@ int main() {
   TestNewShaderRecompilerCfgPrunesUnreachableSelectionEntry();
   TestNewShaderRecompilerCfgIrreducibleDispatcher();
   TestNewShaderRecompilerDispatcherSpillsU32x3();
+  TestNewShaderRecompilerDispatcherShaderSideSrtAlias();
   TestNewShaderRecompilerU64PairTranslation();
   TestComputeDispatchWaveSize();
   TestNewShaderRecompilerBufferLoadsGuardedByExec();
