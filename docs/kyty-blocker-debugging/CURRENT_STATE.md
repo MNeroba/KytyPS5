@@ -1,6 +1,6 @@
 # Current KytyPS5 debugging state
 
-Last reconciled: 2026-09-10 23:06 Europe/Riga
+Last reconciled: 2026-09-10 23:20 Europe/Riga
 
 This file is the volatile checkpoint. Durable facts live in `PROJECT_MEMORY.md`; stable mechanisms live in `REFERENCE.md`.
 
@@ -9,15 +9,15 @@ This file is the volatile checkpoint. Durable facts live in `PROJECT_MEMORY.md`;
 ```text
 Repository/worktree: G:/KytyPS5/repo
 Branch: astro/materialize-resources
-HEAD at semantic source checkpoint: 1161113cb88d26355c1248c04632691b27f94726
-Working tree: canonical debugging documentation is pending; source/test tree is clean at the semantic checkpoint
+HEAD at documentation/runtime checkpoint: 46fa56c61052d3916836863e4a8afc4d3c649388
+Working tree: this checkpoint update is pending; source/test tree is clean at the semantic checkpoint
 Compiler/configuration: clang-cl, Ninja, Release
 Executable used for diagnostic run: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.exe
-Diagnostic executable SHA-256: 3C430E1853381212F9DDBF64EC91CEB011FFDA26D84DFC23C8D385766BD0EE51
-Diagnostic runtime label: Source build 3dc3e19; Vulkan pipeline cache disabled (dirty build)
+Clean executable SHA-256 (build/install): AF740B8B2EE49CE957CFD77134FF515E5260D4EAEBA3257908ADAA53EEF29AEE
+Clean runtime label: Source build 46fa56c; Release, clang-lld_link-64
 ```
 
-The diagnostic executable was built before `1161113`; it must not be treated as completed-fix validation. The intended validation must be rebuilt and installed from the exact semantic commit with no dirty source/configuration inputs.
+The executable was built and copied into the local install tree from clean HEAD `46fa56c`; the system-wide CMake install prefix was not used because it requires administrator access.
 
 ## Target and game milestones
 
@@ -25,11 +25,11 @@ The diagnostic executable was built before `1161113`; it must not be treated as 
 Target game: ASTRO BOT EU
 Title ID: PPSA21567
 Game input: G:/PS5 Games/PPSA21567/extracted
-Current milestone: M1 startup shaders compile — target CS now emits SPIR-V and passes offline validation
+Current milestone: M1 startup shaders compile — clean run emitted 44 modules and all passed offline validation
 Next milestone: M2 first graphics/compute submissions succeed
-Current P0: prove the target shader pipeline and first submission on a clean exact-commit ASTRO run
-Class: SPV2 was cleared diagnostically; active P0 is Vulkan pipeline/runtime (M2)
-Last validated progress signal: diagnostic run emitted 21 modules (CS 17 / PS 2 / VS 2), reached the target wave64 compute, and did not reach a menu or visible frame
+Current P0: classify the stable post-emission runtime stall at the pipeline/submit/wait boundary before the first observable frame
+Class: SPV2 is cleared; active P0 is Vulkan pipeline/runtime (M2)
+Last validated progress signal: clean run emitted 44 modules (CS 22 / PS 14 / VS 7 / MS 1), reached target wave64 compute, and produced no fatal/validation error before bounded stop
 Known P1 likely blockers: descriptor/pipeline runtime compatibility, then GPU execution/rendering; media/input/game logic only after a frame
 ```
 
@@ -48,19 +48,21 @@ G:/KytyPS5/notes/ASTRO_BS1_SHADER_ARCHIVE_20260910/
 
 ## Current exact evidence
 
-Diagnostic run (dirty source; evidence only):
+Clean exact-commit run (runtime trace intentionally incomplete):
 
 ```text
-Run: G:/KytyPS5/logs/ASTRO_DISPATCH_SRT_20260911_0050_debug/
-Target SPIR-V: G:/KytyPS5/logs/ASTRO_DISPATCH_SRT_20260911_0050_debug/shaders/0019_new_shader_cs_78af8e269b528b5c.spv
-Target disassembly: ...spv.spvasm
-Target size: 941,496 bytes
-spirv-val --target-env vulkan1.3: PASS (exit 0)
-Numeric disassembly scan: definitions=45,225, references=45,225, missing=0
+Run: G:/KytyPS5/logs/ASTRO_CLEAN_20260910_230833/
+Executable: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.exe
+Arguments: --stub-bvh, shader/vulkan validation=true, GPU-assisted=false, graphics-debug-dump=true, shader logs in run/shaders
+Artifacts: 44 `.spv` + 44 `.bin` + 44 `.rdna2`
+spirv-val --target-env vulkan1.3: 44/44 PASS (exit 0)
+Numeric disassembly scan: 44/44 clean; target 0019 definitions=45,225, references=45,225, missing=0
 Runtime stdout: initialized graphics, then `warning: executing wave64 compute shader cs=0x0000000908e86a00`
 ```
 
-The process was stopped manually after the target emitted and validated; no pipeline-creation, submission, frame, menu, or gameplay signal was captured. The old diagnostic artifact in `ASTRO_DISPATCH_SRT_20260910_2320_debug` failed because it still contained the undefined ID `%28241`; do not use it as current evidence.
+The process was force-stopped after roughly nine minutes and 44 artifacts; no fatal/validation error, pipeline trace, submission, frame, menu, or gameplay signal was captured. Because `GraphicsRunDebugDumpEnabled()` is gated by non-silent printf output, this run cannot classify pipeline versus submit/wait. The prior dirty artifact in `ASTRO_DISPATCH_SRT_20260910_2320_debug` failed on undefined `%28241`; do not use it as current evidence.
+
+Next discriminating runtime capture: repeat one bounded run only when needed with `--printf-direction File --printf-output-file <run>/runtime.log` and `--graphics-debug-dump true`, then inspect the first `QueuePoint`, `vkCreate*Pipeline`, submit, wait, or fatal line. This changes observability, not shader semantics.
 
 ## Semantic source checkpoint
 
@@ -79,13 +81,11 @@ Commit `1161113` contains these generic changes and does not modify BDA/R1 logic
 
 Passed after the current source changes: `shader_cfg_tests`, `resource_materialization_tests`, `shader_recompiler_compute_tests`, and `scalar_provenance_tests`. The new dispatcher alias fixture passes. `resource_tracking_tests` still reaches the known unrelated baseline failure: `dynamic storage mips: an inverted dynamic storage mip range was accepted or mutated output`.
 
-Before a clean target run:
+Before the next instrumented target run:
 
 ```text
-run git diff --check and inspect staged paths
-build/install Release from that exact commit
-verify executable hash and Source build label
-run exactly one ASTRO validation with the intentional shader/artifact flags
-run spirv-val and numeric undefined-ID scan on the target module immediately
-inspect first pipeline/submission/frame signal and checkpoint this file
+verify git status, HEAD, executable hash, and Source build label
+use printf-direction File plus printf-output-file so graphics debug traces are enabled
+run one bounded ASTRO validation with the intentional shader/artifact flags
+inspect the first pipeline/submit/wait signal; then checkpoint this file
 ```

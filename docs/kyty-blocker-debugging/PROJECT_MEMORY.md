@@ -86,6 +86,26 @@ EVIDENCE: The 2026-09-10/11 target artifact checks above and `DEBUG_REFERENCE_SO
 
 RELATED CODE/COMMIT: `REFERENCE.md § SPIR-V emission and validation`.
 
+### Clean target artifact batch — PROVEN
+
+FACT: From clean HEAD `46fa56c` (semantic source fix `1161113`), ASTRO BOT emitted 44 startup modules: CS 22, PS 14, VS 7, MS 1. All 44 passed `spirv-val --target-env vulkan1.3`; numeric disassembly scans found no missing IDs.
+
+WHY IT MATTERS: M1 startup shader/recompiler output is validated for the observed batch. The remaining P0 is runtime classification at M2; no frame or menu claim follows from offline validation.
+
+EVIDENCE: `G:/KytyPS5/logs/ASTRO_CLEAN_20260910_230833/`; target `0019_new_shader_cs_78af8e269b528b5c.spv` is 941,496 bytes, with 45,225 definitions/references and zero missing IDs; build/install executable hash is `AF740B8B2EE49CE957CFD77134FF515E5260D4EAEBA3257908ADAA53EEF29AEE` and runtime label is `Source build 46fa56c`.
+
+RELATED CODE/COMMIT: `1161113`; `CURRENT_STATE.md` runtime checkpoint.
+
+### Graphics trace gating — PROVEN
+
+FACT: `GraphicsRunDebugDumpEnabled()` returns true only when graphics debug dump is enabled and printf direction is not `Silent`.
+
+WHY IT MATTERS: A run with `--graphics-debug-dump true --printf-direction Silent` can emit and execute shaders without recording `QueuePoint`/pipeline traces; absence of those lines is not a pipeline failure.
+
+EVIDENCE: `src/graphics/guest_gpu/graphicsRun.cpp`; clean run `ASTRO_CLEAN_20260910_230833` had `Silent` output and no runtime trace beyond stdout initialization/wave64 warning.
+
+RELATED CODE/COMMIT: `REFERENCE.md § Build and runtime boundary`; no source commit required.
+
 ## Confirmed blocker history and commits
 
 | Checkpoint | Durable result |

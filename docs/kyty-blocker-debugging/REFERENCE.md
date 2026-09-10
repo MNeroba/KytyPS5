@@ -148,6 +148,8 @@ A numeric undefined-ID scan complements `spirv-val`. Planning-only producers and
 
 Dispatcher fallback executes an unstructured CFG through a structured SPIR-V loop and switch. Its spill table is for native SPIR-V values only. SRT/resource handles and typed image-address metadata are resolved through their consumers and have no standalone SPIR-V value; planning-only scalar reads are omitted unless a shader-side SRT wrapper retains that producer. A shader-side `ReadConst` wrapper aliases the retained `program.srt_reads[slot].value` producer, so cross-block spill analysis and `Def` must follow that producer rather than spill the metadata wrapper.
 
+`GraphicsRunDebugDumpEnabled()` additionally requires a non-silent printf direction. To observe `QueuePoint`, pipeline, submit, and wait traces, use `--graphics-debug-dump true` together with `--printf-direction File` and `--printf-output-file`; `Silent` suppresses those traces even when the graphics flag is true.
+
 ## BDA memory emitter
 
 Key mechanisms: `DeviceAddressFromWords`, `GuestAddress`, `GetBdaPointer`, `LoadBdaDword`, and `LoadBda`.
