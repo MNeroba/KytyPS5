@@ -1055,6 +1055,36 @@ void TestDynamicStorageMipTracking() {
         "an inverted dynamic storage mip range was accepted or mutated output");
 }
 
+void TestDirectImageRecognizesSrtReadWrappers() {
+  Fixture fixture;
+  const auto table = fixture.Address(fixture.UserData(0), fixture.UserData(1), 0x1200);
+  std::array<Value, 8> dwords;
+  for (uint32_t dword = 0; dword < dwords.size(); ++dword) {
+    MemoryInfo scalar;
+    scalar.kind = ResourceKind::ScalarAddress;
+    scalar.offset = dword * sizeof(uint32_t);
+    dwords[dword] = fixture.Emit(
+        ValueOpcode::LoadAddressU32,
+        {table, Value(0u), Value(0u), Value(true)},
+        fixture.AddMemory(scalar, 0x1200));
+  }
+  const auto image = fixture.Image(dwords, 0x1210);
+  const auto sampler = fixture.Sampler({Value(0u), Value(0u), Value(0u), Value(0u)}, 0x1210);
+  MemoryInfo sample;
+  sample.kind = ResourceKind::Image;
+  sample.image_dimension = Decoder::ImageDimension::Dim2D;
+  fixture.Emit(ValueOpcode::ImageSampleRaw,
+               {image, sampler, fixture.ImageAddress()}, fixture.AddMemory(sample, 0x1210));
+
+  fixture.PlanAndTrack();
+  Check(fixture.program.info.images.size() == 1,
+        "direct image SRT wrapper fixture did not track its image");
+  const auto source = fixture.program.info.images[0].source;
+  Check(source < fixture.program.descriptor_sources.size() &&
+            fixture.program.descriptor_sources[source].indirect_image.has_value(),
+        "direct image SRT wrappers were not recognized as an indirect image plan");
+}
+
 void TestSrtFlatteningAndRuntimeMemoization() {
   Fixture fixture;
   const auto base =
@@ -1899,6 +1929,7 @@ int main() {
     Run("images and samplers", TestImagesSamplersAndAliases);
     Run("SampleAdjust sampler scratch", TestSampleAdjustSamplerScratch);
     Run("FMASK load specialization", TestFmaskLoadSpecialization);
+    Run("direct image SRT wrappers", TestDirectImageRecognizesSrtReadWrappers);
     Run("dynamic storage mips", TestDynamicStorageMipTracking);
     Run("invariant indirect images", TestInvariantIndirectImageMaterialization);
     Run("SRT runtime", TestSrtFlatteningAndRuntimeMemoization);

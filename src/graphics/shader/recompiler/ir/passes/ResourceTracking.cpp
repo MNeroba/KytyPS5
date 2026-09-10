@@ -958,6 +958,61 @@ private:
 		       selector_inst->GetOpcode() == ValueOpcode::ReadFirstLane;
 	}
 
+	// SRT planning replaces scalar descriptor reads with ReadConst references before
+	// resource tracking runs.  Recover the original raw read for descriptor-shape
+	// recognition without changing the runtime value or its provenance.
+	const Inst* ResolveDescriptorRead(Value value) const {
+		value            = value.Resolve();
+		const auto* inst = value.TryInstruction();
+		if (inst == nullptr || inst->GetOpcode() != ValueOpcode::ReadConst ||
+		    inst->NumArgs() != 2u) {
+			return inst;
+		}
+		const auto slot = inst->Arg(1).Resolve();
+		if (!slot.IsImmediate() || slot.GetType() != Type::U32 ||
+		    slot.U32() >= m_program.srt_reads.size()) {
+			return nullptr;
+		}
+		return m_program.srt_reads[slot.U32()].value.Resolve().TryInstruction();
+	}
+
+	bool DescriptorReadUsesOnlyImages(Value value, const Inst& read) const {
+		value               = value.Resolve();
+		const auto* wrapper = value.TryInstruction();
+		if (wrapper == &read) {
+			return !read.Uses().empty() && std::ranges::all_of(read.Uses(), [](const Use& use) {
+				return use.user->GetOpcode() == ValueOpcode::GetImageResource;
+			});
+		}
+		if (wrapper == nullptr || wrapper->GetOpcode() != ValueOpcode::ReadConst ||
+		    wrapper->NumArgs() != 2u) {
+			return false;
+		}
+		const auto slot = wrapper->Arg(1).Resolve();
+		if (!slot.IsImmediate() || slot.GetType() != Type::U32 ||
+		    slot.U32() >= m_program.srt_reads.size() ||
+		    m_program.srt_reads[slot.U32()].value.Resolve().TryInstruction() != &read) {
+			return false;
+		}
+		bool has_wrapper = false;
+		for (const auto* block: m_program.blocks) {
+			for (const auto& candidate: *block) {
+				if (candidate.GetOpcode() != ValueOpcode::ReadConst || candidate.NumArgs() != 2u ||
+				    candidate.Arg(1).Resolve() != slot) {
+					continue;
+				}
+				has_wrapper |= &candidate == wrapper;
+				if (candidate.Uses().empty() ||
+				    !std::ranges::all_of(candidate.Uses(), [](const Use& wrapper_use) {
+					    return wrapper_use.user->GetOpcode() == ValueOpcode::GetImageResource;
+				    })) {
+					return false;
+				}
+			}
+		}
+		return has_wrapper;
+	}
+
 	bool TryMakeIndirectImage(Inst& handle, uint32_t pc, IndirectImagePlan& plan) {
 		if (handle.GetOpcode() != ValueOpcode::GetImageResource || handle.NumArgs() != 8u) {
 			return false;
@@ -1068,6 +1123,13 @@ private:
 		return found == m_indirect_images.end() ? nullptr : &*found;
 	}
 
+	static bool SupportsIndirectImageUse(const Inst& handle) {
+		return !handle.Uses().empty() && std::ranges::all_of(handle.Uses(), [](const Use& use) {
+			return use.user->GetOpcode() == ValueOpcode::ImageSampleRaw ||
+			       use.user->GetOpcode() == ValueOpcode::ImageRead;
+		});
+	}
+
 	bool IsIndirectPlanningMemory(uint32_t index) const {
 		return std::any_of(m_indirect_images.begin(), m_indirect_images.end(),
 		                   [&](const IndirectImagePlan& plan) {
@@ -1086,6 +1148,7 @@ private:
 				if (handle == nullptr || FindIndirectImage(*handle) != nullptr) {
 					continue;
 				}
+				if (!SupportsIndirectImageUse(*handle)) continue;
 				IndirectImagePlan plan;
 				if (TryMakeIndirectImage(*handle, inst.Flags<MemoryFlags>().pc, plan) ||
 				    TryMakeDirectImage(*handle, inst.Flags<MemoryFlags>().pc, plan)) {
@@ -1692,7 +1755,7 @@ private:
 		bool        raw_address = false;
 		uint32_t    immediate   = 0;
 		for (uint32_t dword = 0; dword < 8u; ++dword) {
-			const auto* read   = handle.Arg(dword).Resolve().TryInstruction();
+			const auto* read   = ResolveDescriptorRead(handle.Arg(dword));
 			uint32_t    index  = 0;
 			const auto* memory = read == nullptr ? nullptr : ScalarReadMemory(*read, index);
 			if (read != nullptr && read->GetOpcode() == ValueOpcode::LoadAddressU32 &&
@@ -1706,18 +1769,20 @@ private:
 					}
 				}
 			}
-			if (memory == nullptr || !MemoryIndexBelongsTo(index, *read)) {
+			const bool belongs = read != nullptr && MemoryIndexBelongsTo(index, *read);
+			const bool image_only =
+			    read != nullptr && DescriptorReadUsesOnlyImages(handle.Arg(dword), *read);
+			if (memory == nullptr || !belongs || !image_only) {
 				return false;
 			}
 			if (dword == 0) immediate = memory->offset;
 			if (int64_t {static_cast<int32_t>(memory->offset)} !=
-			    int64_t {static_cast<int32_t>(immediate)} + dword * 4u)
+			    int64_t {static_cast<int32_t>(immediate)} + dword * 4u) {
 				return false;
+			}
 			const auto* base = read->Arg(0).Resolve().TryInstruction();
 			if (base == nullptr || (table != nullptr && table != base) ||
-			    !std::ranges::all_of(read->Uses(), [](const Use& use) {
-				    return use.user->GetOpcode() == ValueOpcode::GetImageResource;
-			    })) {
+			    !DescriptorReadUsesOnlyImages(handle.Arg(dword), *read)) {
 				return false;
 			}
 			table = base;
