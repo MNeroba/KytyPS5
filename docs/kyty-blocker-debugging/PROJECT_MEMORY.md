@@ -297,3 +297,40 @@ FACT: The failure-only wait diagnostic in the cold cache run records
 EVIDENCE: `G:/KytyPS5/logs/ASTRO_PIPELINE_CACHE_COLD_20260911_2325/runtime.log` lines
 778120–778121. Do not retry or suppress the wait failure; classify its source in the next
 runtime investigation.
+
+### Post-M5 device loss — PROVEN RESULT, ROOT UNCLASSIFIED
+
+FACT: `MasterSemaphore::Wait` can return `vk::Result::eErrorDeviceLost` after ASTRO reaches
+the post-M5 runtime path. In two `bd131e8` diagnostic runs, the failure was observed for
+ticks 327685/327708 and 352888/352911; the process ended with wrapper status `0x141`.
+
+WHY IT MATTERS: The exact Vulkan result is settled, but the wait is only the first host-side
+observation of an asynchronous GPU fault. Do not treat the last marker write as the cause, ignore
+or retry the error, or reopen the earlier resource-remap/replay work.
+
+EVIDENCE: `G:/KytyPS5/logs/ASTRO_DEVICE_LOSS_DIAG_20260912_0005/runtime.log` and
+`G:/KytyPS5/logs/ASTRO_DEVICE_LOSS_HISTORY_20260912_0018/runtime.log` contain the failure
+records and submit metadata. Both runs reached 40 compute shaders. Windows System Event 153
+from `nvlddmkm` coincided with each termination (first at
+`2026-09-11T21:07:56.4265059Z`, second at local `2026-09-12 00:29:33`). NVIDIA driver-event
+evidence indicates a GPU/driver fault but does not identify the offending command.
+
+RELATED CODE/COMMIT: `MasterSemaphore::Wait`, `CommandScheduler::Submit`, and the bounded
+submit ring in `masterSemaphore.{h,cpp}`; diagnostic commits `a7b7bb5` and `bd131e8`.
+
+### Submit metadata interpretation — PROVEN MECHANISM
+
+FACT: The failed wait records are predominantly `debug_op=3` (`EopWrite`) marker submissions,
+with one preceding `debug_op=5` (`EopWriteBack`); `CommandProcessor::WriteAtEndOfPipe` performs
+the guest marker write through the host synchronization path and records metadata. The ring did
+not retain a direct draw/dispatch immediately before the failure.
+
+WHY IT MATTERS: EOP metadata identifies the synchronization point at which device loss was
+detected, not necessarily the GPU command that caused it. The next investigation must recover the
+last non-EOP operation and its descriptor/resource state before proposing a semantic fix.
+
+EVIDENCE: `ASTRO_DEVICE_LOSS_HISTORY_20260912_0018/runtime.log` lines 826063–826100; enum
+definitions in `src/graphics/guest_gpu/command_processor/commandProcessor.h`; EOP paths in
+`src/graphics/guest_gpu/graphicsRun.cpp` and `src/graphics/host_gpu/renderer/sync.cpp`.
+
+RELATED CODE/COMMIT: diagnostic submit ring from `bd131e8`; no semantic change made.

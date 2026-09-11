@@ -173,3 +173,13 @@ The usual Windows build is CMake/Ninja with `clang-cl`. The executable used for 
 `PipelineCache::GetComputeProgram` sets `host_subgroup_size` from `SupportsComputeWave64()`. `RenderExecutor::DispatchDirect` passes the dispatch mode and group counts, but writes `dispatch_threads_num` only after `GetComputeProgram` returns; therefore `CompileProgram`, which runs inside that call, sees the initial zero triple for that field. Compute `CompileOptions::user_data_base` remains its default zero because only vertex/mesh paths override it.
 
 The raw code and SPIR-V `LocalSize` do not uniquely recover this state. Exact replay requires a capture of all fields and user-data count from the production call. Place any crash-safe diagnostic before resource-plan extraction and an exact marker immediately before `CompileProgram`; do not infer fields from IR builtin use or substitute values from another shader.
+
+## Timeline waits and end-of-pipe markers
+
+`CommandScheduler::Submit` associates each host submission with a master timeline tick;
+`MasterSemaphore::Wait` is the host observation point for completion. `CommandBufferDebugOp`
+values 3 and 5 identify end-of-pipe write and write-back marker submissions. The guest
+`CommandProcessor::WriteAtEndOfPipe` and host `Sync::WriteAtEndOfPipe*` paths record marker
+metadata and perform the emulated write, but an `ErrorDeviceLost` returned by the wait does not
+by itself identify that marker as the offending GPU command. Recover the last non-EOP submission
+and its resource state before changing GPU semantics.

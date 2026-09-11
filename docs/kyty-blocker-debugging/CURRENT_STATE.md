@@ -1,6 +1,6 @@
 # Current KytyPS5 debugging state
 
-Last reconciled: 2026-09-11 23:42 Europe/Riga
+Last reconciled: 2026-09-12 00:36 Europe/Riga
 
 This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable mechanisms live in REFERENCE.md.
 
@@ -8,17 +8,17 @@ This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable
 
 Repository/worktree: G:/KytyPS5/repo
 Branch: astro/materialize-resources
-Repository HEAD at this docs checkpoint: `86073bb` (source checkpoint; docs will be updated again after this checkpoint commit)
-Current source HEAD: 86073bb2f196c703e6652a6705ff33e9c054e885 (`graphics: persist expensive Vulkan pipeline cache snapshots`)
-Last ASTRO runtime source HEAD: 86073bb2f196c703e6652a6705ff33e9c054e885
-Runtime source HEAD at launch: 86073bb2f196c703e6652a6705ff33e9c054e885
-Working tree before this checkpoint: clean at `86073bb`; local install tree was refreshed from this build
+Repository HEAD at this docs checkpoint: `3f4f6d9` (docs-only checkpoint; source/build revision remains `bd131e8`)
+Current source HEAD: bd131e82212f9d60c2b23ed1e05850d9eee4fcf7 (`debug: dump recent submits on wait failure`)
+Last ASTRO runtime source HEAD: bd131e82212f9d60c2b23ed1e05850d9eee4fcf7
+Runtime source HEAD at launch: bd131e82212f9d60c2b23ed1e05850d9eee4fcf7
+Working tree before this checkpoint: clean at `bd131e8`; local install tree was refreshed from this build
 Build: Release, CMake/Ninja, clang-cl, clang-lld_link-64
 Executable: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.exe
-Executable SHA-256: 99274EDE87D67FE55BE07321FE2FE3E2C04904F2636985F29898A4880F749E23
-Executable size: 21,023,744 bytes; local install refreshed from `86073bb` before the cache runs
-Build label: Source build 86073bb (from generated `kytyGitVersion.h`); wait-result diagnostic is enabled
-Matching PDB: G:/KytyPS5/repo/_Build/windows/kyty_emulator.pdb and local install copy; SHA-256 B99F47087F9A9FCD285EEFF9BBF7DFAC98BECAAD96D977397CD5CFA24E7E6E02; size 24,059,904 bytes
+Executable SHA-256: D5522E70E52A437A7C267E9B2503E42F18716D0AD9E4B2EAC32D0ECCA48BA05D
+Executable size: 21,026,304 bytes; local install refreshed from `bd131e8` before the diagnostic runs
+Build label: Source build bd131e8 (from generated `kytyGitVersion.h`); wait-result and recent-submit diagnostics are enabled
+Matching PDB: G:/KytyPS5/repo/_Build/windows/kyty_emulator.pdb and local install copy; SHA-256 BC29B98CBE80A4C8B84E53BD2A1255EB41E1DCCD9FCA7E548F993490DF1467EF; size 24,059,904 bytes
 Binary provenance: the historical dump/run used 4374a9d above; this bounded capture used the exact 150a139 executable/PDB above
 
 The system-wide CMake install prefix was not used because it requires administrator access.
@@ -28,15 +28,15 @@ The system-wide CMake install prefix was not used because it requires administra
 Target game: ASTRO BOT EU
 Title ID: PPSA21567
 Game input: G:/PS5 Games/PPSA21567/extracted
-Current milestone: M4 intro/loading — post-intro continuation is not yet proven
-Next milestone: M5 main menu
-Current P0: classify the causal boundary of the post-M4 `MasterSemaphore::Wait` failure after the exact `ErrorDeviceLost (-4)` result (`masterSemaphore.cpp:69`)
+Current milestone: M5 main menu — reached in the validated title-screen progression run
+Next milestone: M6 gameplay
+Current P0: classify the cause of the post-M5 `MasterSemaphore::Wait` `ErrorDeviceLost (-4)` failure (`masterSemaphore.cpp:69`)
 P0 class: GPU synchronization/device-loss runtime result; the exact `vk::Result` is now proven, but its cause is not investigated here
-Last validated progress signal: cold and warm ASTRO runs persisted/loaded the Vulkan driver cache while reaching 40 compute shaders; M5 is not treated as proven by the latest evidence
+Last validated progress signal: title screen reached (M5); subsequent diagnostic branches reached 40 compute shaders before an asynchronous device-loss wait failure
 Known P1 likely blockers: incorrect color/output interpretation remains P1 and is not a current fix target
 Known P2: cold-start large dispatcher pipeline compilation latency; successful creates are not a hang. Cache persistence/load is proven, but a substantial warm-time reduction is not.
 
-M1, M2, M3, and M4 are closed. M5 remains unproven; the earlier title-screen interpretation is superseded for the active checkpoint. Do not reopen the cleared startup SRT/BDA-lifetime, pipeline-create, submission, or visible-frame conclusions without contradictory evidence.
+M1, M2, M3, M4, and M5 are closed/reached. M6 gameplay is not proven. Do not reopen the cleared startup SRT/BDA-lifetime, pipeline-create, submission, visible-frame, or bounded resource-remap conclusions without contradictory evidence.
 
 ## Exact runtime evidence
 
@@ -99,7 +99,7 @@ the build tree. `shader_recompiler_compute_tests` passed (`EXIT_CODE=0`, wall `8
 `G:/KytyPS5/logs/shader_recompiler_compute_tests_150a139.log`), and the replay test executable
 help path also returned 0 (`G:/KytyPS5/logs/shader_replay_tests_help_150a139.log`).
 
-Next action: recover the exact `vk::Result` for the saved post-M4 wait boundary from the failure-only diagnostic; do not make a semantic fix until its cause is proven. Keep color correctness P1 and cold pipeline latency P2.
+Next action: classify the proven `ErrorDeviceLost (-4)` boundary from the saved submit ring and system evidence before any semantic fix. Keep color correctness P1 and cold pipeline latency P2.
 
 ## Bounded production-capture attempt
 
@@ -146,7 +146,7 @@ Two offline exact replays both returned exit code 0 and internal validation PASS
 and 108 ms. External `spirv-val --target-env vulkan1.3` returned 0 for both outputs. This proves
 production-state equivalence for the captured recompiler input, without changing M1–M4.
 
-## Progression run — post-M4 wait boundary (M5 unproven)
+## Progression run — post-M4 wait boundary (M5 reached)
 
 Run/artifact: `G:/KytyPS5/logs/ASTRO_PROGRESS_20260911_225139/`.
 The one progression launch used the installed executable SHA-256
@@ -154,9 +154,9 @@ The one progression launch used the installed executable SHA-256
 `--stub-bvh` baseline; the exact command is in `command.txt`. The runtime label is `Source build
 150a139`; the repository HEAD at launch was `3fe3d2718f154e9d3f8f133a0fb8a176c7004a63`.
 
-The latest user-reviewed evidence proves target shader emission and 40 compute shaders, but does
-not prove M5. Earlier title-screen asset/level lines remain historical evidence only and are not
-used to advance the active milestone.
+The latest user-reviewed evidence proves target shader emission and 40 compute shaders. M5 was
+already proven by the title-screen progression run recorded in commit `4b0deac`; these later
+diagnostic branches are classified as post-M5 outcomes.
 
 The process terminated through the existing fatal-error path at runtime.log lines 780571–
 780572 and stdout lines 107–125: `Not implemented (result != vk::Result::eSuccess)` in
@@ -219,3 +219,37 @@ reached `CS 40` and then the existing `MaterializeResources(...)` fatal at `pipe
 Cache persistence and load are therefore proven, while cache performance benefit remains
 unproven. Do not expand cache tooling. Return the runtime critical path to the known P0 exact
 `vkDevice.waitSemaphores` `ErrorDeviceLost (-4)` classification; keep colors P1.
+
+## Device-loss diagnosis checkpoint — 2026-09-12
+
+Source/build provenance: source HEAD `bd131e82212f9d60c2b23ed1e05850d9eee4fcf7`, branch
+`astro/materialize-resources`; installed Release executable SHA-256
+`D5522E70E52A437A7C267E9B2503E42F18716D0AD9E4B2EAC32D0ECCA48BA05D`; matching PDB SHA-256
+`BC29B98CBE80A4C8B84E53BD2A1255EB41E1DCCD9FCA7E548F993490DF1467EF`. The exact build and
+launch command are recorded in each artifact directory below.
+
+Two diagnostic launches used the known-good `--stub-bvh` baseline and reached the post-M5
+runtime path. Both terminated with wrapper exit `321` (`0x00000141`) after
+`vkDevice.waitSemaphores` returned `ErrorDeviceLost (-4)`:
+
+- `G:/KytyPS5/logs/ASTRO_DEVICE_LOSS_DIAG_20260912_0005/`: ticks 327685 and 327708;
+  `nvlddmkm` System Event 153 at `2026-09-11T21:07:56.4265059Z`.
+- `G:/KytyPS5/logs/ASTRO_DEVICE_LOSS_HISTORY_20260912_0018/`: ticks 352888 and 352911;
+  `nvlddmkm` System Event 153 at local `2026-09-12 00:29:33`.
+
+The bounded submit ring identifies the failed waits as `debug_op=3` EOP marker submissions
+(with one preceding `debug_op=5` write-back), all on submit 6676 in the second run. This is a
+detection point for an earlier asynchronous GPU fault, not proof that the marker write itself is
+the root cause. The last 16 records contain no direct draw/dispatch operation, so the offending
+GPU command remains unclassified. No Vulkan device-lost error is ignored or retried, and no
+semantic fix was made.
+
+Focused validation after the diagnostic commits passed:
+`ninja -C _Build/windows -j1 kyty_emulator shader_recompiler_compute_tests`, followed by
+`shader_recompiler_compute_tests.exe --scheduler-only` (exit 0). The current worktree is clean
+before this documentation checkpoint.
+
+Next action: in the next session, use the existing logs/source to identify the last non-EOP GPU
+operation and its resource state; add further bounded diagnostics only if that evidence cannot be
+recovered statically. Then build a focused regression before any semantic change. Do not rerun
+ASTRO tonight; do not reopen resource-remap, replay, pipeline-cache, or color work.
