@@ -126,7 +126,7 @@ EVIDENCE: `C:/Users/mneroba/AppData/Local/CrashDumps/kyty_emulator.exe.9700.dmp`
 
 RELATED CODE/COMMIT: `ResourceControlFlow` / `ExtractResourcePlan` in `ResourceMaterialization.cpp`; `PipelineCache::ProgramCache::Get` caller; runtime source HEAD `4374a9d`. The source fix and regression below close this invariant for the observed transformation path; preserve raw guest shader bytes before this interval on a future diagnostic run if needed.
 
-### Production compute input provenance — PROVEN / UNAVAILABLE
+### Production compute input provenance before capture — PROVEN / superseded
 
 FACT: A raw shader binary does not determine the dynamic `ShaderComputeInputInfo` used by `CompileProgram`. The exact historical ASTRO artifacts contain no input dump or replay capsule for CS `0x657ad04626bf9d55`; the target raw `.bin`/`.rdna2` and SPIR-V cannot supply PM4 register values. Do not construct replay candidates from `LocalSize`, IR builtin use, another shader's dump, or defaults.
 
@@ -138,11 +138,11 @@ RELATED CODE/COMMIT: PM4 decoding in `src/graphics/guest_gpu/command_processor/p
 
 FACT: For the target run, `host_subgroup_size=32` is **PROVEN** by the Vulkan report (`default=32`, no wave64 support) and the `SupportsComputeWave64()` branch. `user_data_base=0` is **PROVEN** as the compute `CompileOptions` default; the compute branch sets `wave_size` but does not set `user_data_base`. `dispatch_threads_num={0,0,0}` at the `CompileProgram` call is **PROVEN by source ordering**: `GetComputeProgram` calls `ProgramCache::Get` (which compiles) before `RenderExecutor::DispatchDirect` writes the dispatch counts back into `input_info`.
 
-FACT: The target-specific values for `threads_num`, `thread_ids_num`, `group_id`, `tg_size_en`, `workgroup_register`, `dispatch_thread_dimensions`, and `user_data count` remain **UNAVAILABLE**. Their provenance is nevertheless fixed: `COMPUTE_NUM_THREAD_X/Y/Z` populate `CsStageRegisters.num_thread_*`; `COMPUTE_PGM_RSRC2` supplies TGID/TG_SIZE/TIDIG/USER_SGPR; `ShaderGetStaticInputInfoCS` copies those fields; `GetShaderParams` sizes `options.user_data` from `user_sgpr`.
+FACT: Before the bounded capture, the target-specific values for `threads_num`, `thread_ids_num`, `group_id`, `tg_size_en`, `workgroup_register`, `dispatch_thread_dimensions`, and `user_data count` were **UNAVAILABLE**. Their provenance is nevertheless fixed: `COMPUTE_NUM_THREAD_X/Y/Z` populate `CsStageRegisters.num_thread_*`; `COMPUTE_PGM_RSRC2` supplies TGID/TG_SIZE/TIDIG/USER_SGPR; `ShaderGetStaticInputInfoCS` copies those fields; `GetShaderParams` sizes `options.user_data` from `user_sgpr`.
 
 WHY IT MATTERS: The generic opt-in `ShaderReplayInput` trace is placed before resource-plan extraction and immediately before `CompileProgram`, so one future capture can supply the missing production state without changing semantics. If `PROJECT_MEMORY.md` already answers an architectural question, do not re-investigate it unless current source, a regression, or new runtime evidence contradicts it.
 
-RELATED CODE/COMMIT: diagnostic trace in `src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp`, commit `3fb0ce7`; no new capsule or ASTRO run has been made for this evidence.
+RELATED CODE/COMMIT: diagnostic trace in `src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp`, initially committed as `3fb0ce7`; the complete production values supersede this unavailable-state checkpoint and are recorded below.
 
 ### Exact production replay state for CS 0x657ad04626bf9d55 — PROVEN
 
