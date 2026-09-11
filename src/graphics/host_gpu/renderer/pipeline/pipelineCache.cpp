@@ -264,13 +264,15 @@ void LogShaderComputeInputBeforeCompile(const char*                             
 	const auto& info = *options.input_info.compute;
 	LOGF("ShaderReplayInput phase=%s hash=0x%016" PRIx64
 	     " threads={%u,%u,%u} thread_ids_num=%d group_id={%s,%s,%s} tg_size_en=%s"
-	     " workgroup_register=%d host_subgroup_size=%u"
+	     " workgroup_register=%d host_subgroup_size=%u wave_size=%u lds_size_dwords=%u"
+	     " scratch_size_dwords=%u"
 	     " dispatch_thread_dimensions=%s dispatch_threads_num={%u,%u,%u}"
 	     " user_data_base=%u user_data_count=%" PRIu64 "\n",
 	     phase, options.shader_hash, info.threads_num[0], info.threads_num[1], info.threads_num[2],
 	     info.thread_ids_num, info.group_id[0] ? "true" : "false",
 	     info.group_id[1] ? "true" : "false", info.group_id[2] ? "true" : "false",
 	     info.tg_size_en ? "true" : "false", info.workgroup_register, info.host_subgroup_size,
+	     info.wave_size, info.lds_size_dwords, info.scratch_size_dwords,
 	     info.dispatch_thread_dimensions ? "true" : "false", info.dispatch_threads_num[0],
 	     info.dispatch_threads_num[1], info.dispatch_threads_num[2], options.user_data_base,
 	     static_cast<uint64_t>(options.user_data.size()));
