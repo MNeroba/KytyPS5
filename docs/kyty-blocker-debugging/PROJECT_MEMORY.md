@@ -267,3 +267,33 @@ G:/KytyPS5/notes/
 ```
 
 Useful existing mechanisms: `LowerScalarBufferReadToBda`, `CloneBdaExpression`, `ShaderSideSrtReadFlag`, `m_bda_srt_clones`, `RefreshShaderSideSrtEligibility`, `PlanBoundedReads`, `ReadBoundedSrtU32`, `RuntimePhiSelect`, `ExtractResourcePlan`, and `MaterializeResources`. Their stable roles are in `REFERENCE.md`.
+
+### Driver pipeline snapshots in normal runs — PROVEN
+
+FACT: Expensive graphics and compute pipeline creation now snapshots the existing Vulkan driver
+cache whenever elapsed time exceeds 1000 ms and a cache is available, regardless of shader or
+graphics debug flags. Both paths hold `PipelineCache::m_mutex` and reuse
+`SnapshotDriverCacheLocked()` with the existing flush and atomic-replace behavior; snapshot
+failure remains non-fatal.
+
+WHY IT MATTERS: Normal ASTRO diagnostics can persist and reload the driver cache without adding
+new capture infrastructure, but persistence alone does not prove a warm compile-time benefit.
+
+EVIDENCE: Source commit `86073bb`; cold run
+`G:/KytyPS5/logs/ASTRO_PIPELINE_CACHE_COLD_20260911_2325/` created a 9,674,239-byte cache
+and saved four expensive compute snapshots (85,675–152,333 ms). Warm run
+`G:/KytyPS5/logs/ASTRO_PIPELINE_CACHE_WARM_20260911_2335/` loaded that payload, saved an
+updated 17,565,856-byte cache, and repeated the landmarks in 85,791–154,026 ms with wall
+times 542.884 s and 543.670 s; both ended at the existing `MaterializeResources` fatal.
+
+RELATED CODE/COMMIT: `src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp`, `86073bb`.
+The active checkpoint remains M4/post-intro with M5 unproven; the known `ErrorDeviceLost (-4)`
+timeline-wait result remains the runtime P0 and was not investigated by this cache experiment.
+
+FACT: The failure-only wait diagnostic in the cold cache run records
+`vkDevice.waitSemaphores` returning `ErrorDeviceLost (-4)` for ticks 328465 and 328442
+(`known=328441`, `current=328466`). This is the exact Vulkan result, not yet its causal root.
+
+EVIDENCE: `G:/KytyPS5/logs/ASTRO_PIPELINE_CACHE_COLD_20260911_2325/runtime.log` lines
+778120–778121. Do not retry or suppress the wait failure; classify its source in the next
+runtime investigation.

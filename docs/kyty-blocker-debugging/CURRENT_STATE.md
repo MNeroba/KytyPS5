@@ -1,6 +1,6 @@
 # Current KytyPS5 debugging state
 
-Last reconciled: 2026-09-11 23:25 Europe/Riga
+Last reconciled: 2026-09-11 23:42 Europe/Riga
 
 This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable mechanisms live in REFERENCE.md.
 
@@ -8,17 +8,17 @@ This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable
 
 Repository/worktree: G:/KytyPS5/repo
 Branch: astro/materialize-resources
-Repository HEAD at this docs checkpoint: `55788cb` (diagnostic commit; docs will be updated again after this checkpoint commit)
-Current source HEAD: 55788cb64911ae79efe05e351d888471d8bbebc0 (`debug: report timeline wait result`)
-Last ASTRO runtime source HEAD: 55788cb64911ae79efe05e351d888471d8
-Runtime source HEAD at launch: 55788cb64911ae79efe05e351d888471d8bbebc0
-Working tree before this checkpoint: clean at `55788cb`; local install tree was refreshed from this build
+Repository HEAD at this docs checkpoint: `86073bb` (source checkpoint; docs will be updated again after this checkpoint commit)
+Current source HEAD: 86073bb2f196c703e6652a6705ff33e9c054e885 (`graphics: persist expensive Vulkan pipeline cache snapshots`)
+Last ASTRO runtime source HEAD: 86073bb2f196c703e6652a6705ff33e9c054e885
+Runtime source HEAD at launch: 86073bb2f196c703e6652a6705ff33e9c054e885
+Working tree before this checkpoint: clean at `86073bb`; local install tree was refreshed from this build
 Build: Release, CMake/Ninja, clang-cl, clang-lld_link-64
 Executable: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.exe
-Executable SHA-256: E3CDEBA9A2E7EA18CB57BAE9FF909FC616978F06F5AA49405C635C445BAF6FA2
-Executable size: 21,023,744 bytes; local install refreshed 2026-09-11 23:09:00 Europe/Riga
-Build label: Source build 55788cb (from generated `kytyGitVersion.h`); wait-result diagnostic is enabled
-Matching PDB: G:/KytyPS5/repo/_Build/windows/kyty_emulator.pdb and local install copy; SHA-256 C2196A66A7073543DF5D9D4CEF2EA754A651B17A8DA86698FBBF72661CC3251D; size 24,059,904 bytes
+Executable SHA-256: 99274EDE87D67FE55BE07321FE2FE3E2C04904F2636985F29898A4880F749E23
+Executable size: 21,023,744 bytes; local install refreshed from `86073bb` before the cache runs
+Build label: Source build 86073bb (from generated `kytyGitVersion.h`); wait-result diagnostic is enabled
+Matching PDB: G:/KytyPS5/repo/_Build/windows/kyty_emulator.pdb and local install copy; SHA-256 B99F47087F9A9FCD285EEFF9BBF7DFAC98BECAAD96D977397CD5CFA24E7E6E02; size 24,059,904 bytes
 Binary provenance: the historical dump/run used 4374a9d above; this bounded capture used the exact 150a139 executable/PDB above
 
 The system-wide CMake install prefix was not used because it requires administrator access.
@@ -30,11 +30,11 @@ Title ID: PPSA21567
 Game input: G:/PS5 Games/PPSA21567/extracted
 Current milestone: M4 intro/loading — post-intro continuation is not yet proven
 Next milestone: M5 main menu
-Current P0: prove the exact Vulkan result and causal boundary of the first post-M4 `MasterSemaphore::Wait` failure (`masterSemaphore.cpp:69`)
-P0 class: GPU synchronization/runtime result; the exact `vk::Result` is not logged in this run
-Last validated progress signal: target CS `0x657ad04626bf9d55` emitted 124012 SPIR-V words and runtime reached 40 compute shaders before the saved wait fatal; M5 is not treated as proven by the latest evidence
+Current P0: classify the causal boundary of the post-M4 `MasterSemaphore::Wait` failure after the exact `ErrorDeviceLost (-4)` result (`masterSemaphore.cpp:69`)
+P0 class: GPU synchronization/device-loss runtime result; the exact `vk::Result` is now proven, but its cause is not investigated here
+Last validated progress signal: cold and warm ASTRO runs persisted/loaded the Vulkan driver cache while reaching 40 compute shaders; M5 is not treated as proven by the latest evidence
 Known P1 likely blockers: incorrect color/output interpretation remains P1 and is not a current fix target
-Known P2: cold-start large dispatcher pipeline compilation latency; successful creates are not a hang
+Known P2: cold-start large dispatcher pipeline compilation latency; successful creates are not a hang. Cache persistence/load is proven, but a substantial warm-time reduction is not.
 
 M1, M2, M3, and M4 are closed. M5 remains unproven; the earlier title-screen interpretation is superseded for the active checkpoint. Do not reopen the cleared startup SRT/BDA-lifetime, pipeline-create, submission, or visible-frame conclusions without contradictory evidence.
 
@@ -188,4 +188,34 @@ The one diagnostic launch using the rebuilt `55788cb` executable is
 `MaterializeResources(...)` fatal in `pipelineCache.cpp:573`; no wait-result diagnostic was
 reached. This run is diagnostic evidence only and does not reclassify or reopen the resource
 blocker. The saved P0 wait result remains unknown and requires a future run only if no existing
-artifact can provide it.
+artifact can provide it. A later `86073bb` cache run recorded `ErrorDeviceLost (-4)` for the
+wait boundary; this identifies the result only and does not classify its cause.
+
+## Pipeline-cache persistence checkpoint — 2026-09-11
+
+Source/build provenance: source HEAD `86073bb2f196c703e6652a6705ff33e9c054e885`, branch
+`astro/materialize-resources`; installed Release executable SHA-256
+`99274EDE87D67FE55BE07321FE2FE3E2C04904F2636985F29898A4880F749E23`; matching PDB SHA-256
+`B99F47087F9A9FCD285EEFF9BBF7DFAC98BECAAD96D977397CD5CFA24E7E6E02`. The source change is
+commit `86073bb`: expensive graphics/compute pipeline snapshots use the existing
+`SnapshotDriverCacheLocked()` path whenever elapsed time exceeds 1000 ms, independent of
+shader/graphics debug flags; failure remains non-fatal.
+
+Cold run: `G:/KytyPS5/logs/ASTRO_PIPELINE_CACHE_COLD_20260911_2325/`, exact command in
+`command.txt`, debug flags off, `--stub-bvh`, wall `542.8841709 s`, exit `0x00000141`.
+The cache was absent at launch and ended at 9,674,239 bytes, SHA-256
+`D89D0B934FB40F5B33672356C3E01F872EDDE70CFBFC06055E0FD95EF6C8DF88`; snapshots were saved
+for compute shaders `0x78af8e269b528b5c` (85,675 ms), `0x7bd68261b1bdfb68` (112,727 ms),
+`0xf3f4e1671b30c1f4` (129,791 ms), and `0x530dcd964f29983c` (152,333 ms).
+
+Warm run: `G:/KytyPS5/logs/ASTRO_PIPELINE_CACHE_WARM_20260911_2335/`, same command and
+provenance, wall `543.6700286 s`, exit `0x00000141`. It loaded the cold cache payload
+(`9,674,161` bytes, SHA-256 `D89D0B...C8DF88`) and ended at 17,565,856 bytes, SHA-256
+`18E0265F0213F9C74D80F9FE7F0178C61AB0E6B9F8F92D9585E120FEE18948BF`. The same four
+landmark pipelines took 85,791, 113,127, 130,659, and 154,026 ms, respectively; no
+substantial warm compile reduction or overall wall-time reduction was proven. Both runs
+reached `CS 40` and then the existing `MaterializeResources(...)` fatal at `pipelineCache.cpp:573`.
+
+Cache persistence and load are therefore proven, while cache performance benefit remains
+unproven. Do not expand cache tooling. Return the runtime critical path to the known P0 exact
+`vkDevice.waitSemaphores` `ErrorDeviceLost (-4)` classification; keep colors P1.
