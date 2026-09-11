@@ -116,6 +116,16 @@ EVIDENCE: G:/KytyPS5/logs/ASTRO_M2_TRACE_20260910_232151/runtime.log. The final 
 
 RELATED CODE/COMMIT: src/graphics/host_gpu/renderer/pipeline/shaders.cpp CreatePipelineInternal(compute); src/graphics/guest_gpu/graphicsRun.cpp QueuePoint/dispatch path; semantic commit 1161113.
 
+### Post-intro fail-fast throw path — PROVEN
+
+FACT: The exact 4374a9d ASTRO BOT dump contains an uncaught MSVC `std::out_of_range` on thread 32576 (0x7f40). The first project call site is app RVA 0x20f021 in `ResourceControlFlow`, inlined into `ExtractResourcePlan`, calling `std::vector<IR::BufferResource>::_Xrange` at RVA 0x188f90 for `program.info.buffers.at(memory.resource)` (`ResourceMaterialization.cpp:1838`). The captured `Program.info.buffers` vector has 7 entries; the branch proves `memory.resource >= 7`, but the numeric value and `MemoryInfo` element are not in the minidump.
+
+WHY IT MATTERS: The current P0 is a shader/recompiler resource-plan invariant failure after IR translation and before SPIR-V emission. The UCRT `0xc0000409` / fast-fail subcode 7 is the terminal `terminate → abort` wrapper, not evidence of a stack-cookie failure, invalid-parameter guard, device loss, or color root cause. Do not replace the checked access with unchecked indexing or add a catch-all handler.
+
+EVIDENCE: `C:/Users/mneroba/AppData/Local/CrashDumps/kyty_emulator.exe.9700.dmp`; matching Release binary/PDB from source `4374a9d9dbf5224fba68e5c9e3037196a0a13245`; `G:/KytyPS5/logs/ASTRO_HOSTTRACE_20260911_175340/runtime.log`; source `src/graphics/shader/recompiler/ir/passes/ResourceMaterialization.cpp:1838`; disassembly and vector layout recover size 7 and the taken range-check branch. Runtime hash `0x657ad04626bf9d55` completed Decode/CFG/IR TranslateProgram and had no SPIR-V emission artifact. Filesystem enumeration was concurrent, but the throwing frame is in the recompiler thread.
+
+RELATED CODE/COMMIT: `ResourceControlFlow` / `ExtractResourcePlan` in `ResourceMaterialization.cpp`; `PipelineCache::ProgramCache::Get` caller; runtime source HEAD `4374a9d`. Next investigation should add a focused out-of-range fixture and inspect the existing defined plan-failure contract before changing semantics. Preserve raw guest shader bytes before this interval on a future diagnostic run if needed.
+
 ## Confirmed blocker history and commits
 
 The later semantic and documentation checkpoints are also durable:

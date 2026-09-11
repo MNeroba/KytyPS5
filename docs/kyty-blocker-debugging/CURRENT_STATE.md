@@ -1,6 +1,6 @@
 # Current KytyPS5 debugging state
 
-Last reconciled: 2026-09-10 23:36 Europe/Riga
+Last reconciled: 2026-09-11 18:58 Europe/Riga
 
 This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable mechanisms live in REFERENCE.md.
 
@@ -8,14 +8,15 @@ This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable
 
 Repository/worktree: G:/KytyPS5/repo
 Branch: astro/materialize-resources
-Runtime source HEAD at launch: 2ae7febc495a331809307bafea2f92d790988a66
-Working tree before this checkpoint: clean
+Runtime source HEAD at launch: 4374a9d9dbf5224fba68e5c9e3037196a0a13245
+Working tree before this checkpoint: clean; documentation checkpoint is being prepared
 Build: Release, CMake/Ninja, clang-cl, clang-lld_link-64
 Executable: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.exe
-Executable SHA-256: 39D69BE6C2956DECBBDC8D1FA1D3FA708B5232F3502F0984EE81BAAD3E5E252E
-Executable size: 20,812,800 bytes
-Runtime label: Source build 2ae7feb
-Binary provenance: built and installed from exact source HEAD above; all later commits in this checkpoint are documentation-only
+Executable SHA-256: 4059FF2D5CF62C6065AB754AC18D374D659C1E4F0829CE3BCC50F0CFF11A3D44
+Executable size: 20,830,720 bytes; installed 2026-09-11 17:53:04 Europe/Riga
+Runtime label: Source build 4374a9d
+Matching PDB: G:/KytyPS5/repo/_Build/windows/kyty_emulator.pdb; SHA-256 A441659DB798E6D441E3AF6C7A82E625201EE46F0EE20E53AFEF572E13888EC4; size 23,953,408 bytes; written 2026-09-11 17:53:02 Europe/Riga
+Binary provenance: dump/run used the exact installed executable and matching PDB from source HEAD above
 
 The system-wide CMake install prefix was not used because it requires administrator access.
 
@@ -24,14 +25,15 @@ The system-wide CMake install prefix was not used because it requires administra
 Target game: ASTRO BOT EU
 Title ID: PPSA21567
 Game input: G:/PS5 Games/PPSA21567/extracted
-Current milestone: M2 pipeline/command path — pipeline creation, graphics command recording, EndOfPipe signals, and guest flip/video-output path reached
-Next milestone: M3 first visible host frame
-Current P0: identify the first stable runtime boundary after the proven pipeline/command path
-P0 class: M2 post-pipeline runtime; submit completion, GPU wait, and host presentation are not yet separated
-Last validated progress signal: complete latest runtime log has matching compute pipeline begin/done pairs, successful graphics pipeline creation, BeginRendering/DrawComplete, QueuePoint entries through submit=7, EndOfPipe signals/events, and guest flip/video-output activity
-Known P1 likely blockers: command submission/timeline completion, GPU execution or synchronization, then host Present; no visible frame is proven
+Current milestone: M4 intro/loading — animated intro/scene rendered and was presented
+Next milestone: M5 main menu
+Current P0: uncaught std::out_of_range in ResourceMaterialization.cpp:1838 (ResourceControlFlow inlined into ExtractResourcePlan) for CS 0x657ad04626bf9d55, after IR translation and before SPIR-V emission
+P0 class: shader/recompiler resource-plan extraction; program.info.buffers had 7 entries and the checked access received memory.resource >= 7
+Last validated progress signal: 75 completed SPIR-V modules (38 CS / 22 PS / 14 VS / 1 MS); HostSubmit through tick=337559, HostWait tick=337558 Success, HostPresent/Flip completed, and an animated intro frame was visible
+Known P1 likely blockers: incorrect color/output interpretation after termination is classified; do not change color semantics yet
+Known P2: cold-start large dispatcher pipeline compilation latency; successful creates are not a hang
 
-M1 is closed: the clean 44-module startup batch passed offline SPIR-V validation and numeric missing-ID scans. Do not reopen SRT/materialization or the cleared pipeline-create hypothesis without contradictory evidence.
+M1, M2, and M3 are closed. Do not reopen the cleared startup SRT/BDA-lifetime, pipeline-create, submission, or visible-frame conclusions without contradictory evidence. M4 was reached; termination before M5 remains open.
 
 ## Exact runtime evidence
 
@@ -43,17 +45,17 @@ Artifacts: 44 SPIR-V modules (CS 22 / PS 14 / VS 7 / MS 1)
 Validation: spirv-val --target-env vulkan1.3 passed 44/44; numeric disassembly scan found no missing IDs
 Target module: 0019_new_shader_cs_78af8e269b528b5c.spv, 941,496 bytes, 45,225 definitions/references, missing 0
 
-Complete latest runtime trace:
+Complete latest runtime trace and crash evidence:
 
-Run: G:/KytyPS5/logs/ASTRO_M2_TRACE_20260910_232151/
-Executable: exact source-parent 2ae7feb install binary above
-Flags: shader/vulkan validation enabled, GPU-assisted=false, graphics-debug-dump=true, printf-direction=File
-Pipeline evidence: 18 vkCreateComputePipelines begin lines and 18 matching done result=Success lines; graphics pipeline creation also returned Success
-Command evidence: BeginRendering and DrawComplete reached; QueuePoint DispatchDirect reached with submit indices including submit=7; EndOfPipe signals and event waits were observed
-Presentation-path evidence: guest flip/video-output work was reached; no host Present result and no visible frame were proven
-Final shader context: address 0x000000050069ec00, hash 0x530dcd964f29983c, SPIR-V EmitProgram words=289489, dispatch groups=1x1x1, local=16x16x1, buffers=10, textures=30, sampled=28, storage=2, samplers=6; the log ends during its descriptor/runtime dump
-Latest artifact: G:/KytyPS5/logs/ASTRO_M2_TRACE_20260910_232151/shaders/0022_new_shader_cs_530dcd964f29983c.spv (1,157,956 bytes), spirv-val clean and numeric scan clean (55,709 definitions, 55,709 references, missing 0)
-Correction: the previously suspected long vkCreateComputePipelines call eventually completed. No persistent pipeline-create failure or hang is proven. The diagnostic process was stopped while the trace was still making progress or logging this dispatch.
+Run/archive: G:/KytyPS5/logs/ASTRO_HOSTTRACE_20260911_175340/
+Executable: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.exe (exact 4374a9d binary above); matching symbols are in the build tree PDB above
+Runtime: ASTRO BOT EU, input G:/PS5 Games/PPSA21567/extracted; final runtime.log write was 2026-09-11 18:02:58 Europe/Riga
+Pipeline/command evidence: HostSubmit/HostWait/HostPresent/Flip completed; no Vulkan/device-lost/error is logged. Large compute creates, including 0x530dcd964f29983c (~152661 ms), eventually succeeded.
+Termination: Windows Application Error 1000 status 0xc0000409; dump C:/Users/mneroba/AppData/Local/CrashDumps/kyty_emulator.exe.9700.dmp (82,354,794 bytes, SHA-256 6F67CB93120E117E699B4B5CEFC50BFB24791A7BE61D94EC78A3A1E0454FE578; PID 9700, created 2026-09-11 18:02:56 Europe/Riga). Exception record is C++ EH 0xe06d7363 with catchable std::out_of_range; UCRT abort fast-fail subcode 7 (FATAL_APP_EXIT) is the terminal wrapper, not the source attribution.
+Throw path: exception thread 32576 (0x7f40); app call at RVA 0x20f021 to vector<IR::BufferResource>::_Xrange (RVA 0x188f90), from ExtractResourcePlan/ResourceControlFlow, source ResourceMaterialization.cpp:1838 (`program.info.buffers.at(memory.resource)`). Program.info.buffers size recovered as 7; numeric memory.resource is not present in the minidump, only proven >= 7.
+Final shader context: CS hash 0x657ad04626bf9d55, code_words=2128; Decode/CFG/IR TranslateProgram completed, with no SPIR-V EmitProgram begin/done, PipelineCompile, or .bin/.spv artifact for this hash. Filesystem enumeration of world1_unlock/anim was concurrent; thread/frame evidence supports the recompiler path for the throw.
+Last runtime progress: archive contains 75 completed modules (38 CS / 22 PS / 14 VS / 1 MS); final successful HostSubmit tick=337559 and HostWait tick=337558 result=Success elapsed_ms=3. No clean-shutdown or pipeline-cache-save evidence is present.
+Exit provenance: the existing launch wrapper recorded no process exit code; stderr has no fatal/assert/exception/device-lost/error text and stdout has no clean shutdown. The dump and Application Error status are the available termination evidence.
 Runtime validation caveat: VK_LAYER_KHRONOS_validation was unavailable; this evidence does not provide Vulkan validation-layer coverage.
 
 ## Semantic checkpoint
@@ -64,10 +66,10 @@ src/graphics/shader/recompiler/ShaderRecompiler.cpp — structured loop-exit val
 src/graphics/shader/recompiler/backend/spirv/spirvEmitterProgram.cpp — metadata/planning-only spill filtering and shader-side SRT alias resolution
 tests/shaderCfgTests.cpp — dispatcher shader-side SRT alias regression
 
-Documentation checkpoint: current repository commit after the runtime capture. Temporary TargetCfgDump diagnostics were removed; saved shader evidence is outside the repository under G:/KytyPS5/notes/.
+Documentation checkpoint: this update records the dump/source localization only; no semantic fix, catch-all handler, unchecked access, or new ASTRO run was made. Temporary diagnostics and runtime artifacts remain outside the repository under G:/KytyPS5/notes/ and G:/KytyPS5/logs/.
 
 ## Focused validation and tomorrow
 
-Passed: shader_cfg_tests, resource_materialization_tests, shader_recompiler_compute_tests, scalar_provenance_tests, and the dispatcher alias fixture. resource_tracking_tests still reaches the known unrelated baseline failure: dynamic storage mips accepted an inverted range.
+Passed before this checkpoint: shader_cfg_tests, resource_materialization_tests, shader_recompiler_compute_tests, scalar_provenance_tests, and the dispatcher alias fixture. resource_tracking_tests still reaches the known unrelated baseline failure: dynamic storage mips accepted an inverted range.
 
-Tomorrow first action: read CURRENT_STATE.md, PROJECT_MEMORY.md, and the relevant REFERENCE.md section; inspect the final runtime context for address 0x000000050069ec00/hash 0x530dcd964f29983c and determine whether the stop was diagnostic, logging/descriptor work, slow pipeline processing, or command submission/GPU wait. Prefer existing evidence and source inspection; if a new run is necessary, give it one purpose: find the first unmatched boundary among dispatch preparation, pipeline create, command submission, GPU completion/wait, and flip/present. Add only minimal markers, then build a focused regression before semantic changes.
+Next action: read CURRENT_STATE.md, PROJECT_MEMORY.md, and the relevant REFERENCE.md section; add a focused ResourceControlFlow/ExtractResourcePlan regression for `memory.resource == buffers.size()` and inspect the existing defined plan-failure contract. Preserve raw guest shader bytes before this interval on a future diagnostic run if source inspection cannot finish the proof. Do not rerun ASTRO until that narrow regression/instrumentation purpose is defined.
