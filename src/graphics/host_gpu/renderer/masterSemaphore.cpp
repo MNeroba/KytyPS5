@@ -53,6 +53,17 @@ void MasterSemaphore::LogSubmitDebug(uint64_t tick) const {
 	} else {
 		LOGF("wait failure submit: tick=%" PRIu64 " metadata=missing\n", tick);
 	}
+
+	const auto first_tick = tick > 16 ? tick - 16 : 1;
+	for (auto history_tick = first_tick; history_tick <= tick; ++history_tick) {
+		const auto& history = m_submit_history[history_tick % SubmitHistorySize];
+		if (history.tick == history_tick) {
+			LOGF("wait failure recent submit: tick=%" PRIu64 " debug_op=%u debug_submit=%" PRIu64
+			     " args=%u,%u,%u,%u,0x%016" PRIx64 "\n",
+			     history.tick, history.debug_op, history.debug_submit, history.arg0, history.arg1,
+			     history.arg2, history.arg3, history.arg4);
+		}
+	}
 }
 
 void MasterSemaphore::Refresh() {
