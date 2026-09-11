@@ -1018,8 +1018,7 @@ PipelineCache::Pipeline& PipelineCache::CreateGraphicsPipeline(
 	    static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
 	                              std::chrono::steady_clock::now() - pipeline_begin)
 	                              .count());
-	if (pipeline_elapsed_ms > 1000u && m_driver_cache != nullptr &&
-	    (Config::ShaderDebugEnabled() || Config::GraphicsDebugDumpEnabled())) {
+	if (pipeline_elapsed_ms > 1000u && m_driver_cache != nullptr) {
 		PipelineCacheLog(
 		    "Vulkan pipeline cache: expensive graphics pipeline elapsed_ms={} snapshot",
 		    pipeline_elapsed_ms);
@@ -1060,8 +1059,7 @@ PipelineCache::CreateComputePipeline(const ShaderComputeInputInfo& input_info,
 	    static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
 	                              std::chrono::steady_clock::now() - pipeline_begin)
 	                              .count());
-	if (pipeline_elapsed_ms > 1000u && m_driver_cache != nullptr &&
-	    (Config::ShaderDebugEnabled() || Config::GraphicsDebugDumpEnabled())) {
+	if (pipeline_elapsed_ms > 1000u && m_driver_cache != nullptr) {
 		PipelineCacheLog("Vulkan pipeline cache: expensive compute pipeline shader_hash=0x{:016x} "
 		                 "elapsed_ms={} snapshot",
 		                 compute_program.shader_hash, pipeline_elapsed_ms);
