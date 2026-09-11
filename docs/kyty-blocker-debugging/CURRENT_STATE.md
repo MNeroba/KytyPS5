@@ -1,6 +1,6 @@
 # Current KytyPS5 debugging state
 
-Last reconciled: 2026-09-11 22:19 Europe/Riga
+Last reconciled: 2026-09-11 22:45 Europe/Riga
 
 This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable mechanisms live in REFERENCE.md.
 
@@ -8,17 +8,17 @@ This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable
 
 Repository/worktree: G:/KytyPS5/repo
 Branch: astro/materialize-resources
-Current source HEAD: 3fb0ce7bf477ccda6f75593ed95926d6a785adec (`debug: trace complete compute input state`)
-Last ASTRO runtime source HEAD: 4374a9d9dbf5224fba68e5c9e3037196a0a13245
-Runtime source HEAD at launch: 4374a9d9dbf5224fba68e5c9e3037196a0a13245
-Working tree before this checkpoint: clean at `3fb0ce7`; local install tree was refreshed from this build
+Current source HEAD: 150a1395c7553191a8e5f856b60cdea657034ed8 (`debug: persist complete shader replay input trace`)
+Last ASTRO runtime source HEAD: 150a1395c7553191a8e5f856b60cdea657034ed8
+Runtime source HEAD at launch: 150a1395c7553191a8e5f856b60cdea657034ed8
+Working tree before this checkpoint: clean at `150a139`; local install tree was refreshed from this build
 Build: Release, CMake/Ninja, clang-cl, clang-lld_link-64
 Executable: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.exe
-Executable SHA-256: F4334F4D39476C95BFA1ABB301D8C25D053DA3331B0B31E8F867823FEA63121C
-Executable size: 21,020,160 bytes; local install refreshed 2026-09-11 22:12:00 Europe/Riga
-Build label: Source build 3fb0ce7 (from generated `kytyGitVersion.h`); one diagnostic launch was attempted, but it stopped before the target shader because the baseline BVH stub flag was omitted
-Matching PDB: G:/KytyPS5/repo/_Build/windows/kyty_emulator.pdb and local install copy; SHA-256 7F622347853D4FF4A6C046DF9999F43CBE378C63D0769643E43443990811E15F; size 24,059,904 bytes; built 2026-09-11 22:11:58 Europe/Riga
-Binary provenance: the historical dump/run used 4374a9d above; the current local install is a separate 3fb0ce7 build for the future capture
+Executable SHA-256: F4710707DC611196CD33C62F9BBDC4B7AAC366CAEB1AA9D8172ADAF793B09724
+Executable size: 21,020,160 bytes; local install refreshed 2026-09-11 22:25:00 Europe/Riga
+Build label: Source build 150a139 (from generated `kytyGitVersion.h`); diagnostic-only replay trace fields are enabled by the launch flags below
+Matching PDB: G:/KytyPS5/repo/_Build/windows/kyty_emulator.pdb and local install copy; SHA-256 7F661D1EECEE0C3CCCE5BF3878D19191A4A928E9940F0FBB885399392A6B078A; size 24,059,904 bytes
+Binary provenance: the historical dump/run used 4374a9d above; this bounded capture used the exact 150a139 executable/PDB above
 
 The system-wide CMake install prefix was not used because it requires administrator access.
 
@@ -29,8 +29,8 @@ Title ID: PPSA21567
 Game input: G:/PS5 Games/PPSA21567/extracted
 Current milestone: M4 intro/loading — animated intro/scene rendered and was presented
 Next milestone: M5 main menu
-Current P0: obtain production-derived `ShaderComputeInputInfo` for CS `0x657ad04626bf9d55` so an exact replay can be built without guessed state
-P0 class: replay provenance / pre-resource-plan observation; the bounded-root producer invariant is fixed generically by `edc7d4f` and must not be reopened without contradictory evidence
+Current P0: production-derived `ShaderComputeInputInfo` capture and exact replay for CS `0x657ad04626bf9d55` are complete; no next runtime blocker was investigated in this bounded task
+P0 class: replay provenance is complete for this target; the bounded-root producer invariant is fixed generically by `edc7d4f` and must not be reopened without contradictory evidence
 Last validated progress signal: 75 completed SPIR-V modules (38 CS / 22 PS / 14 VS / 1 MS); HostSubmit through tick=337559, HostWait tick=337558 Success, HostPresent/Flip completed, and an animated intro frame was visible
 Known P1 likely blockers: classify any next post-intro boundary after the exact target state is captured; incorrect color/output interpretation remains P1 and is not a current fix target
 Known P2: cold-start large dispatcher pipeline compilation latency; successful creates are not a hang
@@ -78,17 +78,27 @@ Passed after `edc7d4f`: `resource_materialization_tests`, `shader_cfg_tests`, `s
 
 ## Production compute-state provenance
 
-The existing target artifacts do not contain an authentic `ShaderComputeInputInfo` snapshot or capsule for `0x657ad04626bf9d55`. The target raw `.bin`/`.rdna2` and SPIR-V contain shader code/output, not PM4 register state. The only target-run field directly proven from existing evidence is `host_subgroup_size=32`, from the Vulkan subgroup report and `GetComputeProgram` selection. `user_data_base=0` is the compute `CompileOptions` default, and source ordering proves `dispatch_threads_num={0,0,0}` at the `CompileProgram` call because `RenderExecutor::DispatchDirect` assigns it only after `GetComputeProgram` returns.
+Before the bounded capture, the target raw `.bin`/`.rdna2` and SPIR-V could not supply PM4
+register state; the historical `ShaderDbgDumpInputInfo` near `0x9e8627388f138c1d` belonged to
+another shader. The source provenance remains: PM4 `COMPUTE_NUM_THREAD_X/Y/Z` and
+`COMPUTE_PGM_RSRC2` populate `CsStageRegisters`; `ShaderGetStaticInputInfoCS` copies those
+fields; `GetShaderParams` copies `cs_user_sgpr` into `options.user_data`; `ProgramCache::Get`
+passes the state into `CompileProgram`.
 
-The remaining target values are **UNAVAILABLE** without a new production capture: `threads_num`, `thread_ids_num`, `group_id`, `tg_size_en`, `workgroup_register`, `dispatch_thread_dimensions`, and `user_data count`. Their provenance is known: PM4 `COMPUTE_NUM_THREAD_X/Y/Z` and `COMPUTE_PGM_RSRC2` populate `CsStageRegisters`; `ShaderGetStaticInputInfoCS` copies those fields; `GetShaderParams` copies `cs_user_sgpr` into `options.user_data`; `ProgramCache::Get` passes the state into `CompileProgram`. The historical `ShaderDbgDumpInputInfo` near `0x9e8627388f138c1d` belongs to that other shader and cannot be reused.
-
-No guessed replay candidate or new ASTRO run was made for this checkpoint. The new opt-in `ShaderReplayInput` markers record the actual state both before resource-plan extraction and immediately before `CompileProgram`; the next run must use them only to capture production values and then build one exact capsule.
+The complete production values and paired trace are recorded in **Bounded production capture —
+complete** below. No values were inferred from LocalSize and no replay candidates were guessed.
 
 ## Focused validation and tomorrow
 
-The diagnostic source change passed `git diff --check` and was committed as `3fb0ce7`. A serialized Release build (`ninja -C _Build/windows -j1 kyty_emulator`) completed; the generated CMake install target still fails at the administrator-only system prefix, so the local install executable/PDB were copied directly from the build tree. `shader_recompiler_compute_tests` was rebuilt from this exact source and passed (`EXIT_CODE=0`, wall `8.370 s`, log `G:/KytyPS5/logs/shader_recompiler_compute_tests_3fb0ce7.log`).
+The diagnostic source change passed `git diff --check` and was committed as `150a139`. A serialized
+Release build (`ninja -C _Build/windows -j1 kyty_emulator shader_recompiler_compute_tests
+shader_replay_tests`) completed; the generated CMake install target still fails at the
+administrator-only system prefix, so the local install executable/PDB were copied directly from
+the build tree. `shader_recompiler_compute_tests` passed (`EXIT_CODE=0`, wall `8.1447 s`, log
+`G:/KytyPS5/logs/shader_recompiler_compute_tests_150a139.log`), and the replay test executable
+help path also returned 0 (`G:/KytyPS5/logs/shader_replay_tests_help_150a139.log`).
 
-Next action: when the no-run constraint is lifted, launch the current local install once with shader-debug enabled solely to capture the target's pre-resource-plan fields, then build one exact capsule from that production state. Do not generate a new exact capsule or change color semantics until those values are production-derived.
+Next action: preserve the exact capsule and replay evidence below; a future session may resume post-intro termination classification. Do not start another ASTRO run or investigate the next blocker as part of this checkpoint.
 
 ## Bounded production-capture attempt
 
@@ -103,3 +113,34 @@ opcode `0xe6` because `--stub-bvh` was not supplied, before
 `0x657ad04626bf9d55` was encountered. No `ShaderReplayInput` A/B record or exact capsule
 was produced; `--printf-direction Silent` also omitted the `LOGF` trace lines. Do not
 count this as a target capture or update M1–M4 from it.
+
+## Bounded production capture — complete
+
+Run/artifact: `G:/KytyPS5/logs/ASTRO_REPLAY_INPUT_20260911_2223148/`.
+The one launch used source `150a1395c7553191a8e5f856b60cdea657034ed8`, executable SHA-256
+`F4710707DC611196CD33C62F9BBDC4B7AAC366CAEB1AA9D8172ADAF793B09724`, matching PDB SHA-256
+`7F661D1EECEE0C3CCCE5BF3878D19191A4A928E9940F0FBB885399392A6B078A`, and the exact command
+is recorded in `command.txt`. It used the known-good `--stub-bvh` baseline, enabled only the
+existing replay trace, and wrote the printf trace to `runtime.log` through the File sink.
+
+Target CS `0x657ad04626bf9d55` was paired by `replay_invocation_id=76`: boundary A
+`pre_resource_plan` is runtime.log line 828914 and boundary B `pre_compile` is line 828922.
+Both records are complete and byte-for-byte identical after removing the phase name. Values:
+`threads_num={32,2,1}`, `thread_ids_num=2`, `group_id={true,true,false}`, `tg_size_en=false`,
+`workgroup_register=16`, `host_subgroup_size=32`, `dispatch_thread_dimensions=false`,
+`dispatch_threads_num={0,0,0}`, `wave_size=64`, `lds_size_dwords=128`, `scratch_size_dwords=0`,
+`user_data_base=0`, and ordered `user_data` count 16:
+`[0x02dff4b0,0x00000005,0x055c0100,0xc1400000,0x001fc01f,0x91b00204,0x00000000,0x00000000,0x00000000,0x00000000,0x5ac08000,0x00080005,0x00100000,0x00005204,0x02dff2e0,0x00000005]`.
+
+The target emitted 124012 SPIR-V words and pipeline creation completed successfully
+(`runtime.log` line 830773, elapsed_ms=614). The wrapper stopped intentionally after both
+records became durable at 2026-09-11 22:41:24; wall time was 545.1619612 s and no process exit
+code is claimed. The immutable runtime capsule is
+`shaders/original/precompile_cs_657ad04626bf9d55.capsule.json`, SHA-256
+`38C3BAEE5D9D3DEFA65A396D15B3546A7C88F2C5913AE273477F55953AEA5E2F`.
+
+Two offline exact replays both returned exit code 0 and internal validation PASS. Each emitted
+124012 words with `OpExecutionMode %main LocalSize 32 1 1`, `uses_dma=true`, and SPIR-V SHA-256
+`0644462056027C84D811B2D621EA5A51FCBFE07B31C629E533373A95DB67DFBC`; wall times were 114 ms
+and 108 ms. External `spirv-val --target-env vulkan1.3` returned 0 for both outputs. This proves
+production-state equivalence for the captured recompiler input, without changing M1–M4.

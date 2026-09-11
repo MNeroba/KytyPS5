@@ -144,6 +144,35 @@ WHY IT MATTERS: The generic opt-in `ShaderReplayInput` trace is placed before re
 
 RELATED CODE/COMMIT: diagnostic trace in `src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp`, commit `3fb0ce7`; no new capsule or ASTRO run has been made for this evidence.
 
+### Exact production replay state for CS 0x657ad04626bf9d55 — PROVEN
+
+FACT: A single ASTRO capture from source `150a1395c7553191a8e5f856b60cdea657034ed8` paired
+the target's pre-resource-plan and pre-CompileProgram records with
+`replay_invocation_id=76`. Both boundaries contain the complete same state:
+`threads_num={32,2,1}`, `thread_ids_num=2`, `group_id={true,true,false}`, `tg_size_en=false`,
+`workgroup_register=16`, `host_subgroup_size=32`, `dispatch_thread_dimensions=false`,
+`dispatch_threads_num={0,0,0}`, `wave_size=64`, `lds_size_dwords=128`, `scratch_size_dwords=0`,
+`user_data_base=0`, and 16 ordered user-data dwords
+`[0x02dff4b0,0x00000005,0x055c0100,0xc1400000,0x001fc01f,0x91b00204,0x00000000,0x00000000,0x00000000,0x00000000,0x5ac08000,0x00080005,0x00100000,0x00005204,0x02dff2e0,0x00000005]`.
+
+WHY IT MATTERS: The target replay input is now production-derived and no guessed state is
+needed. The checked `.at()` and resource/materialization semantics remain unchanged.
+
+EVIDENCE: `G:/KytyPS5/logs/ASTRO_REPLAY_INPUT_20260911_2223148/runtime.log` lines 828914 and
+828922; raw target bytes `shaders/original/precompile_cs_657ad04626bf9d55.bin`; runtime capsule
+`shaders/original/precompile_cs_657ad04626bf9d55.capsule.json` (SHA-256
+`38C3BAEE5D9D3DEFA65A396D15B3546A7C88F2C5913AE273477F55953AEA5E2F`). Runtime emitted 124012
+SPIR-V words and pipeline creation succeeded. Two offline exact replays returned internal
+validation PASS and external `spirv-val --target-env vulkan1.3` exit 0, each producing
+`LocalSize 32 1 1`, `uses_dma=true`, and identical SPIR-V SHA-256
+`0644462056027C84D811B2D621EA5A51FCBFE07B31C629E533373A95DB67DFBC`.
+
+RELATED CODE/COMMIT: diagnostic trace and invocation correlation in
+`src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp` and
+`src/graphics/shader/recompiler/ShaderRecompiler.h`, commit `150a139`.
+The bounded launch used `--stub-bvh` and persisted the printf File sink; the wrapper stopped
+after both records were durable, so no exit code is inferred.
+
 ### Bounded descriptor root resource remap — PROVEN
 
 FACT: `PlanBoundedRootReads` can retain a raw scalar-buffer `ReadConstBuffer` as a descriptor root. `ApplyBoundedRootReads` keeps that original instruction alive with `ReferenceU32`, but the old `ResourceTracking::Collect` returned before `AddBuffer` and `AddMemoryPatch`. Its frontend resource id therefore remained in the guest/SGPR namespace while `program.info.buffers` was dense, producing the post-intro `std::out_of_range`.
