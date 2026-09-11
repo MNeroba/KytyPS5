@@ -4683,6 +4683,64 @@ void TestNewShaderRecompilerScalarMemoryBindingDomains() {
             ShaderRecompiler::IR::ResourceKind::ScalarBuffer) == 1u,
         "descriptor scalar load did not remain a live typed buffer operation");
   CheckSpirvBinaryValidates(buffer.spirv);
+
+  // A retained shader-side SRT root is planning-only and bypasses the normal
+  // address Collect branch. It still emits through the BDA helper, so the
+  // resource topology must preserve the DMA descriptor domain.
+  {
+    using namespace ShaderRecompiler::IR;
+    Program program;
+    program.stage = ShaderType::Compute;
+    program.user_data_count = 64u;
+    program.block_storage.push_back(std::make_unique<Block>());
+    auto *block = program.block_storage.back().get();
+    program.blocks.push_back(block);
+    program.block_info.emplace_back();
+    const auto user_data = [&](uint32_t index) {
+      return Value(&block->AppendNewInst(
+          ValueOpcode::GetUserData,
+          {Value(static_cast<ScalarReg>(index))}));
+    };
+    const auto address = [&](Value low, Value high, uint32_t pc) {
+      auto &inst = block->AppendNewInst(ValueOpcode::GetAddressResource, {low, high});
+      inst.SetFlags(MemoryFlags{0u, pc});
+      return Value(&inst);
+    };
+    const auto scalar_memory = [&](uint32_t pc) {
+      MemoryInfo memory;
+      memory.kind = ResourceKind::ScalarAddress;
+      const auto index = static_cast<uint32_t>(program.memory_info.size());
+      program.memory_info.push_back(memory);
+      return MemoryFlags{index, pc};
+    };
+    const auto emit_load = [&](Value base, uint32_t offset, uint32_t pc) {
+      auto &inst = block->AppendNewInst(
+          ValueOpcode::LoadAddressU32,
+          {base, Value(offset), Value(0u), Value(true)});
+      inst.SetFlags(scalar_memory(pc));
+      return Value(&inst);
+    };
+    const auto root = emit_load(address(user_data(0u), user_data(1u), 0x4200u), 0x30u,
+                                0x4200u);
+    const auto child = emit_load(address(root, Value(0u), 0x4204u), 0u, 0x4204u);
+    block->AppendNewInst(ValueOpcode::ReferenceU32, {child});
+
+    BuildSrtPlan(program);
+    TrackResources(program);
+    Check(program.info.uses_dma,
+          "retained shader-side SRT root did not preserve DMA topology");
+
+    ShaderComputeInputInfo compute{};
+    CollectShaderInfo(program, {.compute = &compute});
+    AllocateBindings(program);
+    Check(FindBinding(program.bindings, DescriptorBindingKind::BdaPagetable) != nullptr &&
+              FindBinding(program.bindings, DescriptorBindingKind::FaultBuffer) != nullptr,
+          "retained shader-side SRT root lost DMA descriptor bindings");
+    ShaderRecompiler::Spirv::AnalyzeProgramRequirements(program);
+    const auto spirv =
+        ShaderRecompiler::Spirv::EmitProgram(program, {.compute = &compute});
+    CheckSpirvBinaryValidates(spirv);
+  }
 }
 
 void TestNewShaderRecompilerImageQueryTranslation() {

@@ -1260,6 +1260,15 @@ void TestShaderSideScalarAddressSrtRead() {
   Check(std::all_of(fixture.program.memory_info.begin(), fixture.program.memory_info.end(),
                     [](const MemoryInfo& memory) { return memory.planning_only; }),
         "shader-side scalar-address roots were not marked planning-only");
+  Check(fixture.program.info.uses_dma,
+        "retained shader-side scalar-address roots did not enable DMA topology");
+
+  ShaderComputeInputInfo compute{};
+  CollectShaderInfo(fixture.program, {.compute = &compute});
+  AllocateBindings(fixture.program);
+  Check(FindBinding(fixture.program.bindings, DescriptorBindingKind::BdaPagetable) != nullptr &&
+            FindBinding(fixture.program.bindings, DescriptorBindingKind::FaultBuffer) != nullptr,
+        "retained shader-side scalar-address roots did not receive DMA bindings");
 
   const auto plan = ExtractResourcePlan(fixture.program);
   std::vector<DescriptorValue> descriptors;
@@ -2688,12 +2697,12 @@ int main() {
         TestBoundedDescriptorSourceSurvivesDeadCodeElimination);
     Run("bounded root scalar-buffer remap",
         TestBoundedRootScalarBufferResourceRemap);
+    Run("shader-side scalar-address SRT", TestShaderSideScalarAddressSrtRead);
     Run("dead planning SRT slot", TestDeadPlanningSrtSlotDoesNotFlatten);
     Run("dynamic storage mips", TestDynamicStorageMipTracking);
     Run("invariant indirect images", TestInvariantIndirectImageMaterialization);
     Run("SRT runtime", TestSrtFlatteningAndRuntimeMemoization);
     Run("dynamic SRT", TestDynamicSrtReadRemainsExplicit);
-    Run("shader-side scalar-address SRT", TestShaderSideScalarAddressSrtRead);
     Run("phi validation", TestPhiValidation);
     Run("runtime-rooted loop", TestLoopCycleEnteredThroughRuntimeValue);
     Run("invariant loop phi", TestInvariantLoopPhi);

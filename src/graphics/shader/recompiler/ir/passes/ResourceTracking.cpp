@@ -210,6 +210,18 @@ public:
 		});
 		RetainBoundedDescriptorSources();
 		RefreshShaderSideSrtEligibility(m_program, shader_side_slot_count, m_bda_srt_clones);
+		// A retained shader-side scalar-address root is planning-only, so Collect
+		// deliberately skips its ordinary address branch.  The root is still
+		// emitted through the shader-side BDA path and therefore must keep the DMA
+		// topology (helper plus descriptor bindings) alive.
+		if (!m_info.uses_dma) {
+			for (const auto& read: m_program.srt_reads) {
+				if (read.shader_side && IsShaderSideRawRead(read.value)) {
+					m_info.uses_dma = true;
+					break;
+				}
+			}
+		}
 		m_program.descriptor_sources         = std::move(m_sources);
 		m_program.info                       = std::move(m_info);
 		m_program.resource_tracking_complete = true;
