@@ -56,6 +56,20 @@ When the blocker changes stages, explicitly hand off the investigation and stop 
 
 Primary metric: **time to the next observable game milestone**. Secondary metric: proven blockers cleared per wall-clock time. For each next action, choose the highest expected information gain or progress per unit time, in this order when applicable: existing logs → static proof → focused test → narrow patch → one game run. Avoid broad architecture exploration while a cheaper discriminating action exists.
 
+## Debug tooling is a means, not the project goal
+
+The primary objective is runtime progression of ASTRO toward the menu and gameplay. Extend offline replay, tracing, capture infrastructure, diagnostics, or test harnesses only when they are required to identify, reproduce, or prove a concrete runtime blocker.
+
+Once the required evidence is captured and replay fidelity is established:
+
+1. Stop expanding the diagnostic infrastructure.
+2. Return immediately to the runtime path.
+3. Identify the next actual blocker.
+4. Make the narrowest semantic fix.
+5. Validate progression in ASTRO.
+
+Do not keep improving replay/debug infrastructure merely because additional fidelity, logging, metadata, or convenience could be added. For a production-state capture, add further trace fields or tooling only when the current capture proves that information required by `CompileProgram` is missing or ambiguous.
+
 ## Priority
 
 The same P0–P3 rules apply to all debugging decisions. Do not reopen an architectural question already answered by `PROJECT_MEMORY.md` unless current source contradicts it, a regression contradicts it, or new runtime evidence makes it stale.
