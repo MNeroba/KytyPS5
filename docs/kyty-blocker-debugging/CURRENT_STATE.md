@@ -1,6 +1,6 @@
 # Current KytyPS5 debugging state
 
-Last reconciled: 2026-09-11 22:45 Europe/Riga
+Last reconciled: 2026-09-11 23:02 Europe/Riga
 
 This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable mechanisms live in REFERENCE.md.
 
@@ -8,7 +8,7 @@ This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable
 
 Repository/worktree: G:/KytyPS5/repo
 Branch: astro/materialize-resources
-Repository HEAD at this docs checkpoint: `99081d8` (docs-only commits after the runtime build; source/build revision remains `150a139`)
+Repository HEAD at this docs checkpoint: `3fe3d27` (docs-only commits after the runtime build; source/build revision remains `150a139`)
 Current source HEAD: 150a1395c7553191a8e5f856b60cdea657034ed8 (`debug: persist complete shader replay input trace`)
 Last ASTRO runtime source HEAD: 150a1395c7553191a8e5f856b60cdea657034ed8
 Runtime source HEAD at launch: 150a1395c7553191a8e5f856b60cdea657034ed8
@@ -28,15 +28,15 @@ The system-wide CMake install prefix was not used because it requires administra
 Target game: ASTRO BOT EU
 Title ID: PPSA21567
 Game input: G:/PS5 Games/PPSA21567/extracted
-Current milestone: M4 intro/loading — animated intro/scene rendered and was presented
-Next milestone: M5 main menu
-Current P0: production-derived `ShaderComputeInputInfo` capture and exact replay for CS `0x657ad04626bf9d55` are complete; no next runtime blocker was investigated in this bounded task
-P0 class: replay provenance is complete for this target; the bounded-root producer invariant is fixed generically by `edc7d4f` and must not be reopened without contradictory evidence
-Last validated progress signal: 75 completed SPIR-V modules (38 CS / 22 PS / 14 VS / 1 MS); HostSubmit through tick=337559, HostWait tick=337558 Success, HostPresent/Flip completed, and an animated intro frame was visible
-Known P1 likely blockers: classify any next post-intro boundary after the exact target state is captured; incorrect color/output interpretation remains P1 and is not a current fix target
+Current milestone: M5 main menu — title screen loaded and rendered
+Next milestone: M6 gameplay
+Current P0: classify the first post-M5 runtime failure at `MasterSemaphore::Wait` (`masterSemaphore.cpp:69`)
+P0 class: GPU synchronization/runtime result; the exact `vk::Result` is not logged in this run
+Last validated progress signal: M5 title screen reached after frame 495 at approximately 14 FPS; `LevelDocument Loaded: title_controller_ship [title]` and title-screen assets were logged
+Known P1 likely blockers: incorrect color/output interpretation remains P1 and is not a current fix target
 Known P2: cold-start large dispatcher pipeline compilation latency; successful creates are not a hang
 
-M1, M2, and M3 are closed. Do not reopen the cleared startup SRT/BDA-lifetime, pipeline-create, submission, or visible-frame conclusions without contradictory evidence. M4 was reached; termination before M5 remains open.
+M1, M2, M3, and M4 are closed. M5 was reached in the progression run below. Do not reopen the cleared startup SRT/BDA-lifetime, pipeline-create, submission, or visible-frame conclusions without contradictory evidence.
 
 ## Exact runtime evidence
 
@@ -99,7 +99,7 @@ the build tree. `shader_recompiler_compute_tests` passed (`EXIT_CODE=0`, wall `8
 `G:/KytyPS5/logs/shader_recompiler_compute_tests_150a139.log`), and the replay test executable
 help path also returned 0 (`G:/KytyPS5/logs/shader_replay_tests_help_150a139.log`).
 
-Next action: preserve the exact capsule and replay evidence below; a future session may resume post-intro termination classification. Do not start another ASTRO run or investigate the next blocker as part of this checkpoint.
+Next action: classify the post-M5 semaphore failure from the preserved run artifact before any fix. Keep color correctness P1 and cold pipeline latency P2.
 
 ## Bounded production-capture attempt
 
@@ -145,3 +145,24 @@ Two offline exact replays both returned exit code 0 and internal validation PASS
 `0644462056027C84D811B2D621EA5A51FCBFE07B31C629E533373A95DB67DFBC`; wall times were 114 ms
 and 108 ms. External `spirv-val --target-env vulkan1.3` returned 0 for both outputs. This proves
 production-state equivalence for the captured recompiler input, without changing M1–M4.
+
+## Progression run — M5 reached
+
+Run/artifact: `G:/KytyPS5/logs/ASTRO_PROGRESS_20260911_225139/`.
+The one progression launch used the installed executable SHA-256
+`F4710707DC611196CD33C62F9BBDC4B7AAC366CAEB1AA9D8172ADAF793B09724` with the known-good
+`--stub-bvh` baseline; the exact command is in `command.txt`. The runtime label is `Source build
+150a139`; the repository HEAD at launch was `3fe3d2718f154e9d3f8f133a0fb8a176c7004a63`.
+
+M5 is proven logically: runtime.log records `LevelDocument Loaded: title_controller_ship [title]`
+at lines 132658 and 750548, repeated `title_screen.spx` loads, and title assets
+`titlescreen_start_text.jxm` and `astro_bot_logo_title.jxm` (lines 133922 and 133940). The process
+window reached frame 495 at approximately 14 FPS; stdout reached `VS 14 | PS 22 | CS 40 | GS 1`.
+
+After M5, the process terminated through the existing fatal-error path at runtime.log lines 780571–
+780572 and stdout lines 107–125: `Not implemented (result != vk::Result::eSuccess)` in
+`src/graphics/host_gpu/renderer/masterSemaphore.cpp:69`, the `vkDevice.waitSemaphores` result check
+in `MasterSemaphore::Wait`. The run wrapper recorded wall time `550.8255477 s`, PID `26180`, and
+no reliable process exit code (`exit_code` was unavailable; do not treat the reported `0x00000000`
+placeholder as a clean exit). No new crash dump was created. The exact Vulkan result and a source
+root cause remain unclassified for the next session; no fix was made in this run.

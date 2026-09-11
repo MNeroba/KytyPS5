@@ -173,6 +173,37 @@ RELATED CODE/COMMIT: diagnostic trace and invocation correlation in
 The bounded launch used `--stub-bvh` and persisted the printf File sink; the wrapper stopped
 after both records were durable, so no exit code is inferred.
 
+### ASTRO M5 title screen progression — PROVEN
+
+FACT: A progression-focused ASTRO run from the `150a139` executable reached the title screen
+after the previously proven M4 intro path. The runtime loaded `title_controller_ship [title]`,
+repeated `title_screen.spx`, `titlescreen_start_text.jxm`, and `astro_bot_logo_title.jxm`; the
+window reached frame 495 at approximately 14 FPS. This is the first proven M5 main-menu/title
+milestone.
+
+WHY IT MATTERS: The resource-remap and target-shader replay work is no longer on the runtime
+critical path. Future work should target progression from M5 toward gameplay.
+
+EVIDENCE: `G:/KytyPS5/logs/ASTRO_PROGRESS_20260911_225139/`; runtime.log lines 132658 and
+750548, title assets at lines 133922 and 133940, stdout line 97 build label `Source build
+150a139`, and final shader count `VS 14 | PS 22 | CS 40 | GS 1`.
+
+RELATED CODE/COMMIT: runtime build source `150a139`; no semantic fix was made for this run.
+
+FACT: After M5 was reached, the same run terminated through the existing fatal-error path at
+`src/graphics/host_gpu/renderer/masterSemaphore.cpp:69`, the non-success check after
+`vkDevice.waitSemaphores` in `MasterSemaphore::Wait`. The exact Vulkan result was not logged and
+no new crash dump was created; this is an unclassified next P0, not evidence against M5.
+
+WHY IT MATTERS: Do not reclassify this as a cold pipeline hang or reopen earlier shader/resource
+blockers. The next investigation must first identify the exact semaphore result and its runtime
+cause before changing semantics.
+
+EVIDENCE: The same run's runtime.log lines 780571–780572 and stdout lines 107–125; wrapper
+wall time `550.8255477 s`, PID `26180`, with no reliable process exit code.
+
+RELATED CODE/COMMIT: `MasterSemaphore::Wait`; runtime artifact above; no fix made in this session.
+
 ### Bounded descriptor root resource remap — PROVEN
 
 FACT: `PlanBoundedRootReads` can retain a raw scalar-buffer `ReadConstBuffer` as a descriptor root. `ApplyBoundedRootReads` keeps that original instruction alive with `ReferenceU32`, but the old `ResourceTracking::Collect` returned before `AddBuffer` and `AddMemoryPatch`. Its frontend resource id therefore remained in the guest/SGPR namespace while `program.info.buffers` was dense, producing the post-intro `std::out_of_range`.
