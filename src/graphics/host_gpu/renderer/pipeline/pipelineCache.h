@@ -101,8 +101,11 @@ struct PipelineVertexInputState {
 };
 
 struct ShaderProgram {
-	uint64_t         id     = 0;
-	vk::ShaderModule module = nullptr;
+	uint64_t         id          = 0;
+	vk::ShaderModule module      = nullptr;
+	ShaderType       stage       = ShaderType::Unknown;
+	uint64_t         shader_hash = 0;
+	uint64_t         spirv_words = 0;
 
 	explicit operator bool() const { return id != 0 && module != nullptr; }
 };
@@ -229,7 +232,7 @@ void CreatePipelineInternal(
     const PipelineStaticParameters& static_params, vk::PipelineCache driver_cache);
 void CreatePipelineInternal(GraphicContext& graphics, PipelineCache::Pipeline& pipeline,
                             const ShaderComputeInputInfo& input_info,
-                            vk::ShaderModule compute_module, vk::PipelineCache driver_cache);
+                            const ShaderProgram& compute_program, vk::PipelineCache driver_cache);
 
 } // namespace Libs::Graphics
 

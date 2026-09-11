@@ -14,6 +14,7 @@
 #include "graphics/presentation/window/windowInternal.h"
 
 #include <algorithm>
+#include <chrono>
 #include <deque>
 #include <limits>
 #include <memory>
@@ -678,9 +679,23 @@ Swapchain::Status Swapchain::Present() {
 	present.waitSemaphoreCount = 1;
 
 	vk::Result result;
+	const auto present_begin = std::chrono::steady_clock::now();
+	if (Config::GraphicsDebugDumpEnabled() &&
+	    Config::GetPrintfDirection() != Config::OutputDirection::Silent) {
+		LOGF("HostPresent begin image=%u frame_index=%u\n", m_image_index, m_frame_index);
+	}
 	{
 		Common::LockGuard lock(m_window.graphic_ctx.queue_mutex);
 		result = m_window.graphic_ctx.queue.presentKHR(&present);
+	}
+	if (Config::GraphicsDebugDumpEnabled() &&
+	    Config::GetPrintfDirection() != Config::OutputDirection::Silent) {
+		LOGF("HostPresent done image=%u frame_index=%u result=%s elapsed_ms=%" PRIu64 "\n",
+		     m_image_index, m_frame_index, vk::to_string(result).c_str(),
+		     static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+	                                     std::chrono::steady_clock::now() - present_begin)
+
+	                                     .count()));
 	}
 	switch (result) {
 		case vk::Result::eSuccess: break;

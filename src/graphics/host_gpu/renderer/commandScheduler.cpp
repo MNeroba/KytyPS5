@@ -3,8 +3,10 @@
 #include "common/assert.h"
 #include "common/logging/log.h"
 #include "graphics/host_gpu/graphicContext.h"
+#include "graphics/host_gpu/renderer/debug.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <optional>
 
@@ -355,6 +357,14 @@ uint64_t CommandScheduler::Submit(SubmitInfo submit) {
 
 	vk::Result result;
 	uint64_t   tick;
+	const auto submit_begin = std::chrono::steady_clock::now();
+	const auto debug_op     = m_command.m_debug_op;
+	const auto debug_submit = m_command.m_debug_submit_id;
+	if (graphics_debug_dump_enabled()) {
+		LOGF("HostSubmit begin cmd=%p waits=%u signals=%u debug_op=%u debug_submit=%" PRIu64 "\n",
+		     static_cast<void*>(buffer), submit.num_wait_semaphores,
+		     submit.num_signal_semaphores + 1u, debug_op, debug_submit);
+	}
 	{
 		Common::LockGuard lock(graphics.queue_mutex);
 		tick = m_master.NextTick();
@@ -384,6 +394,15 @@ uint64_t CommandScheduler::Submit(SubmitInfo submit) {
 		                  m_command.m_debug_submit_id, m_command.m_debug_arg0,
 		                  m_command.m_debug_arg1, m_command.m_debug_arg2, m_command.m_debug_arg3,
 		                  m_command.m_debug_arg4);
+	}
+	if (graphics_debug_dump_enabled()) {
+		LOGF("HostSubmit done cmd=%p tick=%" PRIu64 " result=%s elapsed_ms=%" PRIu64
+		     " debug_op=%u debug_submit=%" PRIu64 "\n",
+		     static_cast<void*>(buffer), tick, vk::to_string(result).c_str(),
+		     static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+		                                     std::chrono::steady_clock::now() - submit_begin)
+		                                     .count()),
+		     debug_op, debug_submit);
 	}
 	EXIT_NOT_IMPLEMENTED(result != vk::Result::eSuccess);
 

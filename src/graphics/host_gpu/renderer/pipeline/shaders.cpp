@@ -17,6 +17,7 @@
 #include "graphics/shader/shader.h"
 
 #include <algorithm>
+#include <chrono>
 #include <limits>
 #include <span>
 #include <vector>
@@ -763,7 +764,13 @@ void CreatePipelineInternal(
 
 	EXIT_IF(pipeline.pipeline != nullptr);
 
+	const auto pipeline_begin = std::chrono::steady_clock::now();
 	if (graphics_debug_dump_enabled()) {
+		LOGF("PipelineCompile: stage=Gfx vs_hash=0x%016" PRIx64 " vs_words=%" PRIu64
+		     " ps_hash=0x%016" PRIx64 " ps_words=%" PRIu64
+		     " cache_feedback=unavailable begin\n",
+		     vertex_program.shader_hash, vertex_program.spirv_words,
+		     ps_active ? pixel_program.shader_hash : 0, ps_active ? pixel_program.spirv_words : 0);
 		LOGF("PipelineTrace: vkCreateGraphicsPipelines begin VS=%" PRIu64 " PS=%" PRIu64
 		     " topology=%" PRIu32 " color_mask=0x%08" PRIx32
 		     " depth=%s blend=%s dyn_states=%" PRIu32 "\n",
@@ -777,6 +784,15 @@ void CreatePipelineInternal(
 	if (graphics_debug_dump_enabled()) {
 		LOGF("PipelineTrace: vkCreateGraphicsPipelines done result=%s pipeline=%p\n",
 		     vk::to_string(result).c_str(), static_cast<void*>(pipeline.pipeline));
+		LOGF("PipelineCompile: stage=Gfx vs_hash=0x%016" PRIx64 " vs_words=%" PRIu64
+		     " ps_hash=0x%016" PRIx64 " ps_words=%" PRIu64
+		     " done result=%s elapsed_ms=%" PRIu64 "\n",
+		     vertex_program.shader_hash, vertex_program.spirv_words,
+		     ps_active ? pixel_program.shader_hash : 0, ps_active ? pixel_program.spirv_words : 0,
+		     vk::to_string(result).c_str(),
+		     static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+	                                     std::chrono::steady_clock::now() - pipeline_begin)
+	                                     .count()));
 	}
 	EXIT_NOT_IMPLEMENTED(result != vk::Result::eSuccess);
 
@@ -793,7 +809,8 @@ void CreatePipelineInternal(
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void CreatePipelineInternal(GraphicContext& graphics, PipelineCache::Pipeline& pipeline,
                             const ShaderComputeInputInfo& input_info,
-                            vk::ShaderModule compute_module, vk::PipelineCache driver_cache) {
+							const ShaderProgram& compute_program, vk::PipelineCache driver_cache) {
+	const auto compute_module = compute_program.module;
 	EXIT_IF(compute_module == nullptr);
 
 	vk::PipelineShaderStageCreateInfo                     comp_shader_stage_info {};
@@ -841,12 +858,27 @@ void CreatePipelineInternal(GraphicContext& graphics, PipelineCache::Pipeline& p
 
 	EXIT_IF(pipeline.pipeline != nullptr);
 
+	const auto pipeline_begin = std::chrono::steady_clock::now();
+	if (graphics_debug_dump_enabled()) {
+		LOGF("PipelineCompile: stage=CS shader_hash=0x%016" PRIx64 " spirv_words=%" PRIu64
+		     " cache_feedback=unavailable begin\n",
+		     compute_program.shader_hash, compute_program.spirv_words);
+	}
 	LOGF("PipelineTrace: vkCreateComputePipelines begin layout=%p\n",
 	     static_cast<void*>(pipeline.pipeline_layout));
 	result = graphics.device.createComputePipelines(driver_cache, 1, &info, nullptr,
 	                                                &pipeline.pipeline);
 	LOGF("PipelineTrace: vkCreateComputePipelines done result=%s pipeline=%p\n",
-	     vk::to_string(result).c_str(), static_cast<void*>(pipeline.pipeline));
+		     vk::to_string(result).c_str(), static_cast<void*>(pipeline.pipeline));
+	if (graphics_debug_dump_enabled()) {
+		LOGF("PipelineCompile: stage=CS shader_hash=0x%016" PRIx64 " spirv_words=%" PRIu64
+		     " done result=%s elapsed_ms=%" PRIu64 "\n",
+		     compute_program.shader_hash, compute_program.spirv_words,
+		     vk::to_string(result).c_str(),
+		     static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+	                                     std::chrono::steady_clock::now() - pipeline_begin)
+	                                     .count()));
+	}
 	EXIT_NOT_IMPLEMENTED(result != vk::Result::eSuccess);
 
 	EXIT_NOT_IMPLEMENTED(pipeline.pipeline == nullptr);

@@ -1,7 +1,11 @@
 #include "graphics/host_gpu/renderer/masterSemaphore.h"
 
 #include "common/assert.h"
+#include "common/logging/log.h"
 #include "graphics/host_gpu/graphicContext.h"
+#include "graphics/host_gpu/renderer/debug.h"
+
+#include <chrono>
 
 namespace Libs::Graphics {
 
@@ -43,6 +47,11 @@ void MasterSemaphore::Wait(uint64_t tick) {
 	if (IsFree(tick)) {
 		return;
 	}
+	const auto wait_begin = std::chrono::steady_clock::now();
+	if (graphics_debug_dump_enabled()) {
+		LOGF("HostWait begin tick=%" PRIu64 " known=%" PRIu64 " current=%" PRIu64 "\n", tick,
+		     KnownGpuTick(), CurrentTick());
+	}
 
 	vk::SemaphoreWaitInfo wait_info {};
 	wait_info.semaphoreCount = 1;
@@ -50,6 +59,13 @@ void MasterSemaphore::Wait(uint64_t tick) {
 	wait_info.pValues        = &tick;
 
 	const auto result = m_graphics.device.waitSemaphores(&wait_info, UINT64_MAX);
+	if (graphics_debug_dump_enabled()) {
+		LOGF("HostWait done tick=%" PRIu64 " result=%s elapsed_ms=%" PRIu64 "\n", tick,
+		     vk::to_string(result).c_str(),
+		     static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+	                                     std::chrono::steady_clock::now() - wait_begin)
+	                                     .count()));
+	}
 	EXIT_NOT_IMPLEMENTED(result != vk::Result::eSuccess);
 	Refresh();
 }
