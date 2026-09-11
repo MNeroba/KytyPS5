@@ -29,6 +29,7 @@
 #include <limits>
 #include <span>
 #include <spirv-tools/libspirv.hpp>
+#include <string>
 #include <tuple>
 #include <unordered_map>
 #include <utility>
@@ -251,31 +252,49 @@ void DumpShaderRawBeforeCompile(const char* stage_name, uint64_t shader_hash,
 	}
 }
 
+uint64_t NextShaderReplayInvocationId() {
+	static std::atomic_uint64_t next_id {1};
+	return next_id.fetch_add(1, std::memory_order_relaxed);
+}
+
 // Capture the dynamic compute specialization before resource-plan extraction can terminate the
 // process.  A raw shader binary does not contain these PM4-derived fields, so this marker is the
 // production provenance needed to build an exact replay later.  Keep it opt-in and diagnostic;
-// it must not synthesize or alter compiler inputs.
+// it must not synthesize or alter compiler inputs.  The ordered user-data payload is part of the
+// production state; the invocation id pairs the two boundaries when a shader is compiled more
+// than once in one run.
 void LogShaderComputeInputBeforeCompile(const char*                             phase,
                                         const ShaderRecompiler::CompileOptions& options) {
 	if ((!Config::ShaderDebugEnabled() && !Config::GraphicsDebugDumpEnabled()) ||
 	    options.input_info.compute == nullptr) {
 		return;
 	}
-	const auto& info = *options.input_info.compute;
-	LOGF("ShaderReplayInput phase=%s hash=0x%016" PRIx64
+	const auto& info             = *options.input_info.compute;
+	std::string user_data_values = "[";
+	for (size_t index = 0; index < options.user_data.size(); index++) {
+		if (index != 0) {
+			user_data_values += ",";
+		}
+		user_data_values += fmt::format("0x{:08x}", options.user_data[index]);
+	}
+	user_data_values += "]";
+	LOGF("ShaderReplayInput phase=%s hash=0x%016" PRIx64 " replay_invocation_id=%" PRIu64
 	     " threads={%u,%u,%u} thread_ids_num=%d group_id={%s,%s,%s} tg_size_en=%s"
 	     " workgroup_register=%d host_subgroup_size=%u wave_size=%u lds_size_dwords=%u"
 	     " scratch_size_dwords=%u"
 	     " dispatch_thread_dimensions=%s dispatch_threads_num={%u,%u,%u}"
-	     " user_data_base=%u user_data_count=%" PRIu64 "\n",
-	     phase, options.shader_hash, info.threads_num[0], info.threads_num[1], info.threads_num[2],
-	     info.thread_ids_num, info.group_id[0] ? "true" : "false",
-	     info.group_id[1] ? "true" : "false", info.group_id[2] ? "true" : "false",
-	     info.tg_size_en ? "true" : "false", info.workgroup_register, info.host_subgroup_size,
-	     info.wave_size, info.lds_size_dwords, info.scratch_size_dwords,
-	     info.dispatch_thread_dimensions ? "true" : "false", info.dispatch_threads_num[0],
-	     info.dispatch_threads_num[1], info.dispatch_threads_num[2], options.user_data_base,
-	     static_cast<uint64_t>(options.user_data.size()));
+	     " user_data_base=%u user_data_count=%" PRIu64 " user_data=%s\n",
+	     phase, options.shader_hash, options.replay_invocation_id, info.threads_num[0],
+	     info.threads_num[1], info.threads_num[2], info.thread_ids_num,
+	     info.group_id[0] ? "true" : "false", info.group_id[1] ? "true" : "false",
+	     info.group_id[2] ? "true" : "false", info.tg_size_en ? "true" : "false",
+	     info.workgroup_register, info.host_subgroup_size, info.wave_size, info.lds_size_dwords,
+	     info.scratch_size_dwords, info.dispatch_thread_dimensions ? "true" : "false",
+	     info.dispatch_threads_num[0], info.dispatch_threads_num[1], info.dispatch_threads_num[2],
+	     options.user_data_base, static_cast<uint64_t>(options.user_data.size()),
+	     user_data_values.c_str());
+	// A fail-fast immediately after this marker must not leave the record in a userspace buffer.
+	Log::Flush();
 }
 
 void DumpShaderOriginal(const char* stage_name, uint64_t shader_hash,
@@ -529,6 +548,9 @@ struct PipelineCache::ProgramCache {
 		options.dump_label  = label;
 		options.input_info  = stage_input;
 		options.scratch_dwords = input_info.scratch_size_dwords;
+		if (Config::ShaderDebugEnabled() || Config::GraphicsDebugDumpEnabled()) {
+			options.replay_invocation_id = NextShaderReplayInvocationId();
+		}
 		if constexpr (std::is_same_v<InputInfo, ShaderVertexInputInfo>) {
 			options.user_data_base = 8;
 			if (stage == ShaderType::Mesh) {
