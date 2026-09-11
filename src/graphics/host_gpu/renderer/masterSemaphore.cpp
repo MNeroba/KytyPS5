@@ -27,6 +27,34 @@ MasterSemaphore::~MasterSemaphore() {
 	}
 }
 
+void MasterSemaphore::RecordSubmitDebug(uint64_t tick, uint32_t debug_op, uint64_t debug_submit,
+                                        uint32_t arg0, uint32_t arg1, uint32_t arg2, uint32_t arg3,
+                                        uint64_t arg4) {
+	std::lock_guard lock(m_submit_history_mutex);
+	auto&           record = m_submit_history[tick % SubmitHistorySize];
+	record.tick            = tick;
+	record.debug_op        = debug_op;
+	record.debug_submit    = debug_submit;
+	record.arg0            = arg0;
+	record.arg1            = arg1;
+	record.arg2            = arg2;
+	record.arg3            = arg3;
+	record.arg4            = arg4;
+}
+
+void MasterSemaphore::LogSubmitDebug(uint64_t tick) const {
+	std::lock_guard lock(m_submit_history_mutex);
+	const auto&     record = m_submit_history[tick % SubmitHistorySize];
+	if (record.tick == tick) {
+		LOGF("wait failure submit: tick=%" PRIu64 " debug_op=%u debug_submit=%" PRIu64
+		     " args=%u,%u,%u,%u,0x%016" PRIx64 "\n",
+		     record.tick, record.debug_op, record.debug_submit, record.arg0, record.arg1,
+		     record.arg2, record.arg3, record.arg4);
+	} else {
+		LOGF("wait failure submit: tick=%" PRIu64 " metadata=missing\n", tick);
+	}
+}
+
 void MasterSemaphore::Refresh() {
 	uint64_t   counter = 0;
 	const auto result  = m_graphics.device.getSemaphoreCounterValue(m_semaphore, &counter);
@@ -71,6 +99,7 @@ void MasterSemaphore::Wait(uint64_t tick) {
 		     " current=%" PRIu64 "\n",
 		     vk::to_string(result).c_str(), static_cast<int>(result), tick, KnownGpuTick(),
 		     CurrentTick());
+		LogSubmitDebug(tick);
 	}
 	EXIT_NOT_IMPLEMENTED(result != vk::Result::eSuccess);
 	Refresh();

@@ -4,7 +4,9 @@
 #include "common/common.h"
 #include "graphics/host_gpu/vulkanCommon.h"
 
+#include <array>
 #include <atomic>
+#include <mutex>
 
 namespace Libs::Graphics {
 
@@ -30,12 +32,31 @@ public:
 
 	void Refresh();
 	void Wait(uint64_t tick);
+	void RecordSubmitDebug(uint64_t tick, uint32_t debug_op, uint64_t debug_submit, uint32_t arg0,
+	                       uint32_t arg1, uint32_t arg2, uint32_t arg3, uint64_t arg4);
 
 private:
-	GraphicContext&       m_graphics;
-	vk::Semaphore         m_semaphore = nullptr;
-	std::atomic<uint64_t> m_gpu_tick {0};
-	std::atomic<uint64_t> m_current_tick {1};
+	struct SubmitDebugInfo {
+		uint64_t tick         = UINT64_MAX;
+		uint32_t debug_op     = 0;
+		uint64_t debug_submit = 0;
+		uint32_t arg0         = 0;
+		uint32_t arg1         = 0;
+		uint32_t arg2         = 0;
+		uint32_t arg3         = 0;
+		uint64_t arg4         = 0;
+	};
+
+	void LogSubmitDebug(uint64_t tick) const;
+
+	static constexpr size_t SubmitHistorySize = 128;
+
+	GraphicContext&                                m_graphics;
+	vk::Semaphore                                  m_semaphore = nullptr;
+	std::atomic<uint64_t>                          m_gpu_tick {0};
+	std::atomic<uint64_t>                          m_current_tick {1};
+	mutable std::mutex                             m_submit_history_mutex;
+	std::array<SubmitDebugInfo, SubmitHistorySize> m_submit_history {};
 };
 
 } // namespace Libs::Graphics

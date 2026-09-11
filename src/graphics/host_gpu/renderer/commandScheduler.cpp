@@ -388,6 +388,9 @@ uint64_t CommandScheduler::Submit(SubmitInfo submit) {
 
 		result = graphics.queue.submit(1, &submit_info, nullptr);
 	}
+	m_master.RecordSubmitDebug(tick, debug_op, debug_submit, m_command.m_debug_arg0,
+	                           m_command.m_debug_arg1, m_command.m_debug_arg2,
+	                           m_command.m_debug_arg3, m_command.m_debug_arg4);
 
 	if (result != vk::Result::eSuccess) {
 		ReportVulkanFatal("vkQueueSubmit", result, tick, m_command.m_debug_op,
@@ -400,8 +403,8 @@ uint64_t CommandScheduler::Submit(SubmitInfo submit) {
 		     " debug_op=%u debug_submit=%" PRIu64 "\n",
 		     static_cast<void*>(buffer), tick, vk::to_string(result).c_str(),
 		     static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
-		                                     std::chrono::steady_clock::now() - submit_begin)
-		                                     .count()),
+		                               std::chrono::steady_clock::now() - submit_begin)
+		                               .count()),
 		     debug_op, debug_submit);
 	}
 	EXIT_NOT_IMPLEMENTED(result != vk::Result::eSuccess);
