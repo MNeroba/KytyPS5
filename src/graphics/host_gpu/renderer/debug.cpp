@@ -674,7 +674,7 @@ void LogDrawPhase(const char* draw_name, const char* phase) {
 }
 
 void LogPipelineTrace(const char* phase, uint64_t vertex_program_id, uint64_t pixel_program_id) {
-	if (graphics_debug_dump_enabled()) {
+	if (Config::ShaderDebugEnabled() || graphics_debug_dump_enabled()) {
 		LOGF("PipelineTrace: %s VS=%" PRIu64 " PS=%" PRIu64 "\n", phase, vertex_program_id,
 		     pixel_program_id);
 	}
@@ -805,8 +805,8 @@ static ScissorRect ScissorRectOffset(ScissorRect r, int x, int y) {
 }
 
 static ScissorRect ScissorRectIntersect(const ScissorRect& a, const ScissorRect& b) {
-	return {std::max(a.left, b.left), std::max(a.top, b.top),
-	        std::min(a.right, b.right), std::min(a.bottom, b.bottom)};
+	return {std::max(a.left, b.left), std::max(a.top, b.top), std::min(a.right, b.right),
+	        std::min(a.bottom, b.bottom)};
 }
 
 static ScissorRect ScissorRectClamp(ScissorRect r, uint32_t width, uint32_t height) {
@@ -857,16 +857,18 @@ ScissorRect calc_final_scissor(const HW::ScreenViewport& vp, const HW::ScanModeC
 	EXIT_IF(viewport_index >= std::size(vp.viewports));
 	ScissorRect final {vp.screen_scissor_left, vp.screen_scissor_top, vp.screen_scissor_right,
 	                   vp.screen_scissor_bottom};
-	const auto intersect = [&](ScissorRect rect, bool window_offset) {
+	const auto  intersect = [&](ScissorRect rect, bool window_offset) {
 		if (window_offset) {
 			rect = ScissorRectOffset(rect, vp.window_offset_x, vp.window_offset_y);
 		}
 		final = ScissorRectIntersect(final, rect);
 	};
 	intersect({vp.window_scissor_left, vp.window_scissor_top, vp.window_scissor_right,
-	           vp.window_scissor_bottom}, vp.window_scissor_window_offset_enable);
+	           vp.window_scissor_bottom},
+	          vp.window_scissor_window_offset_enable);
 	intersect({vp.generic_scissor_left, vp.generic_scissor_top, vp.generic_scissor_right,
-	           vp.generic_scissor_bottom}, vp.generic_scissor_window_offset_enable);
+	           vp.generic_scissor_bottom},
+	          vp.generic_scissor_window_offset_enable);
 
 	const auto& viewport = vp.viewports[viewport_index];
 	if (smc.vport_scissor_enable) {
@@ -886,7 +888,8 @@ ScissorRect calc_final_scissor(const HW::ScreenViewport& vp, const HW::ScanModeC
 				}
 
 				intersect({vp.clip_rect_left[i], vp.clip_rect_top[i], vp.clip_rect_right[i],
-				           vp.clip_rect_bottom[i]}, vp.clip_rect_window_offset_enable[i]);
+				           vp.clip_rect_bottom[i]},
+				          vp.clip_rect_window_offset_enable[i]);
 			}
 		} else {
 			static std::atomic<uint32_t> log_count {0};

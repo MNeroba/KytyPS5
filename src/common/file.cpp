@@ -551,6 +551,13 @@ bool File::RenameFile(const std::filesystem::path& src,
 	return SysFileRenameFile(src, dst);
 }
 
+bool File::AtomicReplaceFile(
+    const std::filesystem::path& src,
+    const std::filesystem::path& dst) // @suppress("Member declaration not found")
+{
+	return SysFileAtomicReplaceFile(src, dst);
+}
+
 void File::RemoveReadonly(const std::filesystem::path& name) {
 	SysFileRemoveReadonly(name);
 }

@@ -105,6 +105,9 @@ public:
 	static std::vector<DirEntry> GetDirEntries(const std::filesystem::path& path);
 	static bool CopyFile(const std::filesystem::path& src, const std::filesystem::path& dst);
 	static bool RenameFile(const std::filesystem::path& src, const std::filesystem::path& dst);
+	// Replace dst with src as one filesystem rename operation when the platform supports it.
+	static bool AtomicReplaceFile(const std::filesystem::path& src,
+	                              const std::filesystem::path& dst);
 	static void RemoveReadonly(const std::filesystem::path& name);
 
 	KYTY_CLASS_NO_COPY(File);

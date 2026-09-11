@@ -116,6 +116,9 @@ public:
 	~PipelineCache();
 	KYTY_CLASS_NO_COPY(PipelineCache);
 	void Save();
+	// Persist compatible Vulkan driver cache data without destroying the live cache object. This is
+	// used after expensive development pipeline builds so a later fail-fast keeps its progress.
+	void SnapshotDriverCache();
 
 	struct Pipeline {
 		vk::PipelineLayout      pipeline_layout       = nullptr;
@@ -221,6 +224,7 @@ private:
 	Common::Mutex                                           m_mutex;
 
 	void InitializeDriverCache();
+	bool SnapshotDriverCacheLocked();
 };
 
 void LogPipelineTrace(const char* phase, uint64_t vertex_program_id, uint64_t pixel_program_id);

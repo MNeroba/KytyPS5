@@ -24,6 +24,12 @@
 
 namespace Libs::Graphics {
 
+static bool shader_pipeline_trace_enabled() {
+	// Focused shader debugging keeps pipeline/recompiler evidence while the graphics debug
+	// switch continues to control high-volume packet/submit/wait tracing elsewhere.
+	return Config::ShaderDebugEnabled() || graphics_debug_dump_enabled();
+}
+
 // IDK: maybe we can remove it?
 constexpr uint8_t kTemporaryVertexAttribFormat113 =
     static_cast<uint8_t>(Prospero::VertexAttribFormat::k16_16SInt);
@@ -390,9 +396,9 @@ static vk::BlendOp GetBlendOp(uint32_t op) {
 	return vk::BlendOp::eAdd;
 }
 
-static void AddLayoutBindings(std::vector<vk::DescriptorSetLayoutBinding>& descriptor_bindings,
+static void AddLayoutBindings(std::vector<vk::DescriptorSetLayoutBinding>&    descriptor_bindings,
                               const ShaderRecompiler::IR::CompiledShaderInfo& program,
-                              vk::ShaderStageFlagBits              stage) {
+                              vk::ShaderStageFlagBits                         stage) {
 	for (const auto& binding: program.bindings.descriptors) {
 		descriptor_bindings.push_back(
 		    {ShaderRecompiler::IR::NativeBinding(program.stage, binding.kind),
@@ -441,7 +447,7 @@ void CreatePipelineInternal(
 	vk::ShaderModule tess_eval_shader_module    = nullptr;
 
 	vk::ShaderModuleCreateInfo create_info {};
-	vk::Result result {};
+	vk::Result                 result {};
 	if (rect_list) {
 		const auto shaders =
 		    BuildRectListShaders(vs_input_info, ps_active ? ps_input_info : nullptr);
@@ -449,7 +455,7 @@ void CreatePipelineInternal(
 		create_info.pCode    = shaders.control.data();
 		result =
 		    graphics.device.createShaderModule(&create_info, nullptr, &tess_control_shader_module);
-		if (graphics_debug_dump_enabled()) {
+		if (shader_pipeline_trace_enabled()) {
 			LOGF("PipelineTrace: vkCreateShaderModule RectList TCS done result=%s module=%p\n",
 			     vk::to_string(result).c_str(), static_cast<void*>(tess_control_shader_module));
 		}
@@ -459,7 +465,7 @@ void CreatePipelineInternal(
 		create_info.pCode    = shaders.evaluation.data();
 		result =
 		    graphics.device.createShaderModule(&create_info, nullptr, &tess_eval_shader_module);
-		if (graphics_debug_dump_enabled()) {
+		if (shader_pipeline_trace_enabled()) {
 			LOGF("PipelineTrace: vkCreateShaderModule RectList TES done result=%s module=%p\n",
 			     vk::to_string(result).c_str(), static_cast<void*>(tess_eval_shader_module));
 		}
@@ -524,7 +530,7 @@ void CreatePipelineInternal(
 		GetInputFormat(vs_input_info.resources[index], input_attr[index].format, attr_size,
 		               static_cast<uint32_t>(used_components));
 
-		if (graphics_debug_dump_enabled()) {
+		if (shader_pipeline_trace_enabled()) {
 			static std::atomic_uint log_count = 0;
 			const auto              log_id    = log_count.fetch_add(1, std::memory_order_relaxed);
 			if (log_id < 128) {
@@ -601,14 +607,15 @@ void CreatePipelineInternal(
 	                     !graphics.provoking_vertex_last_enabled);
 	if (graphics.provoking_vertex_last_enabled) {
 		provoking_vertex.provokingVertexMode = static_params.provoking_vtx_last
-		    ? vk::ProvokingVertexModeEXT::eLastVertex : vk::ProvokingVertexModeEXT::eFirstVertex;
-		provoking_vertex.pNext = rasterizer.pNext;
-		rasterizer.pNext = &provoking_vertex;
+		                                           ? vk::ProvokingVertexModeEXT::eLastVertex
+		                                           : vk::ProvokingVertexModeEXT::eFirstVertex;
+		provoking_vertex.pNext               = rasterizer.pNext;
+		rasterizer.pNext                     = &provoking_vertex;
 	}
-	rasterizer.cullMode  = cull_mode;
-	rasterizer.frontFace = front_face;
+	rasterizer.cullMode    = cull_mode;
+	rasterizer.frontFace   = front_face;
 	rasterizer.polygonMode = static_params.polygon_mode;
-	rasterizer.lineWidth = 1.0f;
+	rasterizer.lineWidth   = 1.0f;
 
 	vk::PipelineMultisampleStateCreateInfo multisampling {};
 	multisampling.sampleShadingEnable  = static_params.sample_shading_enable ? VK_TRUE : VK_FALSE;
@@ -678,14 +685,14 @@ void CreatePipelineInternal(
 
 	EXIT_IF(pipeline.pipeline_layout != nullptr);
 
-	if (graphics_debug_dump_enabled()) {
+	if (shader_pipeline_trace_enabled()) {
 		LOGF("PipelineTrace: vkCreatePipelineLayout begin VS=%" PRIu64 " PS=%" PRIu64
 		     " set_layouts=1 push_constants=%" PRIu32 "\n",
 		     vertex_program.id, ps_active ? pixel_program.id : 0, 1u);
 	}
 	result = graphics.device.createPipelineLayout(&pipeline_layout_info, nullptr,
 	                                              &pipeline.pipeline_layout);
-	if (graphics_debug_dump_enabled()) {
+	if (shader_pipeline_trace_enabled()) {
 		LOGF("PipelineTrace: vkCreatePipelineLayout done result=%s layout=%p\n",
 		     vk::to_string(result).c_str(), static_cast<void*>(pipeline.pipeline_layout));
 	}
@@ -713,18 +720,12 @@ void CreatePipelineInternal(
 	depth_stencil_info.maxDepthBounds    = static_params.depth_max_bounds;
 
 	std::vector<vk::DynamicState> dynamic_states {
-	    vk::DynamicState::eViewportWithCount,
-	    vk::DynamicState::eScissorWithCount,
-	    vk::DynamicState::eLineWidth,
-	    vk::DynamicState::eDepthTestEnable,
-	    vk::DynamicState::eDepthWriteEnable,
-	    vk::DynamicState::eDepthCompareOp,
-	    vk::DynamicState::eDepthBiasEnable,
-	    vk::DynamicState::eDepthBias,
-	    vk::DynamicState::eStencilCompareMask,
-	    vk::DynamicState::eStencilReference,
-	    vk::DynamicState::eStencilWriteMask,
-	    vk::DynamicState::eBlendConstants,
+	    vk::DynamicState::eViewportWithCount,  vk::DynamicState::eScissorWithCount,
+	    vk::DynamicState::eLineWidth,          vk::DynamicState::eDepthTestEnable,
+	    vk::DynamicState::eDepthWriteEnable,   vk::DynamicState::eDepthCompareOp,
+	    vk::DynamicState::eDepthBiasEnable,    vk::DynamicState::eDepthBias,
+	    vk::DynamicState::eStencilCompareMask, vk::DynamicState::eStencilReference,
+	    vk::DynamicState::eStencilWriteMask,   vk::DynamicState::eBlendConstants,
 	};
 #if !defined(__APPLE__)
 	if (rendering.color_count != 0) {
@@ -761,16 +762,20 @@ void CreatePipelineInternal(
 	pipeline_info.pDynamicState           = &dynamic_state;
 	pipeline_info.layout                  = pipeline.pipeline_layout;
 	pipeline_info.basePipelineIndex       = -1;
+	pipeline_info.flags                   = Config::ShaderDebugDisableOptimization()
+	                                            ? vk::PipelineCreateFlagBits::eDisableOptimization
+	                                            : vk::PipelineCreateFlags {};
 
 	EXIT_IF(pipeline.pipeline != nullptr);
 
 	const auto pipeline_begin = std::chrono::steady_clock::now();
-	if (graphics_debug_dump_enabled()) {
+	if (shader_pipeline_trace_enabled()) {
 		LOGF("PipelineCompile: stage=Gfx vs_hash=0x%016" PRIx64 " vs_words=%" PRIu64
 		     " ps_hash=0x%016" PRIx64 " ps_words=%" PRIu64
-		     " cache_feedback=unavailable begin\n",
+		     " optimization=%s cache_feedback=unavailable begin\n",
 		     vertex_program.shader_hash, vertex_program.spirv_words,
-		     ps_active ? pixel_program.shader_hash : 0, ps_active ? pixel_program.spirv_words : 0);
+		     ps_active ? pixel_program.shader_hash : 0, ps_active ? pixel_program.spirv_words : 0,
+		     Config::ShaderDebugDisableOptimization() ? "disabled" : "normal");
 		LOGF("PipelineTrace: vkCreateGraphicsPipelines begin VS=%" PRIu64 " PS=%" PRIu64
 		     " topology=%" PRIu32 " color_mask=0x%08" PRIx32
 		     " depth=%s blend=%s dyn_states=%" PRIu32 "\n",
@@ -781,18 +786,18 @@ void CreatePipelineInternal(
 	}
 	result = graphics.device.createGraphicsPipelines(driver_cache, 1, &pipeline_info, nullptr,
 	                                                 &pipeline.pipeline);
-	if (graphics_debug_dump_enabled()) {
+	if (shader_pipeline_trace_enabled()) {
 		LOGF("PipelineTrace: vkCreateGraphicsPipelines done result=%s pipeline=%p\n",
 		     vk::to_string(result).c_str(), static_cast<void*>(pipeline.pipeline));
 		LOGF("PipelineCompile: stage=Gfx vs_hash=0x%016" PRIx64 " vs_words=%" PRIu64
-		     " ps_hash=0x%016" PRIx64 " ps_words=%" PRIu64
-		     " done result=%s elapsed_ms=%" PRIu64 "\n",
+		     " ps_hash=0x%016" PRIx64 " ps_words=%" PRIu64 " done result=%s elapsed_ms=%" PRIu64
+		     "\n",
 		     vertex_program.shader_hash, vertex_program.spirv_words,
 		     ps_active ? pixel_program.shader_hash : 0, ps_active ? pixel_program.spirv_words : 0,
 		     vk::to_string(result).c_str(),
 		     static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
-	                                     std::chrono::steady_clock::now() - pipeline_begin)
-	                                     .count()));
+		                               std::chrono::steady_clock::now() - pipeline_begin)
+		                               .count()));
 	}
 	EXIT_NOT_IMPLEMENTED(result != vk::Result::eSuccess);
 
@@ -809,7 +814,7 @@ void CreatePipelineInternal(
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void CreatePipelineInternal(GraphicContext& graphics, PipelineCache::Pipeline& pipeline,
                             const ShaderComputeInputInfo& input_info,
-							const ShaderProgram& compute_program, vk::PipelineCache driver_cache) {
+                            const ShaderProgram& compute_program, vk::PipelineCache driver_cache) {
 	const auto compute_module = compute_program.module;
 	EXIT_IF(compute_module == nullptr);
 
@@ -820,8 +825,8 @@ void CreatePipelineInternal(GraphicContext& graphics, PipelineCache::Pipeline& p
 	comp_shader_stage_info.pName  = "main";
 	EXIT_IF(!input_info.stage);
 	const auto wave_size = input_info.stage.program->wave_size;
-	if (graphics.compute_subgroup_size_control_enabled &&
-	    wave_size >= graphics.min_subgroup_size && wave_size <= graphics.max_subgroup_size) {
+	if (graphics.compute_subgroup_size_control_enabled && wave_size >= graphics.min_subgroup_size &&
+	    wave_size <= graphics.max_subgroup_size) {
 		comp_subgroup_size.requiredSubgroupSize = wave_size;
 		comp_shader_stage_info.pNext            = &comp_subgroup_size;
 	}
@@ -841,12 +846,16 @@ void CreatePipelineInternal(GraphicContext& graphics, PipelineCache::Pipeline& p
 
 	EXIT_IF(pipeline.pipeline_layout != nullptr);
 
-	LOGF("PipelineTrace: vkCreatePipelineLayout CS begin set_layouts=1 push_constants=%u\n",
-	     1u);
+	if (shader_pipeline_trace_enabled()) {
+		LOGF("PipelineTrace: vkCreatePipelineLayout CS begin set_layouts=1 push_constants=%u\n",
+		     1u);
+	}
 	auto result = graphics.device.createPipelineLayout(&pipeline_layout_info, nullptr,
-	                                                  &pipeline.pipeline_layout);
-	LOGF("PipelineTrace: vkCreatePipelineLayout CS done result=%s layout=%p\n",
-	     vk::to_string(result).c_str(), static_cast<void*>(pipeline.pipeline_layout));
+	                                                   &pipeline.pipeline_layout);
+	if (shader_pipeline_trace_enabled()) {
+		LOGF("PipelineTrace: vkCreatePipelineLayout CS done result=%s layout=%p\n",
+		     vk::to_string(result).c_str(), static_cast<void*>(pipeline.pipeline_layout));
+	}
 	EXIT_NOT_IMPLEMENTED(result != vk::Result::eSuccess);
 
 	EXIT_NOT_IMPLEMENTED(pipeline.pipeline_layout == nullptr);
@@ -855,29 +864,38 @@ void CreatePipelineInternal(GraphicContext& graphics, PipelineCache::Pipeline& p
 	info.stage             = comp_shader_stage_info;
 	info.layout            = pipeline.pipeline_layout;
 	info.basePipelineIndex = -1;
+	info.flags             = Config::ShaderDebugDisableOptimization()
+	                             ? vk::PipelineCreateFlagBits::eDisableOptimization
+	                             : vk::PipelineCreateFlags {};
 
 	EXIT_IF(pipeline.pipeline != nullptr);
 
 	const auto pipeline_begin = std::chrono::steady_clock::now();
-	if (graphics_debug_dump_enabled()) {
+	if (shader_pipeline_trace_enabled()) {
 		LOGF("PipelineCompile: stage=CS shader_hash=0x%016" PRIx64 " spirv_words=%" PRIu64
-		     " cache_feedback=unavailable begin\n",
-		     compute_program.shader_hash, compute_program.spirv_words);
+		     " optimization=%s cache_feedback=unavailable begin\n",
+		     compute_program.shader_hash, compute_program.spirv_words,
+		     Config::ShaderDebugDisableOptimization() ? "disabled" : "normal");
 	}
-	LOGF("PipelineTrace: vkCreateComputePipelines begin layout=%p\n",
-	     static_cast<void*>(pipeline.pipeline_layout));
-	result = graphics.device.createComputePipelines(driver_cache, 1, &info, nullptr,
-	                                                &pipeline.pipeline);
-	LOGF("PipelineTrace: vkCreateComputePipelines done result=%s pipeline=%p\n",
+	if (shader_pipeline_trace_enabled()) {
+		LOGF("PipelineTrace: vkCreateComputePipelines begin layout=%p flags=%s\n",
+		     static_cast<void*>(pipeline.pipeline_layout),
+		     Config::ShaderDebugDisableOptimization() ? "disable-optimization" : "normal");
+	}
+	result =
+	    graphics.device.createComputePipelines(driver_cache, 1, &info, nullptr, &pipeline.pipeline);
+	if (shader_pipeline_trace_enabled()) {
+		LOGF("PipelineTrace: vkCreateComputePipelines done result=%s pipeline=%p\n",
 		     vk::to_string(result).c_str(), static_cast<void*>(pipeline.pipeline));
-	if (graphics_debug_dump_enabled()) {
+	}
+	if (shader_pipeline_trace_enabled()) {
 		LOGF("PipelineCompile: stage=CS shader_hash=0x%016" PRIx64 " spirv_words=%" PRIu64
 		     " done result=%s elapsed_ms=%" PRIu64 "\n",
 		     compute_program.shader_hash, compute_program.spirv_words,
 		     vk::to_string(result).c_str(),
 		     static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
-	                                     std::chrono::steady_clock::now() - pipeline_begin)
-	                                     .count()));
+		                               std::chrono::steady_clock::now() - pipeline_begin)
+		                               .count()));
 	}
 	EXIT_NOT_IMPLEMENTED(result != vk::Result::eSuccess);
 

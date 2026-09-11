@@ -71,6 +71,14 @@ bool ShaderValidationEnabled() {
 	return g_config->shader_validation_enabled;
 }
 
+bool ShaderDebugEnabled() {
+	return g_config->shader_debug_enabled;
+}
+
+bool ShaderDebugDisableOptimization() {
+	return g_config->shader_debug_disable_optimization;
+}
+
 ShaderOptimizationType GetShaderOptimizationType() {
 	return g_config->shader_optimization_type;
 }

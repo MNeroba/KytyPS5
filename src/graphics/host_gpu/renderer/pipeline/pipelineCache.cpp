@@ -13,22 +13,22 @@
 #include "graphics/host_gpu/renderer/render.h"
 #include "graphics/host_gpu/renderer/renderContext.h"
 #include "graphics/shader/recompiler/ShaderRecompiler.h"
+#include "graphics/shader/recompiler/ShaderReplayCapsule.h"
 #include "graphics/shader/shaderCompiler.h"
 #include "kernel/memory.h"
-#include "kytyGitVersion.h"
 #include "loader/systemContent.h"
 
 #include <algorithm>
 #include <array>
 #include <atomic>
 #include <cctype>
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <fmt/format.h>
 #include <limits>
 #include <span>
 #include <spirv-tools/libspirv.hpp>
-#include <string_view>
 #include <tuple>
 #include <unordered_map>
 #include <utility>
@@ -68,8 +68,11 @@ std::string DriverCacheSignature(const vk::PhysicalDeviceProperties& properties)
 		uuid[i * 2]     = hex[properties.pipelineCacheUUID[i] >> 4u];
 		uuid[i * 2 + 1] = hex[properties.pipelineCacheUUID[i] & 0xfu];
 	}
-	return fmt::format("KytyPC1:{}:{:08x}:{:08x}:{:08x}:{}\n", KYTY_GIT_REVISION,
-	                   properties.vendorID, properties.deviceID, properties.driverVersion, uuid);
+	// Source revisions and dirty markers do not affect Vulkan's serialized driver cache format.
+	// Keep only the cache format and physical-device identity so active development builds can
+	// reuse a compatible cache while still rejecting a different driver/device/UUID.
+	return fmt::format("KytyPC2:1:{:08x}:{:08x}:{:08x}:{}\n", properties.vendorID,
+	                   properties.deviceID, properties.driverVersion, uuid);
 }
 
 std::string PipelineCacheTitleId() {
@@ -187,7 +190,7 @@ bool IsShaderMemoryMapped(void*, uint64_t address, uint64_t size) {
 
 void DumpShaderSpirv(const char* stage_name, uint64_t shader_hash,
                      const std::vector<uint32_t>& spirv) {
-	if (!Config::GraphicsDebugDumpEnabled()) {
+	if (!Config::ShaderDebugEnabled() && !Config::GraphicsDebugDumpEnabled()) {
 		return;
 	}
 	static std::atomic_int id = 0;
@@ -203,9 +206,54 @@ void DumpShaderSpirv(const char* stage_name, uint64_t shader_hash,
 	file.Write(spirv.data(), spirv.size() * sizeof(uint32_t));
 }
 
+const char* ShaderStageName(ShaderType stage) {
+	switch (stage) {
+		case ShaderType::Vertex: return "vs";
+		case ShaderType::Mesh: return "ms";
+		case ShaderType::Pixel: return "ps";
+		case ShaderType::Compute: return "cs";
+		default: return "unknown";
+	}
+}
+
+// Keep the guest input available before any specialization, emitter, or Vulkan work can fail.
+// The regular decoded dump is still written after compilation; this early sidecar is the
+// minimal crash-safe replay input and is enabled by focused shader debugging or the legacy full
+// graphics dump flag.
+void DumpShaderRawBeforeCompile(const char* stage_name, uint64_t shader_hash,
+                                std::span<const uint32_t> code) {
+	if ((!Config::ShaderDebugEnabled() && !Config::GraphicsDebugDumpEnabled()) || code.empty()) {
+		return;
+	}
+	if (code.size_bytes() > std::numeric_limits<uint32_t>::max()) {
+		LOGF_COLOR(Log::Color::BrightRed, "Shader raw input is too large to persist\n");
+		return;
+	}
+	const auto path = Config::GetShaderLogFolder() /
+	                  fmt::format("original/precompile_{}_{:016x}.bin", stage_name, shader_hash);
+	Common::File::CreateDirectories(path.parent_path());
+	auto temporary_path = path;
+	temporary_path += ".tmp";
+	Common::File file;
+	if (!file.Create(temporary_path)) {
+		const auto path_text = Common::PathToString(temporary_path);
+		LOGF_COLOR(Log::Color::BrightRed, "Can't create file: %s\n", path_text.c_str());
+		return;
+	}
+	uint32_t written = 0;
+	file.Write(code.data(), static_cast<uint32_t>(code.size_bytes()), &written);
+	const bool flushed = file.Flush();
+	file.Close();
+	if (written != static_cast<uint32_t>(code.size_bytes()) || !flushed ||
+	    !Common::File::AtomicReplaceFile(temporary_path, path)) {
+		const auto path_text = Common::PathToString(path);
+		LOGF_COLOR(Log::Color::BrightRed, "Can't persist file: %s\n", path_text.c_str());
+	}
+}
+
 void DumpShaderOriginal(const char* stage_name, uint64_t shader_hash,
                         std::span<const uint32_t> code, const std::string& decoded_dump) {
-	if (!Config::GraphicsDebugDumpEnabled()) {
+	if (!Config::ShaderDebugEnabled() && !Config::GraphicsDebugDumpEnabled()) {
 		return;
 	}
 	EXIT_IF(code.empty());
@@ -230,6 +278,26 @@ void DumpShaderOriginal(const char* stage_name, uint64_t shader_hash,
 		} else {
 			file.Write(data, size);
 		}
+	}
+}
+
+void DumpShaderReplayCapsule(const char*                                         stage_name,
+                             const ShaderRecompiler::CompileOptions&             options,
+                             std::span<const uint32_t>                           code,
+                             const ShaderRecompiler::IR::ResourceSpecialization& specialization,
+                             uint32_t push_data_start_dword) {
+	if (!Config::ShaderDebugEnabled()) {
+		return;
+	}
+	const auto path =
+	    Config::GetShaderLogFolder() / "original" /
+	    fmt::format("precompile_{}_{:016x}.capsule.json", stage_name, options.shader_hash);
+	Common::File::CreateDirectories(path.parent_path());
+	std::string error;
+	if (!ShaderRecompiler::WriteReplayCapsule(path, code, options, specialization,
+	                                          push_data_start_dword, &error)) {
+		LOGF_COLOR(Log::Color::BrightRed, "Can't create shader replay capsule: %s\n",
+		           error.c_str());
 	}
 }
 
@@ -315,14 +383,10 @@ struct PipelineCache::ProgramCache {
 	                               ShaderRecompiler::TranslateResult            translated,
 	                               ShaderRecompiler::IR::ResourceSpecialization specialization,
 	                               uint32_t push_data_start_dword) {
-		const char* stage_name = nullptr;
-		switch (options.stage) {
-			case ShaderType::Vertex: stage_name = "vs"; break;
-			case ShaderType::Mesh: stage_name = "ms"; break;
-			case ShaderType::Pixel: stage_name = "ps"; break;
-			case ShaderType::Compute: stage_name = "cs"; break;
-			default: EXIT("invalid pipeline shader stage\n");
-		}
+		const char* stage_name = ShaderStageName(options.stage);
+		EXIT_IF(options.stage == ShaderType::Unknown || options.stage == ShaderType::Fetch);
+		DumpShaderReplayCapsule(stage_name, options, params.code, specialization,
+		                        push_data_start_dword);
 		auto result = ShaderRecompiler::CompileProgram(std::move(translated), options,
 		                                               specialization, push_data_start_dword);
 		DumpShaderOriginal(stage_name, options.shader_hash, params.code, result.decoded_dump);
@@ -352,10 +416,10 @@ struct PipelineCache::ProgramCache {
 		    .specialization = std::move(specialization),
 		    .program        = std::move(result.program).TakeCompiledInfo(),
 		    .handle         = {.id          = ++next_shader_id,
-		                        .module      = module,
-		                        .stage       = options.stage,
-		                        .shader_hash = options.shader_hash,
-		                        .spirv_words = result.spirv.size()},
+		                       .module      = module,
+		                       .stage       = options.stage,
+		                       .shader_hash = options.shader_hash,
+		                       .spirv_words = result.spirv.size()},
 		};
 	}
 
@@ -448,6 +512,10 @@ struct PipelineCache::ProgramCache {
 			options.wave_size = input_info.wave_size;
 		}
 		auto translated = ShaderRecompiler::TranslateProgram(params.code, options);
+		// Persist raw bytes before resource-plan extraction/materialization. Those passes are part
+		// of the crash-prone interval and can fail before CompilePermutation has an exact
+		// specialization.
+		DumpShaderRawBeforeCompile(ShaderStageName(stage), options.shader_hash, params.code);
 		if (entry == programs.end()) {
 			auto resource_plan = ShaderRecompiler::IR::ExtractResourcePlan(translated.program);
 			EXIT_IF(!ShaderRecompiler::IR::MaterializeResources(resource_plan, runtime, resources,
@@ -520,21 +588,6 @@ void PipelineCache::InitializeDriverCache() {
 	if (title_id.empty()) {
 		return;
 	}
-	if (KYTY_BUILD != KYTY_BUILD_RELEASE) {
-		PipelineCacheLog("Vulkan pipeline cache: disabled (non-Release build)");
-		return;
-	}
-	const std::string_view git_hash     = KYTY_GIT_HASH;
-	const std::string_view git_revision = KYTY_GIT_REVISION;
-	if (git_hash == "unknown" || git_revision == "unknown") {
-		PipelineCacheLog("Vulkan pipeline cache: disabled (unknown git revision)");
-		return;
-	}
-	if (git_hash.ends_with("-dirty")) {
-		PipelineCacheLog("Vulkan pipeline cache: disabled (dirty build)");
-		return;
-	}
-
 	m_driver_cache_path     = std::filesystem::path("_PipelineCache") / (title_id + ".bin");
 	const auto path         = Common::PathToString(m_driver_cache_path);
 	const bool cache_exists = Common::File::IsFileExisting(m_driver_cache_path);
@@ -601,14 +654,12 @@ void PipelineCache::InitializeDriverCache() {
 	}
 }
 
-void PipelineCache::Save() {
-	Common::LockGuard lock(m_mutex);
-	if (m_driver_cache == nullptr) {
-		return;
+bool PipelineCache::SnapshotDriverCacheLocked() {
+	if (m_driver_cache == nullptr || m_driver_cache_path.empty()) {
+		return false;
 	}
-
-	size_t               size = 0;
-	vk::Result           result;
+	size_t               size   = 0;
+	vk::Result           result = vk::Result::eErrorUnknown;
 	std::vector<uint8_t> payload;
 	for (uint32_t attempt = 0; attempt < 3; attempt++) {
 		size   = 0;
@@ -625,9 +676,9 @@ void PipelineCache::Save() {
 	}
 	if (result != vk::Result::eSuccess || size == 0 ||
 	    size > std::numeric_limits<uint32_t>::max()) {
-		PipelineCacheLog("Vulkan pipeline cache: save failed ({}, {} bytes)", vk::to_string(result),
-		                 size);
-		return;
+		PipelineCacheLog("Vulkan pipeline cache: snapshot failed ({}, {} bytes)",
+		                 vk::to_string(result), size);
+		return false;
 	}
 	payload.resize(size);
 	auto       prefix       = DriverCacheSignature(m_graphics.GetPhysicalDeviceProperties());
@@ -635,7 +686,7 @@ void PipelineCache::Save() {
 	prefix.append(reinterpret_cast<const char*>(&payload_hash), sizeof(payload_hash));
 	if (!Common::File::CreateDirectories(m_driver_cache_path.parent_path())) {
 		PipelineCacheLog("Vulkan pipeline cache: failed to create cache directory");
-		return;
+		return false;
 	}
 	auto temp_path = m_driver_cache_path;
 	temp_path += ".tmp";
@@ -649,13 +700,27 @@ void PipelineCache::Save() {
 	const bool flushed = !file.IsInvalid() && file.Flush();
 	file.Close();
 	if (prefix_written != prefix.size() || payload_written != payload.size() || !flushed ||
-	    !Common::File::RenameFile(temp_path, m_driver_cache_path)) {
+	    !Common::File::AtomicReplaceFile(temp_path, m_driver_cache_path)) {
 		PipelineCacheLog("Vulkan pipeline cache: failed to write {}",
 		                 Common::PathToString(m_driver_cache_path));
+		return false;
+	}
+	PipelineCacheLog("Vulkan pipeline cache: snapshot saved {} bytes to {}", payload.size(),
+	                 Common::PathToString(m_driver_cache_path));
+	return true;
+}
+
+void PipelineCache::SnapshotDriverCache() {
+	Common::LockGuard lock(m_mutex);
+	(void)SnapshotDriverCacheLocked();
+}
+
+void PipelineCache::Save() {
+	Common::LockGuard lock(m_mutex);
+	if (m_driver_cache == nullptr) {
 		return;
 	}
-	PipelineCacheLog("Vulkan pipeline cache: saved {} bytes to {}", payload.size(),
-	                 Common::PathToString(m_driver_cache_path));
+	(void)SnapshotDriverCacheLocked();
 	m_graphics.device.destroyPipelineCache(m_driver_cache, nullptr);
 	m_driver_cache = nullptr;
 }
@@ -893,10 +958,22 @@ PipelineCache::Pipeline& PipelineCache::CreateGraphicsPipeline(
 
 	auto cached = std::make_unique<Pipeline>();
 	LogPipelineTrace("CreatePipelineInternal begin", vs_id, ps_id);
+	const auto pipeline_begin = std::chrono::steady_clock::now();
 	CreatePipelineInternal(m_graphics, *cached, rendering, key.vertex_input, vs_input_info,
 	                       vertex_program, ps_input_info, pixel_program, static_params,
 	                       m_driver_cache);
 	LogPipelineTrace("CreatePipelineInternal done", vs_id, ps_id);
+	const auto pipeline_elapsed_ms =
+	    static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+	                              std::chrono::steady_clock::now() - pipeline_begin)
+	                              .count());
+	if (pipeline_elapsed_ms > 1000u && m_driver_cache != nullptr &&
+	    (Config::ShaderDebugEnabled() || Config::GraphicsDebugDumpEnabled())) {
+		PipelineCacheLog(
+		    "Vulkan pipeline cache: expensive graphics pipeline elapsed_ms={} snapshot",
+		    pipeline_elapsed_ms);
+		(void)SnapshotDriverCacheLocked();
+	}
 
 	EXIT_NOT_IMPLEMENTED(cached->pipeline == nullptr);
 	EXIT_NOT_IMPLEMENTED(cached->pipeline_layout == nullptr);
@@ -925,8 +1002,20 @@ PipelineCache::CreateComputePipeline(const ShaderComputeInputInfo& input_info,
 		ShaderDbgDumpInputInfo(input_info);
 	}
 
-	auto cached = std::make_unique<Pipeline>();
+	auto       cached         = std::make_unique<Pipeline>();
+	const auto pipeline_begin = std::chrono::steady_clock::now();
 	CreatePipelineInternal(m_graphics, *cached, input_info, compute_program, m_driver_cache);
+	const auto pipeline_elapsed_ms =
+	    static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+	                              std::chrono::steady_clock::now() - pipeline_begin)
+	                              .count());
+	if (pipeline_elapsed_ms > 1000u && m_driver_cache != nullptr &&
+	    (Config::ShaderDebugEnabled() || Config::GraphicsDebugDumpEnabled())) {
+		PipelineCacheLog("Vulkan pipeline cache: expensive compute pipeline shader_hash=0x{:016x} "
+		                 "elapsed_ms={} snapshot",
+		                 compute_program.shader_hash, pipeline_elapsed_ms);
+		(void)SnapshotDriverCacheLocked();
+	}
 
 	EXIT_NOT_IMPLEMENTED(cached->pipeline == nullptr);
 	EXIT_NOT_IMPLEMENTED(cached->pipeline_layout == nullptr);

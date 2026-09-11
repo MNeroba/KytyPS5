@@ -61,6 +61,11 @@ static void PrintUsage() {
 	::printf("  --gpu-assisted-validation <t|f>      Bounds-check shader accesses on the GPU.\n"
 	         "                                       Implies --vulkan-validation; very slow.\n");
 	::printf("  --shader-validation <true|false>     Enable shader validation.\n");
+	::printf("  --shader-debug <true|false>          Focused shader traces/dumps without graphics "
+	         "packet tracing.\n");
+	::printf("  --shader-debug-disable-optimization <true|false>\n"
+	         "                                       Disable Vulkan pipeline optimization for A/B "
+	         "debug runs.\n");
 	::printf("  --shader-optimization-type <value>   None, Size, or Performance.\n");
 	::printf("  --shader-log-direction <value>       Silent, Console, or File.\n");
 	::printf("  --shader-log-folder <path>           Shader log output folder.\n");
@@ -74,7 +79,8 @@ static void PrintUsage() {
 	::printf(
 	    "  --readback-linear-images <true|false> Read back writable linear images on submit.\n");
 	::printf("  --playgo-hack                       Use the supplied PlayGo stub fallback.\n");
-	::printf("  --stub-bvh                          Use a stub for MIMG BVH opcodes (ray tracing is not implemented). Default: off.\n");
+	::printf("  --stub-bvh                          Use a stub for MIMG BVH opcodes (ray tracing "
+	         "is not implemented). Default: off.\n");
 #if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
 	::printf("  --redzone                            Protect the guest SysV red zone.\n");
 #endif
@@ -265,6 +271,16 @@ static bool ParseArgs(int argc, char* argv[], RunOptions& options, bool& show_he
 			}
 		} else if (arg == "--shader-validation") {
 			if (!ParseBool(value, options.config.shader_validation_enabled)) {
+				::printf("invalid boolean for %s: %s\n", arg.c_str(), value.c_str());
+				return false;
+			}
+		} else if (arg == "--shader-debug") {
+			if (!ParseBool(value, options.config.shader_debug_enabled)) {
+				::printf("invalid boolean for %s: %s\n", arg.c_str(), value.c_str());
+				return false;
+			}
+		} else if (arg == "--shader-debug-disable-optimization") {
+			if (!ParseBool(value, options.config.shader_debug_disable_optimization)) {
 				::printf("invalid boolean for %s: %s\n", arg.c_str(), value.c_str());
 				return false;
 			}
