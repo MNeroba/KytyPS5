@@ -1,6 +1,6 @@
 # Current KytyPS5 debugging state
 
-Last reconciled: 2026-09-11 20:18 Europe/Riga
+Last reconciled: 2026-09-11 22:04 Europe/Riga
 
 This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable mechanisms live in REFERENCE.md.
 
@@ -8,10 +8,10 @@ This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable
 
 Repository/worktree: G:/KytyPS5/repo
 Branch: astro/materialize-resources
-Current source HEAD: 9b433654191799974bed2d613d8bd1dbbd00a179 (`shader: add offline replay and development diagnostics`)
+Current source HEAD: ce32234ff6ff83ffc1492c59473e9596ba6a9908 (`debug: trace production compute replay inputs`)
 Last ASTRO runtime source HEAD: 4374a9d9dbf5224fba68e5c9e3037196a0a13245
 Runtime source HEAD at launch: 4374a9d9dbf5224fba68e5c9e3037196a0a13245
-Working tree before this checkpoint: clean before the current diagnostic trace; this checkpoint includes only the trace and docs
+Working tree before this checkpoint: clean at `ce32234`; install tree remains the older 4374a9d runtime binary
 Build: Release, CMake/Ninja, clang-cl, clang-lld_link-64
 Executable: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.exe
 Executable SHA-256: 4059FF2D5CF62C6065AB754AC18D374D659C1E4F0829CE3BCC50F0CFF11A3D44
@@ -86,6 +86,6 @@ No guessed replay candidate or new ASTRO run was made for this checkpoint. The n
 
 ## Focused validation and tomorrow
 
-The diagnostic source change passes `git diff --check`. A rebuild was attempted with `ninja -C _Build/windows kyty_emulator` but stopped before the changed translation unit because the existing checkout is missing third-party headers (`3rdparty/fmt/include/avx2intrin.h`; Tracy headers also failed in the same invocation). This is a build-environment baseline, not a source or test result.
+The diagnostic source change passed `git diff --check` and was committed as `ce32234`. A serialized rebuild (`ninja -C _Build/windows -j1 kyty_emulator`) reached project compilation but stopped in the existing clang-cl include setup when MSVC STL `<new>` resolved through the Tracy include path. Earlier parallel attempts also reported missing build-tree/third-party headers. These are build-environment baselines, not source or test results; the installed executable was not replaced.
 
 Next action: restore/verify the existing dependency checkout, rebuild from `9b43365`, then run one narrowly scoped ASTRO capture with shader-debug enabled solely to obtain the target's pre-resource-plan fields. Do not generate a new exact capsule, rerun ASTRO, or change color semantics until those values are production-derived.

@@ -142,7 +142,7 @@ FACT: The target-specific values for `threads_num`, `thread_ids_num`, `group_id`
 
 WHY IT MATTERS: The generic opt-in `ShaderReplayInput` trace is placed before resource-plan extraction and immediately before `CompileProgram`, so one future capture can supply the missing production state without changing semantics. If `PROJECT_MEMORY.md` already answers an architectural question, do not re-investigate it unless current source, a regression, or new runtime evidence contradicts it.
 
-RELATED CODE/COMMIT: diagnostic trace in `src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp` (working tree after `9b43365`); no new capsule or ASTRO run has been made for this evidence.
+RELATED CODE/COMMIT: diagnostic trace in `src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp`, commit `ce32234`; no new capsule or ASTRO run has been made for this evidence.
 
 ### Bounded descriptor root resource remap — PROVEN
 
