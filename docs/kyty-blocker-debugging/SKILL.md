@@ -77,6 +77,10 @@ Do not report every command. When a blocker closes, explicitly report `CLOSED`, 
 
 Once exact failing path + incorrect decision/pass + correct invariant + focused reproduction are known, stop broad investigation and proceed to regression/fix/validation.
 
+## Replay fidelity
+
+Raw guest shader code does not encode the live compute specialization. Before making a replay capsule, trace the production `ShaderComputeInputInfo` and `CompileOptions` values at the PM4-to-`CompileProgram` boundary, including workgroup dimensions, resource namespace flags, subgroup size, dispatch fields, user-data base, and user-data count. If a crash can occur during resource-plan extraction, persist the raw code and a diagnostic input snapshot before that interval, then record the final state immediately before `CompileProgram`. Mark missing values as unknown; do not infer them from `LocalSize`, IR builtin usage, another shader, or guessed candidates. A shape replay is useful for generic tests but cannot be called an exact production replay until its state and specialization are captured from the target path.
+
 ## PATCH THRESHOLD
 
 Patch when:

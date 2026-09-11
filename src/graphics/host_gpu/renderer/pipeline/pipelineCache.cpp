@@ -251,6 +251,31 @@ void DumpShaderRawBeforeCompile(const char* stage_name, uint64_t shader_hash,
 	}
 }
 
+// Capture the dynamic compute specialization before resource-plan extraction can terminate the
+// process.  A raw shader binary does not contain these PM4-derived fields, so this marker is the
+// production provenance needed to build an exact replay later.  Keep it opt-in and diagnostic;
+// it must not synthesize or alter compiler inputs.
+void LogShaderComputeInputBeforeCompile(const char*                             phase,
+                                        const ShaderRecompiler::CompileOptions& options) {
+	if ((!Config::ShaderDebugEnabled() && !Config::GraphicsDebugDumpEnabled()) ||
+	    options.input_info.compute == nullptr) {
+		return;
+	}
+	const auto& info = *options.input_info.compute;
+	LOGF("ShaderReplayInput phase=%s hash=0x%016" PRIx64
+	     " threads={%u,%u,%u} thread_ids_num=%d group_id={%s,%s,%s} tg_size_en=%s"
+	     " workgroup_register=%d host_subgroup_size=%u"
+	     " dispatch_thread_dimensions=%s dispatch_threads_num={%u,%u,%u}"
+	     " user_data_base=%u user_data_count=%" PRIu64 "\n",
+	     phase, options.shader_hash, info.threads_num[0], info.threads_num[1], info.threads_num[2],
+	     info.thread_ids_num, info.group_id[0] ? "true" : "false",
+	     info.group_id[1] ? "true" : "false", info.group_id[2] ? "true" : "false",
+	     info.tg_size_en ? "true" : "false", info.workgroup_register, info.host_subgroup_size,
+	     info.dispatch_thread_dimensions ? "true" : "false", info.dispatch_threads_num[0],
+	     info.dispatch_threads_num[1], info.dispatch_threads_num[2], options.user_data_base,
+	     static_cast<uint64_t>(options.user_data.size()));
+}
+
 void DumpShaderOriginal(const char* stage_name, uint64_t shader_hash,
                         std::span<const uint32_t> code, const std::string& decoded_dump) {
 	if (!Config::ShaderDebugEnabled() && !Config::GraphicsDebugDumpEnabled()) {
@@ -387,6 +412,7 @@ struct PipelineCache::ProgramCache {
 		EXIT_IF(options.stage == ShaderType::Unknown || options.stage == ShaderType::Fetch);
 		DumpShaderReplayCapsule(stage_name, options, params.code, specialization,
 		                        push_data_start_dword);
+		LogShaderComputeInputBeforeCompile("pre_compile", options);
 		auto result = ShaderRecompiler::CompileProgram(std::move(translated), options,
 		                                               specialization, push_data_start_dword);
 		DumpShaderOriginal(stage_name, options.shader_hash, params.code, result.decoded_dump);
@@ -516,6 +542,7 @@ struct PipelineCache::ProgramCache {
 		// of the crash-prone interval and can fail before CompilePermutation has an exact
 		// specialization.
 		DumpShaderRawBeforeCompile(ShaderStageName(stage), options.shader_hash, params.code);
+		LogShaderComputeInputBeforeCompile("pre_resource_plan", options);
 		if (entry == programs.end()) {
 			auto resource_plan = ShaderRecompiler::IR::ExtractResourcePlan(translated.program);
 			EXIT_IF(!ShaderRecompiler::IR::MaterializeResources(resource_plan, runtime, resources,

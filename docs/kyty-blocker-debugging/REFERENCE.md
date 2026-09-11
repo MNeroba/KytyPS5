@@ -165,3 +165,11 @@ Guest-address translation and mapped-memory behavior are distinct from descripto
 ## Build and runtime boundary
 
 The usual Windows build is CMake/Ninja with `clang-cl`. The executable used for target validation may come from the install tree, so build-tree and install-tree binaries can diverge. Stable architecture ends at that boundary; the exact current commit, commands, binary hashes, flags, and runtime label belong in `CURRENT_STATE.md`.
+
+## Compute input provenance and replay
+
+`ShaderComputeInputInfo` is assembled from live PM4 state, not from the shader binary. `COMPUTE_NUM_THREAD_X/Y/Z` populate `CsStageRegisters.num_thread_*`; `COMPUTE_PGM_RSRC2` supplies `USER_SGPR`, `TGID_*_EN`, `TG_SIZE_EN`, and `TIDIG_COMP_CNT`; `ShaderGetStaticInputInfoCS` copies them into the compute input. `GetShaderParams` then copies the first `USER_SGPR` values into `CompileOptions::user_data`.
+
+`PipelineCache::GetComputeProgram` sets `host_subgroup_size` from `SupportsComputeWave64()`. `RenderExecutor::DispatchDirect` passes the dispatch mode and group counts, but writes `dispatch_threads_num` only after `GetComputeProgram` returns; therefore `CompileProgram`, which runs inside that call, sees the initial zero triple for that field. Compute `CompileOptions::user_data_base` remains its default zero because only vertex/mesh paths override it.
+
+The raw code and SPIR-V `LocalSize` do not uniquely recover this state. Exact replay requires a capture of all fields and user-data count from the production call. Place any crash-safe diagnostic before resource-plan extraction and an exact marker immediately before `CompileProgram`; do not infer fields from IR builtin use or substitute values from another shader.

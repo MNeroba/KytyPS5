@@ -1,6 +1,6 @@
 # Current KytyPS5 debugging state
 
-Last reconciled: 2026-09-11 19:24 Europe/Riga
+Last reconciled: 2026-09-11 20:18 Europe/Riga
 
 This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable mechanisms live in REFERENCE.md.
 
@@ -8,10 +8,10 @@ This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable
 
 Repository/worktree: G:/KytyPS5/repo
 Branch: astro/materialize-resources
-Current source HEAD: edc7d4f4aaef71df6d6dca0c80a8d5ff6d77cb1c (`shader: remap retained bounded descriptor roots`)
+Current source HEAD: 9b433654191799974bed2d613d8bd1dbbd00a179 (`shader: add offline replay and development diagnostics`)
 Last ASTRO runtime source HEAD: 4374a9d9dbf5224fba68e5c9e3037196a0a13245
 Runtime source HEAD at launch: 4374a9d9dbf5224fba68e5c9e3037196a0a13245
-Working tree before this checkpoint: source fix committed; documentation checkpoint is pending
+Working tree before this checkpoint: clean before the current diagnostic trace; this checkpoint includes only the trace and docs
 Build: Release, CMake/Ninja, clang-cl, clang-lld_link-64
 Executable: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.exe
 Executable SHA-256: 4059FF2D5CF62C6065AB754AC18D374D659C1E4F0829CE3BCC50F0CFF11A3D44
@@ -29,10 +29,10 @@ Title ID: PPSA21567
 Game input: G:/PS5 Games/PPSA21567/extracted
 Current milestone: M4 intro/loading — animated intro/scene rendered and was presented
 Next milestone: M5 main menu
-Current P0: validate the bounded-root remap fix on ASTRO and classify the first post-intro boundary if termination persists
-P0 class: runtime validation of the source fix; the prior shader/recompiler resource-plan invariant is closed by `edc7d4f`
+Current P0: obtain production-derived `ShaderComputeInputInfo` for CS `0x657ad04626bf9d55` so an exact replay can be built without guessed state
+P0 class: replay provenance / pre-resource-plan observation; the bounded-root producer invariant is fixed generically by `edc7d4f` and must not be reopened without contradictory evidence
 Last validated progress signal: 75 completed SPIR-V modules (38 CS / 22 PS / 14 VS / 1 MS); HostSubmit through tick=337559, HostWait tick=337558 Success, HostPresent/Flip completed, and an animated intro frame was visible
-Known P1 likely blockers: incorrect color/output interpretation after termination is classified; do not change color semantics yet
+Known P1 likely blockers: classify any next post-intro boundary after the exact target state is captured; incorrect color/output interpretation remains P1 and is not a current fix target
 Known P2: cold-start large dispatcher pipeline compilation latency; successful creates are not a hang
 
 M1, M2, and M3 are closed. Do not reopen the cleared startup SRT/BDA-lifetime, pipeline-create, submission, or visible-frame conclusions without contradictory evidence. M4 was reached; termination before M5 remains open.
@@ -72,8 +72,20 @@ Semantic source checkpoint: `edc7d4f` keeps `.at()` and fixes the producer path:
 
 Producer regression: `TestBoundedRootScalarBufferResourceRemap` builds seven ordinary dense buffers, retains a dynamic scalar-buffer root through `PlanBoundedRootReads`/`ApplyBoundedRootReads`, and starts that root with frontend-style `memory.resource=7`. Before `edc7d4f`, `ExtractResourcePlan` failed with `invalid vector subscript`; after it, the root maps to dense buffer 7 and the plan contains eight buffers.
 
-## Focused validation and tomorrow
+## Prior focused validation
 
 Passed after `edc7d4f`: `resource_materialization_tests`, `shader_cfg_tests`, `shader_recompiler_compute_tests`, and `scalar_provenance_tests`. `resource_tracking_tests` reaches the known unrelated baseline failure at `dynamic storage mips`; the new bounded-root regression passes before that baseline case.
 
-Next action: build/install the Release emulator from `edc7d4f`, verify executable/PDB provenance, then make one narrowly scoped ASTRO run to test whether the post-intro out-of-range termination is gone. If it persists, capture only the first new boundary; do not reopen M1/M2/M3 or color semantics.
+## Production compute-state provenance
+
+The existing target artifacts do not contain an authentic `ShaderComputeInputInfo` snapshot or capsule for `0x657ad04626bf9d55`. The target raw `.bin`/`.rdna2` and SPIR-V contain shader code/output, not PM4 register state. The only target-run field directly proven from existing evidence is `host_subgroup_size=32`, from the Vulkan subgroup report and `GetComputeProgram` selection. `user_data_base=0` is the compute `CompileOptions` default, and source ordering proves `dispatch_threads_num={0,0,0}` at the `CompileProgram` call because `RenderExecutor::DispatchDirect` assigns it only after `GetComputeProgram` returns.
+
+The remaining target values are **UNAVAILABLE** without a new production capture: `threads_num`, `thread_ids_num`, `group_id`, `tg_size_en`, `workgroup_register`, `dispatch_thread_dimensions`, and `user_data count`. Their provenance is known: PM4 `COMPUTE_NUM_THREAD_X/Y/Z` and `COMPUTE_PGM_RSRC2` populate `CsStageRegisters`; `ShaderGetStaticInputInfoCS` copies those fields; `GetShaderParams` copies `cs_user_sgpr` into `options.user_data`; `ProgramCache::Get` passes the state into `CompileProgram`. The historical `ShaderDbgDumpInputInfo` near `0x9e8627388f138c1d` belongs to that other shader and cannot be reused.
+
+No guessed replay candidate or new ASTRO run was made for this checkpoint. The new opt-in `ShaderReplayInput` markers record the actual state both before resource-plan extraction and immediately before `CompileProgram`; the next run must use them only to capture production values and then build one exact capsule.
+
+## Focused validation and tomorrow
+
+The diagnostic source change passes `git diff --check`. A rebuild was attempted with `ninja -C _Build/windows kyty_emulator` but stopped before the changed translation unit because the existing checkout is missing third-party headers (`3rdparty/fmt/include/avx2intrin.h`; Tracy headers also failed in the same invocation). This is a build-environment baseline, not a source or test result.
+
+Next action: restore/verify the existing dependency checkout, rebuild from `9b43365`, then run one narrowly scoped ASTRO capture with shader-debug enabled solely to obtain the target's pre-resource-plan fields. Do not generate a new exact capsule, rerun ASTRO, or change color semantics until those values are production-derived.
