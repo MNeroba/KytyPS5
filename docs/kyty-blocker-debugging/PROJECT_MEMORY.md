@@ -124,7 +124,17 @@ WHY IT MATTERS: The current P0 is a shader/recompiler resource-plan invariant fa
 
 EVIDENCE: `C:/Users/mneroba/AppData/Local/CrashDumps/kyty_emulator.exe.9700.dmp`; matching Release binary/PDB from source `4374a9d9dbf5224fba68e5c9e3037196a0a13245`; `G:/KytyPS5/logs/ASTRO_HOSTTRACE_20260911_175340/runtime.log`; source `src/graphics/shader/recompiler/ir/passes/ResourceMaterialization.cpp:1838`; disassembly and vector layout recover size 7 and the taken range-check branch. Runtime hash `0x657ad04626bf9d55` completed Decode/CFG/IR TranslateProgram and had no SPIR-V emission artifact. Filesystem enumeration was concurrent, but the throwing frame is in the recompiler thread.
 
-RELATED CODE/COMMIT: `ResourceControlFlow` / `ExtractResourcePlan` in `ResourceMaterialization.cpp`; `PipelineCache::ProgramCache::Get` caller; runtime source HEAD `4374a9d`. Next investigation should add a focused out-of-range fixture and inspect the existing defined plan-failure contract before changing semantics. Preserve raw guest shader bytes before this interval on a future diagnostic run if needed.
+RELATED CODE/COMMIT: `ResourceControlFlow` / `ExtractResourcePlan` in `ResourceMaterialization.cpp`; `PipelineCache::ProgramCache::Get` caller; runtime source HEAD `4374a9d`. The source fix and regression below close this invariant for the observed transformation path; preserve raw guest shader bytes before this interval on a future diagnostic run if needed.
+
+### Bounded descriptor root resource remap — PROVEN
+
+FACT: `PlanBoundedRootReads` can retain a raw scalar-buffer `ReadConstBuffer` as a descriptor root. `ApplyBoundedRootReads` keeps that original instruction alive with `ReferenceU32`, but the old `ResourceTracking::Collect` returned before `AddBuffer` and `AddMemoryPatch`. Its frontend resource id therefore remained in the guest/SGPR namespace while `program.info.buffers` was dense, producing the post-intro `std::out_of_range`.
+
+WHY IT MATTERS: This is an upstream missing-registration/remap bug, not a valid-input case for clamping, unchecked indexing, catch-all handling, or graceful fallback. Keep the checked `.at()` as the invariant boundary. Ordinary bounded reads are still replaced later and remain deferred.
+
+EVIDENCE: `TestBoundedRootScalarBufferResourceRemap` builds seven ordinary dense buffers, retains a dynamic root with `memory.resource=7`, and reaches `ExtractResourcePlan`. With the pre-fix `Collect` skip it fails with `invalid vector subscript`; with `edc7d4f` the root registers as dense buffer 7, `program.info.buffers` has eight entries, and the root remains represented in `srt_reads`.
+
+RELATED CODE/COMMIT: `ResourceTracking.cpp::Collect`, `PlanBoundedRootReads`, `ApplyBoundedRootReads`; `tests/ResourceTrackingTests.cpp`; semantic commit `edc7d4f`.
 
 ## Confirmed blocker history and commits
 

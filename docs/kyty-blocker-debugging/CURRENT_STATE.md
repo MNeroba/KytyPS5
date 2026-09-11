@@ -1,6 +1,6 @@
 # Current KytyPS5 debugging state
 
-Last reconciled: 2026-09-11 18:58 Europe/Riga
+Last reconciled: 2026-09-11 19:24 Europe/Riga
 
 This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable mechanisms live in REFERENCE.md.
 
@@ -8,8 +8,10 @@ This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable
 
 Repository/worktree: G:/KytyPS5/repo
 Branch: astro/materialize-resources
+Current source HEAD: edc7d4f4aaef71df6d6dca0c80a8d5ff6d77cb1c (`shader: remap retained bounded descriptor roots`)
+Last ASTRO runtime source HEAD: 4374a9d9dbf5224fba68e5c9e3037196a0a13245
 Runtime source HEAD at launch: 4374a9d9dbf5224fba68e5c9e3037196a0a13245
-Working tree before this checkpoint: clean; documentation checkpoint is being prepared
+Working tree before this checkpoint: source fix committed; documentation checkpoint is pending
 Build: Release, CMake/Ninja, clang-cl, clang-lld_link-64
 Executable: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.exe
 Executable SHA-256: 4059FF2D5CF62C6065AB754AC18D374D659C1E4F0829CE3BCC50F0CFF11A3D44
@@ -27,8 +29,8 @@ Title ID: PPSA21567
 Game input: G:/PS5 Games/PPSA21567/extracted
 Current milestone: M4 intro/loading — animated intro/scene rendered and was presented
 Next milestone: M5 main menu
-Current P0: uncaught std::out_of_range in ResourceMaterialization.cpp:1838 (ResourceControlFlow inlined into ExtractResourcePlan) for CS 0x657ad04626bf9d55, after IR translation and before SPIR-V emission
-P0 class: shader/recompiler resource-plan extraction; program.info.buffers had 7 entries and the checked access received memory.resource >= 7
+Current P0: validate the bounded-root remap fix on ASTRO and classify the first post-intro boundary if termination persists
+P0 class: runtime validation of the source fix; the prior shader/recompiler resource-plan invariant is closed by `edc7d4f`
 Last validated progress signal: 75 completed SPIR-V modules (38 CS / 22 PS / 14 VS / 1 MS); HostSubmit through tick=337559, HostWait tick=337558 Success, HostPresent/Flip completed, and an animated intro frame was visible
 Known P1 likely blockers: incorrect color/output interpretation after termination is classified; do not change color semantics yet
 Known P2: cold-start large dispatcher pipeline compilation latency; successful creates are not a hang
@@ -66,10 +68,12 @@ src/graphics/shader/recompiler/ShaderRecompiler.cpp — structured loop-exit val
 src/graphics/shader/recompiler/backend/spirv/spirvEmitterProgram.cpp — metadata/planning-only spill filtering and shader-side SRT alias resolution
 tests/shaderCfgTests.cpp — dispatcher shader-side SRT alias regression
 
-Documentation checkpoint: this update records the dump/source localization only; no semantic fix, catch-all handler, unchecked access, or new ASTRO run was made. Temporary diagnostics and runtime artifacts remain outside the repository under G:/KytyPS5/notes/ and G:/KytyPS5/logs/.
+Semantic source checkpoint: `edc7d4f` keeps `.at()` and fixes the producer path: retained bounded `ReadConstBuffer` roots now register their descriptor source through `AddBuffer` and receive `AddMemoryPatch`; ordinary bounded reads remain deferred. No catch-all handler, unchecked access, clamp, substitution, or color change was made. Temporary diagnostics and runtime artifacts remain outside the repository under G:/KytyPS5/notes/ and G:/KytyPS5/logs/.
+
+Producer regression: `TestBoundedRootScalarBufferResourceRemap` builds seven ordinary dense buffers, retains a dynamic scalar-buffer root through `PlanBoundedRootReads`/`ApplyBoundedRootReads`, and starts that root with frontend-style `memory.resource=7`. Before `edc7d4f`, `ExtractResourcePlan` failed with `invalid vector subscript`; after it, the root maps to dense buffer 7 and the plan contains eight buffers.
 
 ## Focused validation and tomorrow
 
-Passed before this checkpoint: shader_cfg_tests, resource_materialization_tests, shader_recompiler_compute_tests, scalar_provenance_tests, and the dispatcher alias fixture. resource_tracking_tests still reaches the known unrelated baseline failure: dynamic storage mips accepted an inverted range.
+Passed after `edc7d4f`: `resource_materialization_tests`, `shader_cfg_tests`, `shader_recompiler_compute_tests`, and `scalar_provenance_tests`. `resource_tracking_tests` reaches the known unrelated baseline failure at `dynamic storage mips`; the new bounded-root regression passes before that baseline case.
 
-Next action: read CURRENT_STATE.md, PROJECT_MEMORY.md, and the relevant REFERENCE.md section; add a focused ResourceControlFlow/ExtractResourcePlan regression for `memory.resource == buffers.size()` and inspect the existing defined plan-failure contract. Preserve raw guest shader bytes before this interval on a future diagnostic run if source inspection cannot finish the proof. Do not rerun ASTRO until that narrow regression/instrumentation purpose is defined.
+Next action: build/install the Release emulator from `edc7d4f`, verify executable/PDB provenance, then make one narrowly scoped ASTRO run to test whether the post-intro out-of-range termination is gone. If it persists, capture only the first new boundary; do not reopen M1/M2/M3 or color semantics.
