@@ -8,6 +8,7 @@ This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable
 
 Repository/worktree: G:/KytyPS5/repo
 Branch: astro/materialize-resources
+Repository HEAD at this docs checkpoint: `99081d8` (docs-only commits after the runtime build; source/build revision remains `150a139`)
 Current source HEAD: 150a1395c7553191a8e5f856b60cdea657034ed8 (`debug: persist complete shader replay input trace`)
 Last ASTRO runtime source HEAD: 150a1395c7553191a8e5f856b60cdea657034ed8
 Runtime source HEAD at launch: 150a1395c7553191a8e5f856b60cdea657034ed8
