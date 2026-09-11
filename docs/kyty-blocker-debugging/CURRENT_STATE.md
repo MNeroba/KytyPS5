@@ -1,6 +1,6 @@
 # Current KytyPS5 debugging state
 
-Last reconciled: 2026-09-11 22:14 Europe/Riga
+Last reconciled: 2026-09-11 22:19 Europe/Riga
 
 This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable mechanisms live in REFERENCE.md.
 
@@ -16,7 +16,7 @@ Build: Release, CMake/Ninja, clang-cl, clang-lld_link-64
 Executable: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.exe
 Executable SHA-256: F4334F4D39476C95BFA1ABB301D8C25D053DA3331B0B31E8F867823FEA63121C
 Executable size: 21,020,160 bytes; local install refreshed 2026-09-11 22:12:00 Europe/Riga
-Build label: Source build 3fb0ce7 (from generated `kytyGitVersion.h`); no ASTRO runtime launched from this build yet
+Build label: Source build 3fb0ce7 (from generated `kytyGitVersion.h`); one diagnostic launch was attempted, but it stopped before the target shader because the baseline BVH stub flag was omitted
 Matching PDB: G:/KytyPS5/repo/_Build/windows/kyty_emulator.pdb and local install copy; SHA-256 7F622347853D4FF4A6C046DF9999F43CBE378C63D0769643E43443990811E15F; size 24,059,904 bytes; built 2026-09-11 22:11:58 Europe/Riga
 Binary provenance: the historical dump/run used 4374a9d above; the current local install is a separate 3fb0ce7 build for the future capture
 
@@ -89,3 +89,17 @@ No guessed replay candidate or new ASTRO run was made for this checkpoint. The n
 The diagnostic source change passed `git diff --check` and was committed as `3fb0ce7`. A serialized Release build (`ninja -C _Build/windows -j1 kyty_emulator`) completed; the generated CMake install target still fails at the administrator-only system prefix, so the local install executable/PDB were copied directly from the build tree. `shader_recompiler_compute_tests` was rebuilt from this exact source and passed (`EXIT_CODE=0`, wall `8.370 s`, log `G:/KytyPS5/logs/shader_recompiler_compute_tests_3fb0ce7.log`).
 
 Next action: when the no-run constraint is lifted, launch the current local install once with shader-debug enabled solely to capture the target's pre-resource-plan fields, then build one exact capsule from that production state. Do not generate a new exact capsule or change color semantics until those values are production-derived.
+
+## Bounded production-capture attempt
+
+The single authorized capture attempt from this checkpoint is incomplete and must not be
+treated as target-game evidence. Run/artifact: `G:/KytyPS5/logs/ASTRO_REPLAY_INPUT_20260911_221647/`.
+Provenance: source `3fb0ce7bf477ccda6f75593ed95926d6a785adec`, repository HEAD
+`84853bcd9ce4b133ecd54e556754b883c3c9a9b8`, installed executable SHA-256
+`F4334F4D39476C95BFA1ABB301D8C25D053DA3331B0B31E8F867823FEA63121C`.
+The exact command is in `command.txt`; the wrapper recorded `exit_code=321`
+(`0x00000141`) after 3.738 s. The process stopped at the known unsupported MIMG BVH
+opcode `0xe6` because `--stub-bvh` was not supplied, before
+`0x657ad04626bf9d55` was encountered. No `ShaderReplayInput` A/B record or exact capsule
+was produced; `--printf-direction Silent` also omitted the `LOGF` trace lines. Do not
+count this as a target capture or update M1–M4 from it.
