@@ -8,17 +8,17 @@ This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable
 
 Repository/worktree: G:/KytyPS5/repo
 Branch: astro/materialize-resources
-Current source HEAD: ce32234ff6ff83ffc1492c59473e9596ba6a9908 (`debug: trace production compute replay inputs`)
+Current source HEAD: de7d8b67b21adfe96ecdbd8573ea82b5418712c4 (`docs: reconcile compute replay checkpoint`)
 Last ASTRO runtime source HEAD: 4374a9d9dbf5224fba68e5c9e3037196a0a13245
 Runtime source HEAD at launch: 4374a9d9dbf5224fba68e5c9e3037196a0a13245
-Working tree before this checkpoint: clean at `ce32234`; install tree remains the older 4374a9d runtime binary
+Working tree before this checkpoint: clean at `de7d8b6`; local install tree was refreshed from this build
 Build: Release, CMake/Ninja, clang-cl, clang-lld_link-64
 Executable: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.exe
-Executable SHA-256: 4059FF2D5CF62C6065AB754AC18D374D659C1E4F0829CE3BCC50F0CFF11A3D44
-Executable size: 20,830,720 bytes; installed 2026-09-11 17:53:04 Europe/Riga
-Runtime label: Source build 4374a9d
-Matching PDB: G:/KytyPS5/repo/_Build/windows/kyty_emulator.pdb; SHA-256 A441659DB798E6D441E3AF6C7A82E625201EE46F0EE20E53AFEF572E13888EC4; size 23,953,408 bytes; written 2026-09-11 17:53:02 Europe/Riga
-Binary provenance: dump/run used the exact installed executable and matching PDB from source HEAD above
+Executable SHA-256: 83CBAE098F0980B68971BE92179E6BF38B443C9328B7D29EB42729F071E1993F
+Executable size: 21,020,160 bytes; local install refreshed 2026-09-11 22:04:26 Europe/Riga
+Build label: Source build de7d8b6 (from generated `kytyGitVersion.h`); no ASTRO runtime launched from this build yet
+Matching PDB: G:/KytyPS5/repo/_Build/windows/kyty_emulator.pdb and local install copy; SHA-256 CF2239F85E878EA9F71C2B18205829DA1BE1E49E7FDBF8554594B79CAB6CF79E; size 24,059,904 bytes; built 2026-09-11 22:04:11 Europe/Riga
+Binary provenance: the historical dump/run used 4374a9d above; the current local install is a separate de7d8b6 build for the future capture
 
 The system-wide CMake install prefix was not used because it requires administrator access.
 
@@ -74,7 +74,7 @@ Producer regression: `TestBoundedRootScalarBufferResourceRemap` builds seven ord
 
 ## Prior focused validation
 
-Passed after `edc7d4f`: `resource_materialization_tests`, `shader_cfg_tests`, `shader_recompiler_compute_tests`, and `scalar_provenance_tests`. `resource_tracking_tests` reaches the known unrelated baseline failure at `dynamic storage mips`; the new bounded-root regression passes before that baseline case.
+Passed after `edc7d4f`: `resource_materialization_tests`, `shader_cfg_tests`, `shader_recompiler_compute_tests`, and `scalar_provenance_tests`. The current `de7d8b6` build re-ran `shader_recompiler_compute_tests` successfully (`EXIT_CODE=0`, wall `8.867 s`; log `G:/KytyPS5/logs/shader_recompiler_compute_tests_ce32234.log`). `resource_tracking_tests` reaches the known unrelated baseline failure at `dynamic storage mips`; the new bounded-root regression passes before that baseline case.
 
 ## Production compute-state provenance
 
@@ -86,6 +86,6 @@ No guessed replay candidate or new ASTRO run was made for this checkpoint. The n
 
 ## Focused validation and tomorrow
 
-The diagnostic source change passed `git diff --check` and was committed as `ce32234`. A serialized rebuild (`ninja -C _Build/windows -j1 kyty_emulator`) reached project compilation but stopped in the existing clang-cl include setup when MSVC STL `<new>` resolved through the Tracy include path. Earlier parallel attempts also reported missing build-tree/third-party headers. These are build-environment baselines, not source or test results; the installed executable was not replaced.
+The diagnostic source change passed `git diff --check` and was committed as `ce32234`. A serialized Release build (`ninja -C _Build/windows -j1 kyty_emulator`) completed; the generated CMake install target still fails at the administrator-only system prefix, so the local install executable/PDB were copied directly from the build tree. `shader_recompiler_compute_tests` was rebuilt and passed (`EXIT_CODE=0`, wall `8.867 s`, log `G:/KytyPS5/logs/shader_recompiler_compute_tests_ce32234.log`).
 
-Next action: restore/verify the existing dependency checkout, rebuild from `9b43365`, then run one narrowly scoped ASTRO capture with shader-debug enabled solely to obtain the target's pre-resource-plan fields. Do not generate a new exact capsule, rerun ASTRO, or change color semantics until those values are production-derived.
+Next action: when the no-run constraint is lifted, launch the current local install once with shader-debug enabled solely to capture the target's pre-resource-plan fields, then build one exact capsule from that production state. Do not generate a new exact capsule or change color semantics until those values are production-derived.
