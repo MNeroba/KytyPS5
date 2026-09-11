@@ -63,8 +63,14 @@ void MasterSemaphore::Wait(uint64_t tick) {
 		LOGF("HostWait done tick=%" PRIu64 " result=%s elapsed_ms=%" PRIu64 "\n", tick,
 		     vk::to_string(result).c_str(),
 		     static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
-	                                     std::chrono::steady_clock::now() - wait_begin)
-	                                     .count()));
+		                               std::chrono::steady_clock::now() - wait_begin)
+		                               .count()));
+	}
+	if (result != vk::Result::eSuccess) {
+		LOGF("vkDevice.waitSemaphores failed: %s (%d), tick=%" PRIu64 " known=%" PRIu64
+		     " current=%" PRIu64 "\n",
+		     vk::to_string(result).c_str(), static_cast<int>(result), tick, KnownGpuTick(),
+		     CurrentTick());
 	}
 	EXIT_NOT_IMPLEMENTED(result != vk::Result::eSuccess);
 	Refresh();
