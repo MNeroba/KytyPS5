@@ -2532,8 +2532,11 @@ private:
 	}
 
 	void Collect(Inst& inst) {
-		if (BoundedRead(&inst) != nullptr ||
-		    std::ranges::find(m_bounded_root_reads, &inst) != m_bounded_root_reads.end()) {
+		// Bounded reads are replaced before resource-plan extraction.  A root that
+		// feeds a bounded descriptor is different: ApplyBoundedRootReads retains
+		// the original scalar read with ReferenceU32, so its frontend resource id
+		// still needs the ordinary dense-buffer registration and memory patch.
+		if (BoundedRead(&inst) != nullptr) {
 			return;
 		}
 		const auto op           = inst.GetOpcode();

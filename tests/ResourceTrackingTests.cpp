@@ -1920,6 +1920,74 @@ void TestBoundedDescriptorSourceSurvivesDeadCodeElimination() {
         "bounded scalar read did not materialize its candidate word");
 }
 
+void TestBoundedRootScalarBufferResourceRemap() {
+  Fixture fixture;
+
+  // Keep the fixture's dense table at the same boundary as the captured
+  // failure: seven ordinary resources are tracked before the retained root.
+  for (uint32_t resource = 0; resource < 7u; ++resource) {
+    const auto descriptor = fixture.Buffer(
+        {fixture.UserData(16u + resource * 4u),
+         fixture.UserData(17u + resource * 4u),
+         fixture.UserData(18u + resource * 4u),
+         fixture.UserData(19u + resource * 4u)},
+        0x34c0u + resource * 4u);
+    MemoryInfo ordinary_memory;
+    ordinary_memory.kind = ResourceKind::Buffer;
+    const auto load = fixture.Emit(
+        ValueOpcode::LoadBufferU32,
+        {descriptor, Value(0u), Value(0u), Value(0u), Value(true)},
+        fixture.AddMemory(ordinary_memory, 0x34c0u + resource * 4u));
+    fixture.Emit(ValueOpcode::ReferenceU32, {load});
+  }
+
+  const auto source_descriptor =
+      fixture.Buffer({fixture.UserData(0), fixture.UserData(1),
+                      fixture.UserData(2), fixture.UserData(3)}, 0x3500);
+
+  // Frontend scalar-buffer metadata uses the guest resource namespace until
+  // resource tracking remaps it to the dense ShaderInfo::buffers table.  This
+  // read is retained as a bounded-descriptor root, so it must still take the
+  // normal producer path that registers its source and patches MemoryInfo.
+  MemoryInfo root_memory;
+  root_memory.kind     = ResourceKind::ScalarBuffer;
+  root_memory.resource = 7u;
+  const auto root = fixture.Emit(
+      ValueOpcode::ReadConstBuffer, {source_descriptor, fixture.UserData(10)},
+      fixture.AddMemory(root_memory, 0x3504));
+
+  const auto descriptor =
+      fixture.Buffer({root, Value(0u), Value(1u), Value(0u)}, 0x3508);
+  const auto workgroup = fixture.Emit(
+      ValueOpcode::GetBuiltin,
+      {Value(static_cast<uint32_t>(StageInputKind::WorkgroupId)), Value(0u)});
+  MemoryInfo bounded_memory;
+  bounded_memory.kind = ResourceKind::ScalarBuffer;
+  const auto bounded = fixture.Emit(
+      ValueOpcode::ReadConstBuffer, {descriptor, workgroup},
+      fixture.AddMemory(bounded_memory, 0x350c));
+  fixture.Emit(ValueOpcode::ReferenceU32, {bounded});
+
+  fixture.PlanAndTrack();
+  Check(std::ranges::any_of(
+            fixture.program.srt_reads, [&](const SrtRead& read) {
+              return read.value.ResolveInstruction() == root.Instruction();
+            }),
+        "bounded descriptor root was not retained as an SRT read");
+  const auto plan = ExtractResourcePlan(fixture.program);
+
+  const auto root_flags = root.Instruction()->Flags<MemoryFlags>();
+  Check(root_flags.index < fixture.program.memory_info.size() &&
+            fixture.program.memory_info[root_flags.index].resource <
+                fixture.program.info.buffers.size(),
+        "bounded root scalar-buffer resource was not remapped to a dense buffer");
+
+  Check(plan.info.buffers.size() == 8u &&
+            plan.memory_info[root_flags.index].resource ==
+                fixture.program.memory_info[root_flags.index].resource,
+        "bounded root scalar-buffer source was not retained in the resource plan");
+}
+
 void TestPhiValidation() {
   Fixture fixture;
   auto *left = fixture.block;
@@ -2618,6 +2686,8 @@ int main() {
     Run("preserve BDA clone through refresh", TestShaderBdaCloneRefreshMixedUse);
     Run("bounded descriptor source lifetime",
         TestBoundedDescriptorSourceSurvivesDeadCodeElimination);
+    Run("bounded root scalar-buffer remap",
+        TestBoundedRootScalarBufferResourceRemap);
     Run("dead planning SRT slot", TestDeadPlanningSrtSlotDoesNotFlatten);
     Run("dynamic storage mips", TestDynamicStorageMipTracking);
     Run("invariant indirect images", TestInvariantIndirectImageMaterialization);
