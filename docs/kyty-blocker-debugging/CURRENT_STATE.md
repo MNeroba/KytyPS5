@@ -1,6 +1,6 @@
 # Current KytyPS5 debugging state
 
-Last reconciled: 2026-09-11 23:02 Europe/Riga
+Last reconciled: 2026-09-11 23:25 Europe/Riga
 
 This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable mechanisms live in REFERENCE.md.
 
@@ -8,17 +8,17 @@ This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable
 
 Repository/worktree: G:/KytyPS5/repo
 Branch: astro/materialize-resources
-Repository HEAD at this docs checkpoint: `3fe3d27` (docs-only commits after the runtime build; source/build revision remains `150a139`)
-Current source HEAD: 150a1395c7553191a8e5f856b60cdea657034ed8 (`debug: persist complete shader replay input trace`)
-Last ASTRO runtime source HEAD: 150a1395c7553191a8e5f856b60cdea657034ed8
-Runtime source HEAD at launch: 150a1395c7553191a8e5f856b60cdea657034ed8
-Working tree before this checkpoint: clean at `150a139`; local install tree was refreshed from this build
+Repository HEAD at this docs checkpoint: `55788cb` (diagnostic commit; docs will be updated again after this checkpoint commit)
+Current source HEAD: 55788cb64911ae79efe05e351d888471d8bbebc0 (`debug: report timeline wait result`)
+Last ASTRO runtime source HEAD: 55788cb64911ae79efe05e351d888471d8
+Runtime source HEAD at launch: 55788cb64911ae79efe05e351d888471d8bbebc0
+Working tree before this checkpoint: clean at `55788cb`; local install tree was refreshed from this build
 Build: Release, CMake/Ninja, clang-cl, clang-lld_link-64
 Executable: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.exe
-Executable SHA-256: F4710707DC611196CD33C62F9BBDC4B7AAC366CAEB1AA9D8172ADAF793B09724
-Executable size: 21,020,160 bytes; local install refreshed 2026-09-11 22:25:00 Europe/Riga
-Build label: Source build 150a139 (from generated `kytyGitVersion.h`); diagnostic-only replay trace fields are enabled by the launch flags below
-Matching PDB: G:/KytyPS5/repo/_Build/windows/kyty_emulator.pdb and local install copy; SHA-256 7F661D1EECEE0C3CCCE5BF3878D19191A4A928E9940F0FBB885399392A6B078A; size 24,059,904 bytes
+Executable SHA-256: E3CDEBA9A2E7EA18CB57BAE9FF909FC616978F06F5AA49405C635C445BAF6FA2
+Executable size: 21,023,744 bytes; local install refreshed 2026-09-11 23:09:00 Europe/Riga
+Build label: Source build 55788cb (from generated `kytyGitVersion.h`); wait-result diagnostic is enabled
+Matching PDB: G:/KytyPS5/repo/_Build/windows/kyty_emulator.pdb and local install copy; SHA-256 C2196A66A7073543DF5D9D4CEF2EA754A651B17A8DA86698FBBF72661CC3251D; size 24,059,904 bytes
 Binary provenance: the historical dump/run used 4374a9d above; this bounded capture used the exact 150a139 executable/PDB above
 
 The system-wide CMake install prefix was not used because it requires administrator access.
@@ -28,15 +28,15 @@ The system-wide CMake install prefix was not used because it requires administra
 Target game: ASTRO BOT EU
 Title ID: PPSA21567
 Game input: G:/PS5 Games/PPSA21567/extracted
-Current milestone: M5 main menu — title screen loaded and rendered
-Next milestone: M6 gameplay
-Current P0: classify the first post-M5 runtime failure at `MasterSemaphore::Wait` (`masterSemaphore.cpp:69`)
+Current milestone: M4 intro/loading — post-intro continuation is not yet proven
+Next milestone: M5 main menu
+Current P0: prove the exact Vulkan result and causal boundary of the first post-M4 `MasterSemaphore::Wait` failure (`masterSemaphore.cpp:69`)
 P0 class: GPU synchronization/runtime result; the exact `vk::Result` is not logged in this run
-Last validated progress signal: M5 title screen reached after frame 495 at approximately 14 FPS; `LevelDocument Loaded: title_controller_ship [title]` and title-screen assets were logged
+Last validated progress signal: target CS `0x657ad04626bf9d55` emitted 124012 SPIR-V words and runtime reached 40 compute shaders before the saved wait fatal; M5 is not treated as proven by the latest evidence
 Known P1 likely blockers: incorrect color/output interpretation remains P1 and is not a current fix target
 Known P2: cold-start large dispatcher pipeline compilation latency; successful creates are not a hang
 
-M1, M2, M3, and M4 are closed. M5 was reached in the progression run below. Do not reopen the cleared startup SRT/BDA-lifetime, pipeline-create, submission, or visible-frame conclusions without contradictory evidence.
+M1, M2, M3, and M4 are closed. M5 remains unproven; the earlier title-screen interpretation is superseded for the active checkpoint. Do not reopen the cleared startup SRT/BDA-lifetime, pipeline-create, submission, or visible-frame conclusions without contradictory evidence.
 
 ## Exact runtime evidence
 
@@ -99,7 +99,7 @@ the build tree. `shader_recompiler_compute_tests` passed (`EXIT_CODE=0`, wall `8
 `G:/KytyPS5/logs/shader_recompiler_compute_tests_150a139.log`), and the replay test executable
 help path also returned 0 (`G:/KytyPS5/logs/shader_replay_tests_help_150a139.log`).
 
-Next action: classify the post-M5 semaphore failure from the preserved run artifact before any fix. Keep color correctness P1 and cold pipeline latency P2.
+Next action: recover the exact `vk::Result` for the saved post-M4 wait boundary from the failure-only diagnostic; do not make a semantic fix until its cause is proven. Keep color correctness P1 and cold pipeline latency P2.
 
 ## Bounded production-capture attempt
 
@@ -146,7 +146,7 @@ Two offline exact replays both returned exit code 0 and internal validation PASS
 and 108 ms. External `spirv-val --target-env vulkan1.3` returned 0 for both outputs. This proves
 production-state equivalence for the captured recompiler input, without changing M1–M4.
 
-## Progression run — M5 reached
+## Progression run — post-M4 wait boundary (M5 unproven)
 
 Run/artifact: `G:/KytyPS5/logs/ASTRO_PROGRESS_20260911_225139/`.
 The one progression launch used the installed executable SHA-256
@@ -154,15 +154,38 @@ The one progression launch used the installed executable SHA-256
 `--stub-bvh` baseline; the exact command is in `command.txt`. The runtime label is `Source build
 150a139`; the repository HEAD at launch was `3fe3d2718f154e9d3f8f133a0fb8a176c7004a63`.
 
-M5 is proven logically: runtime.log records `LevelDocument Loaded: title_controller_ship [title]`
-at lines 132658 and 750548, repeated `title_screen.spx` loads, and title assets
-`titlescreen_start_text.jxm` and `astro_bot_logo_title.jxm` (lines 133922 and 133940). The process
-window reached frame 495 at approximately 14 FPS; stdout reached `VS 14 | PS 22 | CS 40 | GS 1`.
+The latest user-reviewed evidence proves target shader emission and 40 compute shaders, but does
+not prove M5. Earlier title-screen asset/level lines remain historical evidence only and are not
+used to advance the active milestone.
 
-After M5, the process terminated through the existing fatal-error path at runtime.log lines 780571–
+The process terminated through the existing fatal-error path at runtime.log lines 780571–
 780572 and stdout lines 107–125: `Not implemented (result != vk::Result::eSuccess)` in
 `src/graphics/host_gpu/renderer/masterSemaphore.cpp:69`, the `vkDevice.waitSemaphores` result check
 in `MasterSemaphore::Wait`. The run wrapper recorded wall time `550.8255477 s`, PID `26180`, and
 no reliable process exit code (`exit_code` was unavailable; do not treat the reported `0x00000000`
-placeholder as a clean exit). No new crash dump was created. The exact Vulkan result and a source
-root cause remain unclassified for the next session; no fix was made in this run.
+placeholder as a clean exit). No new crash dump was created. The exact Vulkan result and source
+cause remain unclassified; no semantic fix was made.
+
+## Timeline-wait diagnostic checkpoint — 2026-09-11
+
+Static symbolization against the 150a139 map/PDB identifies two saved fatal paths: one enters
+`MasterSemaphore::Wait` from `CommandScheduler::PriorityOperationsThread`; the other enters it
+from `CommandScheduler::Finish` via `BufferCache::DownloadBufferMemory` and
+`GpuResourceManager::HandleFault`. The current source submits the master timeline value in
+`CommandScheduler::Submit`; its wait caller and requested tick are not logged by the saved
+`ASTRO_PROGRESS` run because `--graphics-debug-dump=false`. Existing full host traces show
+successful submits through tick 337559 and a successful wait for tick 337558, but contain no
+non-success wait result for the failing run.
+
+Failure-only logging was added without changing control flow in commit `55788cb`:
+`MasterSemaphore::Wait` now logs numeric/result-string `vkDevice.waitSemaphores` status together
+with requested tick, `KnownGpuTick()`, and `CurrentTick()` only when the result is non-success.
+`shader_recompiler_compute_tests.exe --scheduler-only` passed (exit 0).
+
+The one diagnostic launch using the rebuilt `55788cb` executable is
+`G:/KytyPS5/logs/ASTRO_WAIT_DIAG_20260911_2009/`, exit `0x141`. It reached target CS
+`0x657ad04626bf9d55` and emitted 124012 words, then stopped at the already-known
+`MaterializeResources(...)` fatal in `pipelineCache.cpp:573`; no wait-result diagnostic was
+reached. This run is diagnostic evidence only and does not reclassify or reopen the resource
+blocker. The saved P0 wait result remains unknown and requires a future run only if no existing
+artifact can provide it.
