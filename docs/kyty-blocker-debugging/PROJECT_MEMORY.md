@@ -225,6 +225,26 @@ EVIDENCE: `G:/KytyPS5/logs/GPU_TICK_SNAPSHOT_ASTRO_20260912_213444/runtime.log`,
 RELATED CODE/COMMIT: `src/graphics/shader/recompiler/frontend/decode/ShaderDecoder.cpp:388`,
 bounded diagnostic commit `5ebf00a`.
 
+### Runtime decoder word versus CDBGSYS regression — PROVEN
+
+FACT: The `2a51379` regression is present in `shader_cfg_tests` and passes as a standalone run,
+but it covers synthetic SOPP raw `0xbf970001` (`EncodeSopp(0x17, 1)`) in compute stage. The ASTRO
+failure is mesh-stage raw `0xc2208080` at PC `0x00003e74`; it cannot enter the SOPP path because
+its top-bit gate is `0xc0000000` and `word >> 26` is `0x30`, which the current discriminator maps
+to `Family::Unknown`. The family discriminator itself was unchanged by `2a51379`.
+
+WHY IT MATTERS: A green CDBGSYS regression does not prove coverage of the current runtime word.
+Do not reuse that fixture or infer an SOPP/CDBGSYS fix for `0xc2208080`; classify the MS encoding
+from source/ISA evidence first. The runtime preceding dword is unavailable, so alignment is only
+known to be structurally 4-byte aligned from the logged PC.
+
+EVIDENCE: `G:/KytyPS5/logs/GPU_TICK_SNAPSHOT_20260912_205915/decoder-cdbg-comparison.txt`,
+`G:/KytyPS5/logs/GPU_TICK_SNAPSHOT_ASTRO_20260912_213444/runtime.log`, current
+`ShaderDecoder.cpp`, and `git show 2a51379`.
+
+RELATED CODE/COMMIT: `src/graphics/shader/recompiler/frontend/decode/ShaderDecoder.cpp`,
+`tests/shaderCfgTests.cpp`, `2a51379`.
+
 ### BVH and FaultBuffer boundaries — PROVEN
 
 Fact: `--stub-bvh` always misses and is only a downstream-progression aid. `FaultBuffer` is a page-fault bitmap.

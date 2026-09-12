@@ -1,6 +1,6 @@
 # Current KytyPS5 debugging state
 
-Last reconciled: 2026-09-12 21:46 Europe/Riga
+Last reconciled: 2026-09-12 21:52 Europe/Riga
 
 This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable mechanisms live in REFERENCE.md.
 
@@ -64,6 +64,27 @@ complete; do not rerun ASTRO or fix this decoder blocker in the same checkpoint.
 
 NEXT ACTION: classify this exact MS instruction from source/ISA evidence in a future session; keep
 the deferred asynchronous device-loss P0 and Prosper/GDS audit closed.
+
+## Decoder regression comparison — 2026-09-12
+
+`git merge-base --is-ancestor 2a51379 5ebf00a` succeeded. Current
+`ShaderDecoder.cpp` still recognizes SOPP through the unchanged family discriminator
+(`(word & 0xc0000000) == 0x80000000` and opcode field `0x7f`); the `0x17` entry is present in
+`SOPP_OPCODE_LIST`. Runtime raw `0xc2208080` has SOPP gate `0xc0000000` and
+`word >> 26 == 0x30`, which is not one of the supported family cases, so it reaches the existing
+unknown-family failure. Commit `2a51379` changed the CDBGSYS opcode/CFG handling but did not change
+the family discriminator.
+
+The regression `TestNewShaderRecompilerSoppCdbgSys` is called by the normal `shader_cfg_tests`
+`main()` and was run separately with a temporary selector (exit 0), then the selector was fully
+reverted. Its fixture encodes `0xbf970001` from `EncodeSopp(0x17, 1)`, starts at word 0, and
+recompiles as `ShaderType::Compute`; it does not exercise runtime `0xc2208080`, mesh stage, or the
+production preceding dword. The runtime failure is mesh stage, hash `0x2b3be82b8235ac05`, PC
+`0x00003e74` (4-byte aligned); the preceding dword was not captured. Comparison artifact:
+`G:/KytyPS5/logs/GPU_TICK_SNAPSHOT_20260912_205915/decoder-cdbg-comparison.txt`.
+
+NEXT ACTION: classify raw `0xc2208080` from MS/RDNA2 source or ISA evidence before any semantic
+change or ASTRO rerun. Do not treat the CDBGSYS regression as coverage for this runtime word.
 
 ## Static submit-6256 reconstruction checkpoint — 2026-09-12
 
