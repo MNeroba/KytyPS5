@@ -1,6 +1,6 @@
 # Current KytyPS5 debugging state
 
-Last reconciled: 2026-09-12 12:40 Europe/Riga
+Last reconciled: 2026-09-12 13:14 Europe/Riga
 
 This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable mechanisms live in REFERENCE.md.
 
@@ -8,18 +8,18 @@ This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable
 
 Repository/worktree: G:/KytyPS5/repo
 Branch: astro/materialize-resources
-Repository HEAD at this checkpoint: `c355ca3` (`docs: record post-CDBGSYS runtime boundary`)
-Current source HEAD: `2a51379` (`shader: support conditional debug system branches`)
-Last ASTRO runtime source HEAD: `2a5137991b23b6a91371eaf8b03ec10c6c7c7228`
-Runtime source HEAD at launch: `2a5137991b23b6a91371eaf8b03ec10c6c7c7228`
-Working tree before this checkpoint: clean at `2a51379`; local install tree was refreshed from this build
+Repository HEAD at this checkpoint: `b8faeeb` (`shader: decode RDNA2 trap temporary operands`)
+Current source HEAD: `b8faeebe5f84bd17a6cd9f24c00995fc1e36e033`
+Last ASTRO runtime source HEAD: `b8faeebe5f84bd17a6cd9f24c00995fc1e36e033`
+Runtime source HEAD at launch: `b8faeebe5f84bd17a6cd9f24c00995fc1e36e033`
+Working tree before this checkpoint: clean at `b8faeeb`; local install tree was refreshed from this build
 Build: Release, CMake/Ninja, clang-cl, clang-lld_link-64
 Executable: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.exe
-Executable SHA-256: E9F6F6E3929BF6A331AEAF3FB2F69CBE1C37F4848C77768C052475CE69F5CF24
-Executable size: 21,051,392 bytes; local install refreshed from `2a51379` before the progression run
-Build label: Source build 2a51379; GPU fault/checkpoint diagnostics are enabled
-Matching PDB: G:/KytyPS5/repo/_Build/windows/kyty_emulator.pdb and local install copy; SHA-256 624214B04FEC4C86E30A168680DC8BBAD1A62C7B7C5EB5F68DE455A4C1466F4D; size 24,068,096 bytes
-Binary provenance: this progression run used the exact `2a51379` executable/PDB above
+Executable SHA-256: F7842BEE9F65308B82ED41F1B277AA6430F527EA340655B876295C54D6B3DFE6
+Executable size: 21,051,392 bytes; local install refreshed from `b8faeeb` before the progression run
+Build label: Source build b8faeeb; GPU fault/checkpoint diagnostics are enabled
+Matching PDB: G:/KytyPS5/repo/_Build/windows/kyty_emulator.pdb and local install copy; SHA-256 `882A4B70CC28FAD040ED0985844607E1E000A4CB2B4ED6A66EF225A65E23A53B`; size 24,072,192 bytes
+Binary provenance: this progression run used the exact `b8faeeb` executable/PDB above
 
 The system-wide CMake install prefix was not used because it requires administrator access.
 
@@ -30,19 +30,33 @@ Title ID: PPSA21567
 Game input: G:/PS5 Games/PPSA21567/extracted
 Current milestone: M5 main menu — reached in the validated title-screen progression run
 Next milestone: M6 gameplay
-Current P0: unsupported scalar source operand `0x00000073` at PC `0x00003db0` while decoding MS shader hash `0x2b3be82b8235ac05`
-P0 class: frontend scalar-source decode; `S_CBRANCH_CDBGSYS` is now decoded and the prior CFG blocker is closed
-Last validated progress signal: post-fix run passed the prior MS `SOPP 0x17` boundary, reached 46 CS / 34 PS / 21 VS / 2 GS, and then failed in the same MS decode at scalar source `0x73`
+Current P0: `VK_ERROR_DEVICE_LOST` (`-4`) returned by `vkDevice.waitSemaphores` in `MasterSemaphore::Wait` at `masterSemaphore.cpp:127`
+P0 class: host Vulkan/device-loss wait boundary after successful shader emission and pipeline/submit progress
+Last validated progress signal: CS `0x657ad04626bf9d55` emitted 124012 SPIR-V words; the run reached 40 CS / 22 PS / 14 VS / 1 GS before the device-loss wait
 Known P1 likely blockers: incorrect color/output interpretation remains P1 and is not a current fix target
 Known P2: cold-start large dispatcher pipeline compilation latency; successful creates are not a hang. Cache persistence/load is proven, but a substantial warm-time reduction is not.
 
-M1, M2, M3, M4, and M5 are closed/reached. M6 gameplay is not proven. Do not reopen the cleared startup SRT/BDA-lifetime, pipeline-create, submission, visible-frame, bounded resource-remap, or scalar-PHI materialization conclusions without contradictory evidence.
+M1, M2, M3, M4, and M5 are closed/reached. M6 gameplay is not proven. Do not reopen the cleared startup SRT/BDA-lifetime, pipeline-create, submission, visible-frame, bounded resource-remap, scalar-PHI materialization, or TTMP scalar-source conclusions without contradictory evidence.
 
 ## Latest progression checkpoint
 
-Run: `G:/KytyPS5/logs/ASTRO_CFG_FIX_20260912_1330/`
-Launch: installed `kyty_emulator.exe --game "G:/PS5 Games/PPSA21567/extracted" --stub-bvh --shader-debug false --shader-log-direction Silent --graphics-debug-dump false --printf-direction File --printf-output-file "G:/KytyPS5/logs/ASTRO_CFG_FIX_20260912_1330/runtime.log"`
-Result: wrapper exit `321` (`0x00000141`); no crash dump. The run completed the previously failing MS `S_CBRANCH_CDBGSYS` path, then stopped at `unsupported scalar source operand 0x00000073 at pc 0x00003db0` (`ShaderDecoder.cpp:264`). No shader emission/pipeline result exists for the failing MS invocation. This is the first new post-fix boundary; no second ASTRO run or fix has been started.
+Run: `G:/KytyPS5/logs/ASTRO_TTMP_FIX_20260912_1510/`
+Launch: installed `kyty_emulator.exe --game "G:/PS5 Games/PPSA21567/extracted" --stub-bvh --shader-debug false --shader-log-direction Silent --graphics-debug-dump false --printf-direction File --printf-output-file "G:/KytyPS5/logs/ASTRO_TTMP_FIX_20260912_1510/runtime.log"`
+Result: wrapper exit `321` (`0x00000141`); no crash dump. The run decoded and emitted CS `0x657ad04626bf9d55` (`SPIR-V EmitProgram words=124012`), then reached 40 CS / 22 PS / 14 VS / 1 GS. The first later fatal boundary was `vkDevice.waitSemaphores` returning `ErrorDeviceLost (-4)` for ticks `328841` and `328864` (`known=328840`, `current=328865`), followed by the existing fatal check at `masterSemaphore.cpp:127`. GPU fault diagnostics completed with `address_count=57`, `vendor_count=0`, advertised/allocated vendor capacity `181328`, and `count_result=Success`, `info_result=Success`, `partial=false`. No pipeline-create failure is proven.
+
+## TTMP decoder semantic checkpoint — 2026-09-12
+
+Commit `b8faeeb` adds generic RDNA2 scalar trap-temporary operands: source/destination codes
+108–123 decode as `TTMP0`–`TTMP15` (so `0x73` is `TTMP7`). TTMP SSA state uses a separate IR range
+from ordinary SGPRs, and embedded-fetch tracking intentionally continues to exclude trap temps.
+The focused `shader_cfg_tests`, `resource_materialization_tests`, `scalar_provenance_tests`, and
+`shader_recompiler_compute_tests` suites pass; `resource_tracking_tests` still reaches its known
+unrelated `dynamic storage mips` baseline failure.
+
+The former `unsupported scalar source operand 0x00000073` boundary is therefore closed. The
+post-fix ASTRO run proves the target shader emitted successfully; the current P0 is the later
+Vulkan device-loss wait above. Do not add a catch-all handler, unchecked access, or target-specific
+TTMP behavior.
 
 ## Exact runtime evidence
 

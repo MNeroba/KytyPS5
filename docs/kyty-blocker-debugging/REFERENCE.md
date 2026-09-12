@@ -23,6 +23,17 @@ to translated shaders; normal execution therefore supplies a clear condition
 while keeping the branch structurally represented. Do not silently decode it
 as an ordinary instruction or discard its target.
 
+## RDNA2 scalar trap-temporary operands
+
+RDNA2 scalar source and destination codes 108–123 name the privileged trap-temporary registers
+`TTMP0`–`TTMP15`; scalar code `0x73` is therefore `TTMP7`. These registers are execution state,
+not ordinary user-data SGPRs. The decoder represents them with a distinct operand kind and the IR
+carries their SSA state in a range after `NumScalarRegs`; ordinary SGPR numbering remains unchanged.
+Embedded-fetch/resource provenance must continue to recognize only decoded SGPRs, so TTMP values do
+not become descriptor identities or host-materialized resources. A missing TTMP decode is a frontend
+ISA coverage blocker; classify and fix it at the decoder/IR boundary before investigating later
+materialization or Vulkan failures.
+
 ## SRT planning and liveness
 
 Key mechanisms: `BuildSrtPlan`, `PlanBuilder`, `srt_reads`, `ReadConst`, `GetSrtResource`, `planning_only`, `ShaderSideSrtReadFlag`, and `live_flat_slots`.

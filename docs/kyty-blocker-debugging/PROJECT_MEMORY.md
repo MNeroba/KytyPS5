@@ -78,15 +78,65 @@ EVIDENCE: fail-before regression `G:/KytyPS5/logs/ASTRO_CFG_P0_20260912_1300/sha
 
 RELATED CODE/COMMIT: decoder/CFG/translator support in `2a51379`; next runtime boundary is documented in `CURRENT_STATE.md`.
 
-### Post-CDBGSYS runtime boundary — PROVEN
+### Post-CDBGSYS runtime boundary — PROVEN / CLOSED
 
-FACT: The `2a51379` ASTRO run reached 46 CS, 34 PS, 21 VS, and 2 GS shader counts and passed the former MS `S_CBRANCH_CDBGSYS` failure. The first new failure is `unsupported scalar source operand 0x00000073 at PC 0x00003db0` in `ShaderDecoder.cpp:264` while decoding MS `0x2b3be82b8235ac05`.
+FACT: The `2a51379` ASTRO run reached 46 CS, 34 PS, 21 VS, and 2 GS shader counts and passed the former MS `S_CBRANCH_CDBGSYS` failure. Its next boundary was `unsupported scalar source operand 0x00000073 at PC 0x00003db0` in `ShaderDecoder.cpp:264` while decoding MS `0x2b3be82b8235ac05`; the later TTMP fix below closes this decoder gap.
 
 WHY IT MATTERS: This is the earliest current P0 for M6 progression. No SPIR-V or pipeline result exists for that MS invocation; the scalar-source value must be classified before any further runtime run or semantic change.
 
 EVIDENCE: `G:/KytyPS5/logs/ASTRO_CFG_FIX_20260912_1330/runtime.log` lines 779241–779259; process result `321` (`0x00000141`), no dump. Exact executable SHA-256 is recorded in `CURRENT_STATE.md`.
 
 RELATED CODE/COMMIT: `src/graphics/shader/recompiler/frontend/decode/ShaderDecoder.cpp`, `2a51379`.
+
+### RDNA2 scalar trap-temporary operands — PROVEN
+
+FACT: RDNA2 scalar source and destination codes 108–123 are the privileged trap-temporary
+registers `TTMP0`–`TTMP15`; therefore scalar code `0x73` is `TTMP7`. Kyty previously rejected
+these operands in `DecodeScalarSource`. The generic fix adds a `Ttmp` operand kind, carries TTMP
+SSA state in a separate IR range (`TtmpBase=106`), and leaves ordinary SGPR numbering and
+embedded-fetch tracking unchanged.
+
+WHY IT MATTERS: Trap temporaries are shader execution state, not user-data SGPRs or descriptor
+resources. Modeling them separately avoids both the decode failure and accidental resource
+materialization/embedded-fetch provenance.
+
+EVIDENCE: Focused fail-before artifact
+`G:/KytyPS5/logs/ASTRO_TTMP_P0_20260912_1400/fail_before_run.log` reports the rejected `0x73`;
+the same `shader_cfg_tests` fixture passes after the fix. `resource_materialization_tests`,
+`scalar_provenance_tests`, and `shader_recompiler_compute_tests` pass afterward, while
+`resource_tracking_tests` reaches only its known unrelated `dynamic storage mips` baseline
+failure. The exact post-fix ASTRO run
+`G:/KytyPS5/logs/ASTRO_TTMP_FIX_20260912_1510/` emits 124012 SPIR-V words for CS
+`0x657ad04626bf9d55` and contains no `0x73` decode failure. The operand encoding is defined by the
+[AMD RDNA 2 ISA](https://www.amd.com/content/dam/amd/en/documents/radeon-tech-docs/instruction-set-architectures/rdna2-shader-instruction-set-architecture.pdf).
+
+RELATED CODE/COMMIT: `ShaderDecoder.{h,cpp}`, `IR/Reg.h`, `IR/Block.h`, `SsaRewrite.cpp`,
+`Translator.{h,cpp}`, `Control.cpp`, `Integer.cpp`, `Memory.cpp`, `ShaderCFG.cpp`; semantic
+commit `b8faeeb`.
+
+### Post-TTMP runtime device-loss boundary — PROVEN RESULT, ROOT UNCLASSIFIED
+
+FACT: A valid ASTRO run from `b8faeeb` cleared the TTMP decoder boundary, emitted the target CS
+`0x657ad04626bf9d55` (`SPIR-V EmitProgram words=124012`), and progressed to 40 CS / 22 PS /
+14 VS / 1 GS. The first later fatal boundary was `vkDevice.waitSemaphores` returning
+`ErrorDeviceLost (-4)` in `MasterSemaphore::Wait` at `masterSemaphore.cpp:127`, for requested
+ticks `328841` and `328864` (`known=328840`, `current=328865`).
+
+WHY IT MATTERS: The wait is the first confirmed blocker after successful shader emission and
+pipeline/submit progress, but it is an asynchronous GPU/driver fault observation rather than
+proof that the marker wait caused the device loss. Do not reopen the TTMP/resource fixes, treat
+slow successful pipeline creation as a hang, or suppress/retry the failed wait.
+
+EVIDENCE: `G:/KytyPS5/logs/ASTRO_TTMP_FIX_20260912_1510/runtime.log` records the exact Vulkan
+result and fatal boundary. `GPU_DEVICE_FAULT` reports `address_count=57`, `vendor_count=0`,
+advertised and allocated vendor capacity `181328`, `count_result=Success`, and
+`info_result=Success` with `partial=false`; no Vulkan error or pipeline-create failure precedes
+the wait. The run exited with wrapper status `321` (`0x00000141`) and produced no crash dump.
+The installed executable hash was
+`F7842BEE9F65308B82ED41F1B277AA6430F527EA340655B876295C54D6B3DFE6` from source `b8faeeb`.
+
+RELATED CODE/COMMIT: `MasterSemaphore::Wait`, `CommandScheduler::Submit`,
+`src/graphics/host_gpu/renderer/gpuFaultDiagnostics.cpp`; no device-loss semantic fix was made.
 
 ### BVH and FaultBuffer boundaries — PROVEN
 
