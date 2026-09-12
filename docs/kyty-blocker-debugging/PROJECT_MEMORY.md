@@ -208,6 +208,23 @@ architecture. Continue to investigate the device-loss P0 through the bounded hos
 EVIDENCE: `graphicsRun.cpp`, `runtimeLinker.cpp`, `GpuResourceManager::HandleFault`,
 `BufferCache::ReadMemoryOnGpu`, and the existing `GpuCommandLane` dirty-fault checks.
 
+### Bounded snapshot runtime boundary — PROVEN
+
+FACT: The first run using the bounded tick-keyed GPU command/resource snapshot reached 46 CS,
+34 PS, 21 VS, and 2 GS with successful pipeline creation, submits, waits, and host flips. It
+terminated earlier in MS decode for `0x2b3be82b8235ac05` with `unknown RDNA2 instruction family`
+at `pc=0x00003e74`, raw `0xc2208080` (`ShaderDecoder.cpp:388`).
+
+WHY IT MATTERS: The snapshot was not exercised because this decoder boundary precedes the known
+post-M5 device-loss window. The next session should classify this exact opcode before any new
+runtime run; do not infer a device-loss cause from this capture.
+
+EVIDENCE: `G:/KytyPS5/logs/GPU_TICK_SNAPSHOT_ASTRO_20260912_213444/runtime.log`, `stdout.txt`,
+`stderr.txt`, and `process-result.txt`; source/build `5ebf00a`; wrapper exit `321` (`0x141`).
+
+RELATED CODE/COMMIT: `src/graphics/shader/recompiler/frontend/decode/ShaderDecoder.cpp:388`,
+bounded diagnostic commit `5ebf00a`.
+
 ### BVH and FaultBuffer boundaries — PROVEN
 
 Fact: `--stub-bvh` always misses and is only a downstream-progression aid. `FaultBuffer` is a page-fault bitmap.

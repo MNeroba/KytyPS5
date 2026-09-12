@@ -1,6 +1,6 @@
 # Current KytyPS5 debugging state
 
-Last reconciled: 2026-09-12 21:29 Europe/Riga
+Last reconciled: 2026-09-12 21:46 Europe/Riga
 
 This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable mechanisms live in REFERENCE.md.
 
@@ -8,18 +8,18 @@ This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable
 
 Repository/worktree: G:/KytyPS5/repo
 Branch: astro/materialize-resources
-Repository HEAD at the start of this checkpoint: `f522eba136e22e42368383bb1acd9e22c7a40131` (`docs: record unresolved dispatch-state correlation`)
-Current semantic source HEAD: `f522eba136e22e42368383bb1acd9e22c7a40131` (documentation-only commits follow)
-Last ASTRO runtime source HEAD: `f522eba136e22e42368383bb1acd9e22c7a40131` with temporary dispatch-state diagnostics
-Runtime source HEAD at launch: `f522eba136e22e42368383bb1acd9e22c7a40131` (diagnostic working tree; source trace was reverted afterward)
-Working tree for this checkpoint: bounded diagnostic snapshot changes are under review on top of `f522eba`
+Repository HEAD at the start of this checkpoint: `5ebf00a201e2b1701451110c5c7550760d7ad964` (`graphics: retain bounded GPU fault command snapshots`)
+Current semantic source HEAD: `5ebf00a201e2b1701451110c5c7550760d7ad964` (diagnostic-only commit)
+Last ASTRO runtime source HEAD: `5ebf00a201e2b1701451110c5c7550760d7ad964`
+Runtime source HEAD at launch: `5ebf00a201e2b1701451110c5c7550760d7ad964`
+Working tree for this checkpoint: clean after the bounded diagnostic commit
 Build: Release, CMake/Ninja, clang-cl, clang-lld_link-64
 Executable: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.exe
-Executable SHA-256: `8326FBF6AC6426763BAE5BBBD33B2753273EC0C44347B1B03C52CAEF6F821E90`
-Executable size: 21,055,488 bytes; local install refreshed from the clean `5191c74` source
-Build label: clean restored build; diagnostic run label was `Source build 5191c74-dirty`
-Matching PDB: G:/KytyPS5/repo/_Build/windows/kyty_emulator.pdb and local install copy; SHA-256 `CC54F3FDD0C14BB728494A4708EC9B8BCB0AD9BE01726CB46235D20983CBDAEE`
-Binary provenance: clean installed executable/PDB above are current; the diagnostic run used the temporary-trace hashes recorded below
+Executable SHA-256: `D22B5CE4874090D6F867D76DECD01A14680CDADBDED26A0EECC8648A50E4142D`
+Executable size: 21,055,488 bytes; local install refreshed from `5ebf00a`
+Build label: `Source build 5ebf00a`
+Matching PDB: G:/KytyPS5/repo/_Build/windows/kyty_emulator.pdb and local install copy; SHA-256 `1E1ED04D7AABD48A54C31BCFF2D821562920473CD0B815CA0D58EDCC0D588646`
+Binary provenance: installed executable/PDB are the current bounded-snapshot build above
 
 The system-wide CMake install prefix was not used because it requires administrator access.
 
@@ -30,15 +30,15 @@ Title ID: PPSA21567
 Game input: G:/PS5 Games/PPSA21567/extracted
 Current milestone: M5 main menu — reached in the validated title-screen progression run
 Next milestone: M6 gameplay
-Current P0: `VK_ERROR_DEVICE_LOST` (`-4`) returned by `vkDevice.waitSemaphores` in `MasterSemaphore::Wait` at `masterSemaphore.cpp:149`
-P0 class: host Vulkan/device-loss wait boundary after successful shader emission and pipeline/submit progress
-Last validated progress signal: active dispatch mapping for CS `0x657ad04626bf9d55` at submit `6683`/tick `353333` completed submit and waits successfully; that submit stream continued through tick `353496`. The separate fault run remains submit `6256`.
+Current P0: MS `0x2b3be82b8235ac05` decoder failure, `unknown RDNA2 instruction family` at `pc=0x00003e74`, raw `0xc2208080`
+P0 class: frontend decode boundary reached before the deferred post-M5 device-loss window
+Last validated progress signal: the bounded-snapshot run reached 46 CS / 34 PS / 21 VS / 2 GS with successful pipeline, submit, wait, and flip activity; the earlier successful target dispatch and separate submit-6256 device-loss evidence remain historical leads.
 Known P1 likely blockers: incorrect color/output interpretation remains P1 and is not a current fix target
 Known P2: cold-start large dispatcher pipeline compilation latency; successful creates are not a hang. Cache persistence/load is proven, but a substantial warm-time reduction is not.
 
 M1, M2, M3, M4, and M5 are closed/reached. M6 gameplay is not proven. Do not reopen the cleared startup SRT/BDA-lifetime, pipeline-create, submission, visible-frame, bounded resource-remap, scalar-PHI materialization, or TTMP scalar-source conclusions without contradictory evidence.
 
-## Prosper-class GDS audit and bounded snapshot preparation — 2026-09-12
+## Prosper-class GDS audit and bounded snapshot result — 2026-09-12
 
 Static audit artifact: `G:/KytyPS5/logs/GPU_TICK_SNAPSHOT_20260912_205915/gds-audit.txt`.
 Kyty's GDS lowering, binding/layout assignment, PM4 DMA_DATA GDS handling (including immediate
@@ -46,15 +46,24 @@ zero reset), and CPU-mediated PM4 indirect argument visibility are proven by sou
 tests. Five ASTRO GDS compute modules reached successful emission at compute binding 45; no
 rejection, omission, or pipeline failure was logged. Prosper's binding 127 is not applicable.
 
-The generic bounded tick-keyed GPU command/resource snapshot is implemented but not yet committed
-or run against ASTRO. It retains at most 64 submitted host-tick batches, 128 commands per command
-buffer, and 96 buffers/images per command, and is dumped from the existing device-loss path.
-Focused build and tests passed: `shader_recompiler_compute_tests --scheduler-only`, full
-`shader_recompiler_compute_tests`, and `shader_cfg_tests` (exit 0). No ASTRO run has been made for
-this snapshot yet.
+The generic bounded tick-keyed GPU command/resource snapshot is committed in `5ebf00a`. It retains
+at most 64 submitted host-tick batches, 128 commands per command buffer, and 96 buffers/images per
+command, and is dumped from the existing device-loss path. Focused post-commit checks passed:
+`shader_recompiler_compute_tests --scheduler-only`, full `shader_recompiler_compute_tests`, and
+`shader_cfg_tests` (exit 0).
 
-NEXT ACTION: review and commit the diagnostic, rebuild/install with provenance, then perform exactly
-one `--stub-bvh` ASTRO run to classify the first concrete violation in the failing tick window.
+The one permitted ASTRO run is `G:/KytyPS5/logs/GPU_TICK_SNAPSHOT_ASTRO_20260912_213444/`, launched
+with the command in `command.txt`, source `5ebf00a`, EXE SHA-256
+`D22B5CE4874090D6F867D76DECD01A14680CDADBDED26A0EECC8648A50E4142D`, and PDB SHA-256
+`1E1ED04D7AABD48A54C31BCFF2D821562920473CD0B815CA0D58EDCC0D588646`. It reached 46 CS / 34 PS /
+21 VS / 2 GS and successful HostPresent/Flip activity, then terminated with wrapper status `321`
+(`0x141`) while decoding MS `0x2b3be82b8235ac05`: `unknown RDNA2 instruction family` at
+`pc=0x00003e74`, raw `0xc2208080`, `ShaderDecoder.cpp:388`. No `GPU_DEVICE_FAULT` or
+`GPU_COMMAND_SNAPSHOT_WINDOW` was emitted because device loss was not reached. The snapshot run is
+complete; do not rerun ASTRO or fix this decoder blocker in the same checkpoint.
+
+NEXT ACTION: classify this exact MS instruction from source/ISA evidence in a future session; keep
+the deferred asynchronous device-loss P0 and Prosper/GDS audit closed.
 
 ## Static submit-6256 reconstruction checkpoint — 2026-09-12
 
