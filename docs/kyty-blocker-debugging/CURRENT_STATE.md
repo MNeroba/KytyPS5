@@ -8,7 +8,7 @@ This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable
 
 Repository/worktree: G:/KytyPS5/repo
 Branch: astro/materialize-resources
-Repository HEAD at this checkpoint: `624fb5d` (diagnostic source commit; docs checkpoint follows)
+Repository HEAD at this checkpoint: `235c800` (`docs: record GPU fault diagnostic checkpoint`)
 Current source HEAD: 624fb5d657b23ac2bece3e5448b88b1f97fa580a (`diag: capture Vulkan device-loss provenance`)
 Last ASTRO runtime source HEAD: 624fb5d657b23ac2bece3e5448b88b1f97fa580a
 Runtime source HEAD at launch: 624fb5d657b23ac2bece3e5448b88b1f97fa580a
