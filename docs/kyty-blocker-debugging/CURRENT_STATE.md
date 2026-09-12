@@ -1,6 +1,6 @@
 # Current KytyPS5 debugging state
 
-Last reconciled: 2026-09-12 12:12 Europe/Riga
+Last reconciled: 2026-09-12 12:16 Europe/Riga
 
 This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable mechanisms live in REFERENCE.md.
 
@@ -8,7 +8,7 @@ This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable
 
 Repository/worktree: G:/KytyPS5/repo
 Branch: astro/materialize-resources
-Repository HEAD at this checkpoint: `f6da96f` (`shader: retain scalar SRT image value operands`)
+Repository HEAD at this checkpoint: `618d534` (`docs: record materialization fix and next blocker`)
 Current source HEAD: f6da96f (`shader: retain scalar SRT image value operands`)
 Last ASTRO runtime source HEAD: f6da96f7d89536fc931033f049a97e32d5baa1cd
 Runtime source HEAD at launch: f6da96f7d89536fc931033f049a97e32d5baa1cd
