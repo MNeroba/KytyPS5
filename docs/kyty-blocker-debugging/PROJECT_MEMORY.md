@@ -477,3 +477,41 @@ only; failed Vulkan results are still fatal and are never retried or ignored.
 
 EVIDENCE: `gpuFaultDiagnostics.cpp`, `commandScheduler.cpp`, semantic diagnostic commit
 `50bb5ad`; scheduler-only and full `shader_recompiler_compute_tests` both exited 0.
+
+### Non-EOP submit provenance — PROVEN MECHANISM
+
+FACT: The command buffer records the most recent non-EOP `DispatchDirect`, `DrawIndex`, or
+`DrawIndexAuto` tuple and copies it into the submit-history record before a wait can report
+device loss. EOP marker metadata remains separate, so the recorded non-EOP operation is a
+causal lead rather than proof of the faulting GPU command.
+
+WHY IT MATTERS: `MasterSemaphore::Wait` can now report the last ordinary GPU operation that was
+queued before the observed timeline failure without changing submission or wait semantics.
+
+EVIDENCE: diagnostic commit `568f00b`; focused scheduler-only and full
+`shader_recompiler_compute_tests` both exited 0. The run
+`G:/KytyPS5/logs/ASTRO_NON_EOP_DIAG_20260912_1340/` recorded submit `6256`,
+`DispatchDirect` groups `4096,1,1`, mode `65`, and guest code pointer
+`0x000000050052a400` before the failing wait.
+
+RELATED CODE/COMMIT: `context.cpp`, `commandScheduler.cpp`, and
+`masterSemaphore.{h,cpp}`, `568f00b`.
+
+### Device-loss fault payload — PROVEN RESULT, ROOT UNCLASSIFIED
+
+FACT: In the `568f00b` diagnostic run, `vkDevice.waitSemaphores` returned
+`VK_ERROR_DEVICE_LOST (-4)` for ticks `329237` and `329214` (`known=329213`,
+`current=329238`). `VK_EXT_device_fault` returned `Success` with 36 address records,
+no vendor records, and `partial=false`; every address had type 4,
+`VK_DEVICE_FAULT_ADDRESS_TYPE_INSTRUCTION_POINTER_UNKNOWN_EXT`.
+
+WHY IT MATTERS: The exact host result and driver payload are durable evidence, but they do not
+identify the asynchronous GPU command or justify a semantic fix. Do not classify the last EOP or
+last non-EOP marker as the root cause without resource/state correlation.
+
+EVIDENCE: `G:/KytyPS5/logs/ASTRO_NON_EOP_DIAG_20260912_1340/runtime.log` lines 778865–778949;
+no earlier queue-submit, pipeline-create, or Vulkan error was logged. The runtime log's generated
+build label is stale (`246ea51-dirty`); use source HEAD `568f00bcc0f1086383c39705216ec35c06c47942`
+and executable/PDB hashes in `CURRENT_STATE.md` for provenance.
+
+RELATED CODE/COMMIT: `MasterSemaphore::Wait`, `gpuFaultDiagnostics.cpp`, `568f00b`.

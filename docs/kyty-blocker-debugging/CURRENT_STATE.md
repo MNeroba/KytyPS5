@@ -1,6 +1,6 @@
 # Current KytyPS5 debugging state
 
-Last reconciled: 2026-09-12 13:14 Europe/Riga
+Last reconciled: 2026-09-12 13:45 Europe/Riga
 
 This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable mechanisms live in REFERENCE.md.
 
@@ -8,18 +8,18 @@ This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable
 
 Repository/worktree: G:/KytyPS5/repo
 Branch: astro/materialize-resources
-Repository HEAD at this checkpoint: `b8faeeb` (`shader: decode RDNA2 trap temporary operands`)
-Current source HEAD: `b8faeebe5f84bd17a6cd9f24c00995fc1e36e033`
-Last ASTRO runtime source HEAD: `b8faeebe5f84bd17a6cd9f24c00995fc1e36e033`
-Runtime source HEAD at launch: `b8faeebe5f84bd17a6cd9f24c00995fc1e36e033`
-Working tree before this checkpoint: clean at `b8faeeb`; local install tree was refreshed from this build
+Repository HEAD at this checkpoint: `4f476f0` (`docs: record non-EOP device-loss checkpoint`)
+Current semantic source HEAD: `568f00bcc0f1086383c39705216ec35c06c47942` (`diag: preserve last non-EOP submit provenance`)
+Last ASTRO runtime source HEAD: `568f00bcc0f1086383c39705216ec35c06c47942`
+Runtime source HEAD at launch: `568f00bcc0f1086383c39705216ec35c06c47942`
+Working tree at this checkpoint: clean at `4f476f0`; local install tree was refreshed from semantic build `568f00b`
 Build: Release, CMake/Ninja, clang-cl, clang-lld_link-64
 Executable: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.exe
-Executable SHA-256: F7842BEE9F65308B82ED41F1B277AA6430F527EA340655B876295C54D6B3DFE6
-Executable size: 21,051,392 bytes; local install refreshed from `b8faeeb` before the progression run
-Build label: Source build b8faeeb; GPU fault/checkpoint diagnostics are enabled
-Matching PDB: G:/KytyPS5/repo/_Build/windows/kyty_emulator.pdb and local install copy; SHA-256 `882A4B70CC28FAD040ED0985844607E1E000A4CB2B4ED6A66EF225A65E23A53B`; size 24,072,192 bytes
-Binary provenance: this progression run used the exact `b8faeeb` executable/PDB above
+Executable SHA-256: B504D737687A2FDD0C94F5B21F6C9AD29D1B26DF4D727DC3A3495464582CC023
+Executable size: 21,054,976 bytes; local install refreshed from `568f00b` before the diagnostic run
+Build label: runtime log reports stale generated label `Source build 246ea51-dirty`; source provenance is the exact HEAD and executable/PDB hashes above
+Matching PDB: G:/KytyPS5/repo/_Build/windows/kyty_emulator.pdb and local install copy; SHA-256 `9EF3793265B7D02BD5A177930B437CBA8993A6EC97F6066D46BA5913FBFC353E`; size 24,072,192 bytes
+Binary provenance: the diagnostic run used the exact `568f00b` executable/PDB above; the generated version header was not regenerated after the commit
 
 The system-wide CMake install prefix was not used because it requires administrator access.
 
@@ -30,13 +30,41 @@ Title ID: PPSA21567
 Game input: G:/PS5 Games/PPSA21567/extracted
 Current milestone: M5 main menu — reached in the validated title-screen progression run
 Next milestone: M6 gameplay
-Current P0: `VK_ERROR_DEVICE_LOST` (`-4`) returned by `vkDevice.waitSemaphores` in `MasterSemaphore::Wait` at `masterSemaphore.cpp:127`
+Current P0: `VK_ERROR_DEVICE_LOST` (`-4`) returned by `vkDevice.waitSemaphores` in `MasterSemaphore::Wait` at `masterSemaphore.cpp:149`
 P0 class: host Vulkan/device-loss wait boundary after successful shader emission and pipeline/submit progress
-Last validated progress signal: CS `0x657ad04626bf9d55` emitted 124012 SPIR-V words; the run reached 40 CS / 22 PS / 14 VS / 1 GS before the device-loss wait
+Last validated progress signal: CS `0x657ad04626bf9d55` emitted 124012 SPIR-V words; the diagnostic run reached at least 40 CS / 22 PS / 14 VS / 1 GS before the device-loss wait
 Known P1 likely blockers: incorrect color/output interpretation remains P1 and is not a current fix target
 Known P2: cold-start large dispatcher pipeline compilation latency; successful creates are not a hang. Cache persistence/load is proven, but a substantial warm-time reduction is not.
 
 M1, M2, M3, M4, and M5 are closed/reached. M6 gameplay is not proven. Do not reopen the cleared startup SRT/BDA-lifetime, pipeline-create, submission, visible-frame, bounded resource-remap, scalar-PHI materialization, or TTMP scalar-source conclusions without contradictory evidence.
+
+## Latest device-loss diagnostic checkpoint — 2026-09-12
+
+Run/artifact: `G:/KytyPS5/logs/ASTRO_NON_EOP_DIAG_20260912_1340/`.
+The exact launch is recorded in `command.txt`; it used the known-good `--stub-bvh` baseline,
+`--graphics-debug-dump false`, and direct file printf output. The wrapper did not persist a
+`runtime-result.json`; no process exit code is claimed from this run. The emulator process was
+gone after the fatal path, and the runtime log ended at 13:45:08 Europe/Riga.
+
+The first recorded Vulkan failure was `vkDevice.waitSemaphores` returning
+`ErrorDeviceLost (-4)` for ticks `329237` and `329214` (`known=329213`, `current=329238`).
+The fatal path is `masterSemaphore.cpp:149`; no earlier queue-submit, pipeline-create, or Vulkan
+error was logged. The fault query returned `count_result=Success`, `info_result=Success`,
+`partial=false`, `address_count=36`, `vendor_count=0`, and advertised/allocated vendor capacity
+`180000`; all returned addresses have type 4 (`INSTRUCTION_POINTER_UNKNOWN_EXT`). The diagnostic
+output is fault evidence only and does not identify the offending GPU command.
+
+The new submit provenance records the last non-EOP operation for the failing tick as
+`op=0` (`DispatchDirect`), submit `6256`, args `4096,1,1,65,0x000000050052a400`.
+Other recent records include dispatches at guest code pointers `0x0000000908e86a00`,
+`0x000000050052fc00`, and `0x000000050052a400`; this metadata is a bounded host-side record and
+does not yet prove which command caused the asynchronous device loss. Checkpoint pointers were
+already retired/unknown when fault reporting ran.
+
+No semantic fix was made. The next action is static correlation of the preserved dispatch and
+its resource/state path; only if that evidence is insufficient should a further bounded diagnostic
+be considered. Do not rerun ASTRO in this checkpoint or reopen resource-remap, replay, pipeline-cache,
+or color work.
 
 ## Latest progression checkpoint
 
