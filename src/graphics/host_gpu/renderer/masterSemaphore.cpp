@@ -4,6 +4,7 @@
 #include "common/logging/log.h"
 #include "graphics/host_gpu/graphicContext.h"
 #include "graphics/host_gpu/renderer/debug.h"
+#include "graphics/host_gpu/renderer/gpuFaultDiagnostics.h"
 
 #include <chrono>
 
@@ -69,12 +70,19 @@ void MasterSemaphore::LogSubmitDebug(uint64_t tick) const {
 void MasterSemaphore::Refresh() {
 	uint64_t   counter = 0;
 	const auto result  = m_graphics.device.getSemaphoreCounterValue(m_semaphore, &counter);
+	if (result == vk::Result::eErrorDeviceLost && m_graphics.gpu_fault_diagnostics != nullptr) {
+		m_graphics.gpu_fault_diagnostics->ReportDeviceLost("vkGetSemaphoreCounterValue", result,
+		                                                   CurrentTick());
+	}
 	EXIT_NOT_IMPLEMENTED(result != vk::Result::eSuccess);
 
 	auto known = m_gpu_tick.load(std::memory_order_acquire);
 	while (known < counter &&
 	       !m_gpu_tick.compare_exchange_weak(known, counter, std::memory_order_release,
 	                                         std::memory_order_relaxed)) {
+	}
+	if (m_graphics.gpu_fault_diagnostics != nullptr) {
+		m_graphics.gpu_fault_diagnostics->RetireCompleted(counter);
 	}
 }
 
@@ -111,6 +119,10 @@ void MasterSemaphore::Wait(uint64_t tick) {
 		     vk::to_string(result).c_str(), static_cast<int>(result), tick, KnownGpuTick(),
 		     CurrentTick());
 		LogSubmitDebug(tick);
+		if (m_graphics.gpu_fault_diagnostics != nullptr) {
+			m_graphics.gpu_fault_diagnostics->ReportDeviceLost("vkDevice.waitSemaphores", result,
+			                                                   tick);
+		}
 	}
 	EXIT_NOT_IMPLEMENTED(result != vk::Result::eSuccess);
 	Refresh();

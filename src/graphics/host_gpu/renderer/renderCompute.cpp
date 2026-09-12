@@ -405,7 +405,9 @@ void RenderExecutor::DispatchDirect(uint64_t submit_id, CommandBuffer& buffer,
 		ShaderWriteHazardBarrier(vk_buffer, vk::PipelineStageFlagBits::eComputeShader);
 	}
 	vk_buffer.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline.pipeline);
+	buffer.SetGpuCheckpoint(GpuCheckpointPhase::Before);
 	vk_buffer.dispatch(thread_group_x, thread_group_y, thread_group_z);
+	buffer.SetGpuCheckpoint(GpuCheckpointPhase::After);
 
 	// The removed host fence also ordered read-only dispatches before later writers.
 	ShaderAccessBarrier(vk_buffer, vk::PipelineStageFlagBits::eComputeShader);

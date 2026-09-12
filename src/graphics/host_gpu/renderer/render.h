@@ -4,6 +4,7 @@
 #include "common/abi.h"
 #include "common/assert.h"
 #include "common/common.h"
+#include "graphics/host_gpu/renderer/gpuFaultDiagnostics.h"
 #include "graphics/host_gpu/renderer/pipeline/descriptors.h"
 #include "graphics/host_gpu/renderer/pipeline/pipelineCache.h"
 #include "graphics/host_gpu/renderer/renderTarget.h"
@@ -109,6 +110,8 @@ public:
 
 	void SetDebugInfo(uint32_t op, uint64_t submit_id, uint32_t arg0 = 0, uint32_t arg1 = 0,
 	                  uint32_t arg2 = 0, uint32_t arg3 = 0, uint64_t arg4 = 0);
+	void SetGpuCheckpoint(GpuCheckpointPhase phase);
+	[[nodiscard]] std::vector<GpuFaultDiagnostics::Marker> TakeGpuCheckpointMarkers();
 	void BeginRendering(const RenderState& state) const;
 	void EndRendering() const;
 
@@ -130,21 +133,22 @@ private:
 	void Begin();
 	void End() const;
 
-	RenderContext&      m_context;
-	GraphicContext&     m_graphics;
-	vk::CommandBuffer   m_buffer          = nullptr;
-	uint32_t            m_debug_op        = 0;
-	uint64_t            m_debug_submit_id = 0;
-	uint32_t            m_debug_arg0      = 0;
-	uint32_t            m_debug_arg1      = 0;
-	uint32_t            m_debug_arg2      = 0;
-	uint32_t            m_debug_arg3      = 0;
-	uint64_t            m_debug_arg4      = 0;
-	mutable RenderState m_render_state;
-	mutable bool        m_rendering   = false;
-	HW::Context*        m_registers   = nullptr;
-	HW::UserConfig*     m_user_config = nullptr;
-	HW::Shader*         m_shaders     = nullptr;
+	RenderContext&                           m_context;
+	GraphicContext&                          m_graphics;
+	vk::CommandBuffer                        m_buffer          = nullptr;
+	uint32_t                                 m_debug_op        = 0;
+	uint64_t                                 m_debug_submit_id = 0;
+	uint32_t                                 m_debug_arg0      = 0;
+	uint32_t                                 m_debug_arg1      = 0;
+	uint32_t                                 m_debug_arg2      = 0;
+	uint32_t                                 m_debug_arg3      = 0;
+	uint64_t                                 m_debug_arg4      = 0;
+	std::vector<GpuFaultDiagnostics::Marker> m_pending_gpu_checkpoints;
+	mutable RenderState                      m_render_state;
+	mutable bool                             m_rendering   = false;
+	HW::Context*                             m_registers   = nullptr;
+	HW::UserConfig*                          m_user_config = nullptr;
+	HW::Shader*                              m_shaders     = nullptr;
 
 	friend class CommandScheduler;
 };
@@ -183,29 +187,30 @@ private:
 	                              uint32_t render_target_slice_offset, uint32_t render_target_slot,
 	                              bool ignore_target_mask = false, bool exact_format = false);
 	void ResolveRenderDepthTarget(CommandBuffer& buffer, RenderDepthInfo& target);
-	[[nodiscard]] bool PrepareDrawRenderState(CommandBuffer& buffer,
-	                                          const DrawCallInfo& draw,
-	                                          uint32_t            render_target_slice_offset,
+	[[nodiscard]] bool PrepareDrawRenderState(CommandBuffer& buffer, const DrawCallInfo& draw,
+	                                          uint32_t render_target_slice_offset,
 	                                          bool log_setup_phases, DrawRenderState& state);
 	void ExecutePreparedDraw(uint64_t submit_id, CommandBuffer& buffer, const DrawCallInfo& draw,
 	                         DrawRenderState& state, vk::PrimitiveTopology topology,
 	                         const DrawEmitInfo& emit, const DrawIndexBufferSource& index_source,
 	                         bool primitive_restart_enable, bool log_pipeline_phase,
 	                         bool set_bind_debug, bool set_auto_debug);
-	[[nodiscard]] RenderState AcquireRenderTargets(CommandBuffer& buffer, RenderColorInfo* colors,
-	                                               uint32_t color_count, RenderDepthInfo& depth,
-	                                               const std::optional<PreparedBindings>& pixel = std::nullopt);
-	[[nodiscard]] bool        ResolveColorTargets(CommandBuffer& buffer,
-	                                              uint32_t render_target_slice_offset);
-	void                      BindImage(ImageId id, bool storage);
-	void                      BindRenderTarget(ImageId id);
-	void                      TrackImageBinding(ImageId id);
-	void                      ResetBindings();
-	[[nodiscard]] bool        TryConsumeComputeMetaClear(const ShaderComputeInputInfo& input,
-	                                                     const CommandBuffer&          buffer);
+	[[nodiscard]] RenderState
+	AcquireRenderTargets(CommandBuffer& buffer, RenderColorInfo* colors, uint32_t color_count,
+	                     RenderDepthInfo&                       depth,
+	                     const std::optional<PreparedBindings>& pixel = std::nullopt);
+	[[nodiscard]] bool ResolveColorTargets(CommandBuffer& buffer,
+	                                       uint32_t       render_target_slice_offset);
+	void               BindImage(ImageId id, bool storage);
+	void               BindRenderTarget(ImageId id);
+	void               TrackImageBinding(ImageId id);
+	void               ResetBindings();
+	[[nodiscard]] bool TryConsumeComputeMetaClear(const ShaderComputeInputInfo& input,
+	                                              const CommandBuffer&          buffer);
 	[[nodiscard]] bool TryConsumeComputeImageClear(const ShaderComputeInputInfo& input,
-	                                              CommandBuffer& command, uint32_t group_x,
-	                                              uint32_t group_y, uint32_t group_z, uint32_t mode);
+	                                               CommandBuffer& command, uint32_t group_x,
+	                                               uint32_t group_y, uint32_t group_z,
+	                                               uint32_t mode);
 
 	RenderContext&                        m_context;
 	std::vector<ImageId>                  m_bound_images;

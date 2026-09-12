@@ -4,6 +4,7 @@
 #include "common/logging/log.h"
 #include "graphics/host_gpu/graphicContext.h"
 #include "graphics/host_gpu/renderer/debug.h"
+#include "graphics/host_gpu/renderer/gpuFaultDiagnostics.h"
 
 #include <algorithm>
 #include <chrono>
@@ -351,8 +352,9 @@ uint64_t CommandScheduler::Submit(SubmitInfo submit) {
 	        submit.num_signal_semaphores >= SubmitInfo::MaxSemaphores);
 
 	m_command.End();
-	const auto buffer   = m_command.m_buffer;
-	auto&      graphics = m_graphics;
+	const auto buffer             = m_command.m_buffer;
+	auto       checkpoint_markers = m_command.TakeGpuCheckpointMarkers();
+	auto&      graphics           = m_graphics;
 	EXIT_IF(graphics.queue == nullptr);
 
 	vk::Result result;
@@ -393,6 +395,9 @@ uint64_t CommandScheduler::Submit(SubmitInfo submit) {
 	                           m_command.m_debug_arg3, m_command.m_debug_arg4);
 
 	if (result != vk::Result::eSuccess) {
+		if (graphics.gpu_fault_diagnostics != nullptr) {
+			graphics.gpu_fault_diagnostics->ReportDeviceLost("vkQueueSubmit", result, tick);
+		}
 		ReportVulkanFatal("vkQueueSubmit", result, tick, m_command.m_debug_op,
 		                  m_command.m_debug_submit_id, m_command.m_debug_arg0,
 		                  m_command.m_debug_arg1, m_command.m_debug_arg2, m_command.m_debug_arg3,
@@ -408,6 +413,9 @@ uint64_t CommandScheduler::Submit(SubmitInfo submit) {
 		     debug_op, debug_submit);
 	}
 	EXIT_NOT_IMPLEMENTED(result != vk::Result::eSuccess);
+	if (graphics.gpu_fault_diagnostics != nullptr) {
+		graphics.gpu_fault_diagnostics->CommitSubmit(tick, std::move(checkpoint_markers));
+	}
 
 	m_command.m_buffer = nullptr;
 	return tick;

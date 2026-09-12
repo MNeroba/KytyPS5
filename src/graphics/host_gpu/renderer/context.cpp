@@ -60,6 +60,22 @@ void CommandBuffer::SetDebugInfo(uint32_t op, uint64_t submit_id, uint32_t arg0,
 	m_debug_arg4      = arg4;
 }
 
+void CommandBuffer::SetGpuCheckpoint(GpuCheckpointPhase phase) {
+	if (!m_graphics.diagnostic_checkpoints_enabled || m_graphics.gpu_fault_diagnostics == nullptr ||
+	    IsInvalid()) {
+		return;
+	}
+	auto marker = m_graphics.gpu_fault_diagnostics->MakeMarker(
+	    phase, m_debug_op, m_debug_submit_id, m_debug_arg0, m_debug_arg1, m_debug_arg2,
+	    m_debug_arg3, m_debug_arg4);
+	Handle().setCheckpointNV(marker.get());
+	m_pending_gpu_checkpoints.push_back(std::move(marker));
+}
+
+std::vector<GpuFaultDiagnostics::Marker> CommandBuffer::TakeGpuCheckpointMarkers() {
+	return std::exchange(m_pending_gpu_checkpoints, {});
+}
+
 void CommandBuffer::BeginRendering(const RenderState& state) const {
 	EXIT_IF(state.width == 0 || state.height == 0 || state.num_layers == 0 ||
 	        state.num_color_attachments > RENDER_COLOR_ATTACHMENTS_MAX);
