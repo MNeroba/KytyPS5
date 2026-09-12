@@ -1696,6 +1696,30 @@ void TestNewShaderRecompilerSoppCdbgSys() {
   CheckSpirvBinaryValidates(result.spirv);
 }
 
+void TestDecoderStopsAfterCompletedBackedgeBeforeTailData() {
+  // Exact control-flow words from production MS 0x2b3be82b8235ac05
+  // (raw SHA-256 A3D856918B88B05D05CFFC079E625D109261920FABBF4C7E5D32E03D7584DF49).
+  // Keep the original absolute PCs; zero-filled gaps are unreachable padding.
+  std::vector<uint32_t> shader(3998, 0u);
+  shader[3880] = 0xbf970024u; // S_CBRANCH_CDBGSYS -> 0x3d34
+  shader[3881] = 0xf8000941u; // EXP
+  shader[3882] = 0x00000028u;
+  shader[3916] = 0xbf810000u; // S_ENDPGM
+  shader[3917] = 0xbe8003ffu; // S_MOV_B32 literal (debug target)
+  shader[3918] = 0xe0040018u;
+  shader[3925] = 0xbf840015u; // S_CBRANCH_SCC0 -> 0x3dac
+  shader[3947] = 0xbf82ffbdu; // S_BRANCH -> 0x3ca4 (completed back-edge)
+  shader[3996] = 0x08183d08u; // V_SUB_F32 immediately before the suspected word
+  shader[3997] = 0xc2208080u; // unreachable tail data, not an RDNA2 instruction start
+
+  ShaderRecompiler::Decoder::Program decoded;
+  ShaderRecompiler::Decoder::DecodeProgram(shader, decoded);
+  Check(!decoded.instructions.empty() && decoded.instructions.back().pc == 0x3dacu &&
+            std::none_of(decoded.instructions.begin(), decoded.instructions.end(),
+                         [](const auto& inst) { return inst.pc == 0x3e74u; }),
+        "decoder traversed unreachable post-backedge tail data");
+}
+
 void TestNewShaderRecompilerTtmpOperands() {
   // RDNA2 scalar source code 0x73 names TTMP7.  Keep both source and
   // destination forms here because trap temporaries use a separate register
@@ -12922,6 +12946,7 @@ int main() {
   // here.
   TestNewShaderDecoderArchitecture();
   TestNewShaderRecompilerSoppCdbgSys();
+  TestDecoderStopsAfterCompletedBackedgeBeforeTailData();
   TestNewShaderRecompilerTtmpOperands();
   TestImageAddressOperands();
   TestSopkCompareImmediateExtension();

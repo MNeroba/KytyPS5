@@ -395,7 +395,12 @@ void DecodeProgram(std::span<const uint32_t> code, Program& program) {
 	program.code = code;
 
 	std::vector<bool> branch_targets;
+	uint32_t          pending_targets = 0;
+	bool              saw_endpgm      = false;
 	for (uint32_t word_index = 0; word_index < code.size();) {
+		if (!branch_targets.empty() && branch_targets[word_index] && pending_targets != 0) {
+			pending_targets--;
+		}
 		program.instructions.emplace_back();
 		DecodeInstruction(code, word_index, program.instructions.back());
 
@@ -407,10 +412,24 @@ void DecodeProgram(std::span<const uint32_t> code, Program& program) {
 			if (branch_targets.empty()) {
 				branch_targets.resize(code.size());
 			}
-			branch_targets[target_index] = true;
+			if (target_index < code.size()) {
+				if (!branch_targets[target_index] && target_index > word_index) {
+					pending_targets++;
+				}
+				branch_targets[target_index] = true;
+			}
 		}
-		if (inst.opcode == Opcode::S_ENDPGM &&
-		    (word_index >= code.size() || branch_targets.empty() || !branch_targets[word_index])) {
+		if (inst.opcode == Opcode::S_ENDPGM) {
+			saw_endpgm = true;
+		}
+		if (inst.opcode == Opcode::S_ENDPGM && pending_targets == 0) {
+			return;
+		}
+		// An unconditional branch has no fallthrough edge. Once every forward target discovered
+		// so far has been visited, continuing linearly would decode unreachable tail data. This
+		// matters for production MS programs that place metadata after a debug back-edge; keep the
+		// post-ENDPGM target path above, then stop at the completed back-edge.
+		if (inst.opcode == Opcode::S_BRANCH && saw_endpgm && pending_targets == 0) {
 			return;
 		}
 	}
