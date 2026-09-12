@@ -217,6 +217,13 @@ metadata and perform the emulated write, but an `ErrorDeviceLost` returned by th
 by itself identify that marker as the offending GPU command. Recover the last non-EOP submission
 and its resource state before changing GPU semantics.
 
+One guest `GuestGpu::Submission` may be sliced and flushed more than once. Each progressed slice
+can end a different pooled primary command buffer and receive a new master timeline tick, while
+the guest `debug_submit` id remains the same. The submit ring stores only the final debug operation
+and final non-EOP Dispatch/Draw metadata for each host command buffer; it cannot serve as a complete
+GPU command or resource trace. Causal device-loss analysis therefore needs a tick-keyed snapshot
+captured at the dispatch/submit boundary, and must not import guest-address mappings from another run.
+
 ## Vulkan device-loss diagnostics
 
 `VK_EXT_device_fault` and `VK_NV_device_diagnostic_checkpoints` are optional capabilities. Keep

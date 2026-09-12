@@ -138,6 +138,27 @@ The installed executable hash was
 RELATED CODE/COMMIT: `MasterSemaphore::Wait`, `CommandScheduler::Submit`,
 `src/graphics/host_gpu/renderer/gpuFaultDiagnostics.cpp`; no device-loss semantic fix was made.
 
+### Host-tick versus guest-submit provenance — PROVEN
+
+FACT: A guest `GuestGpu::Submission` receives one `debug_submit` id, but a sliced submission can
+call `BufferFlush` repeatedly; each flush ends one pooled primary command buffer and assigns a new
+master timeline tick. `CommandBuffer::SetDebugInfo` keeps only the last operation and the last
+non-EOP Dispatch/Draw summary for that command buffer.
+
+WHY IT MATTERS: The fault artifact for submit `6256` (ticks `329198..329237`) cannot reconstruct
+all GPU operations or identify the target shader/resources from its ring records. A causal device-
+loss capture must key a crash-safe active dispatch/resource snapshot by host tick; do not map a guest
+code address to a shader or resource state from another run.
+
+EVIDENCE: `G:/KytyPS5/logs/DEVICE_LOSS_STATIC_20260912_2035/submit6256_reconstruction.txt`;
+`ASTRO_NON_EOP_DIAG_20260912_1340` prints only the bounded submit history, omits ticks 329215-329220,
+and has no descriptor/BDA/lifetime/layout snapshot. The same run compiled CS
+`0x657ad04626bf9d55`, but no active pointer/hash pairing exists for submit `6256`.
+
+RELATED CODE: `src/graphics/guest_gpu/graphicsRun.cpp` (`GuestGpu::Process`),
+`src/graphics/host_gpu/renderer/commandScheduler.cpp` (`Submit`),
+`src/graphics/host_gpu/renderer/context.cpp` (`SetDebugInfo`).
+
 ### BDA page-table initialization contract — PROVEN
 
 FACT: Vulkan device-local allocations do not provide a zero-content contract. Kyty's 512 MiB

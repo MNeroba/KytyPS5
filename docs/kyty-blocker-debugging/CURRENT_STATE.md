@@ -1,6 +1,6 @@
 # Current KytyPS5 debugging state
 
-Last reconciled: 2026-09-12 20:24 Europe/Riga
+Last reconciled: 2026-09-12 20:40 Europe/Riga
 
 This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable mechanisms live in REFERENCE.md.
 
@@ -37,6 +37,34 @@ Known P1 likely blockers: incorrect color/output interpretation remains P1 and i
 Known P2: cold-start large dispatcher pipeline compilation latency; successful creates are not a hang. Cache persistence/load is proven, but a substantial warm-time reduction is not.
 
 M1, M2, M3, M4, and M5 are closed/reached. M6 gameplay is not proven. Do not reopen the cleared startup SRT/BDA-lifetime, pipeline-create, submission, visible-frame, bounded resource-remap, scalar-PHI materialization, or TTMP scalar-source conclusions without contradictory evidence.
+
+## Static submit-6256 reconstruction checkpoint — 2026-09-12
+
+Artifact: `G:/KytyPS5/logs/DEVICE_LOSS_STATIC_20260912_2035/submit6256_reconstruction.txt`.
+The source artifact is `568f00b`; the exact fault artifact is
+`G:/KytyPS5/logs/ASTRO_NON_EOP_DIAG_20260912_1340/`. Offline inspection reconstructed the
+recoverable master-timeline order for ticks `329198..329237`: submit `6255` contributes the
+329198–329200 lead-in, then submit `6256` contains repeated EOP writes and the bounded
+last-non-EOP records expose dispatches at guest code pointers
+`0x0000000908e86a00` (3072/65536 groups, mode `0x61`), `0x000000050052fc00` (131072 groups,
+mode `0x41`), and `0x000000050052a400` (4096 groups, mode `0x41`), plus a later DrawIndexAuto
+record at tick `329223`. Ticks `329215..329220` are absent from the two 16-entry failure windows.
+
+This is a command-buffer summary, not a complete command stream: `CommandProcessor` reuses guest
+submit id `6256` across slices, while each progressed slice can produce a new host command buffer
+and master tick. `CommandBuffer::SetDebugInfo` retains only the final operation and final
+non-EOP Dispatch/Draw metadata. The artifact has no failing-submit shader/hash pairing, descriptor
+snapshot, buffer/image/BDA range, allocation lifetime, page-table state, image layout/access state,
+or per-submit barrier trace. The 36 device-fault addresses are type-4 instruction-pointer records,
+not resolvable host resource addresses. The same-run target hash `0x657ad04626bf9d55` therefore
+cannot be assigned to submit `6256`, and no stale resource, invalid range, or synchronization/layout
+violation is proven.
+
+The single missing runtime fact is a crash-safe active command-buffer snapshot keyed by host tick,
+including same-invocation shader/pipeline identity, descriptor-derived resources and host BDA ranges,
+allocation deleted/retired state, and image layout/access state. Do not enable address-binding
+diagnostics until static evidence identifies a suspicious host GPU VA. No ASTRO run or semantic
+change was made in this checkpoint.
 
 ## Submit 6683 correlation checkpoint — 2026-09-12
 
