@@ -323,6 +323,16 @@ bool IsShaderSideScalarRoot(const ResourcePlan& program, const Inst& root) {
 	       AddressOpcodeInfoOf(root.GetOpcode()).access == AddressAccess::Read;
 }
 
+bool IsShaderSideImageOperand(ValueOpcode opcode, size_t operand) {
+	if (operand >= NumArgsOf(opcode)) return false;
+	const auto type = ArgTypeOf(opcode, operand);
+	// ImageResource and SamplerResource identify host descriptors. Every other
+	// image operand is shader data (address, coordinates, payload, or predicate)
+	// and may remain in the shader-side scalar graph when its downstream uses are
+	// also proven safe.
+	return type != Type::ImageResource && type != Type::SamplerResource;
+}
+
 bool ShaderSideUseGraph(const ResourcePlan& program, const Inst& root) {
 	std::unordered_set<const Inst*> visited;
 	const auto                      walk = [&](auto&& self, const Inst* value) -> bool {
@@ -347,22 +357,12 @@ bool ShaderSideUseGraph(const ResourcePlan& program, const Inst& root) {
 				return false;
 			}
 			if (ImageOpcodeInfoOf(op).access != ImageAccess::None) {
-				// A scalar-address SRT value may feed the ordinary texel payload of
-				// an already tracked image write.  The image resource itself and
-				// all other image operands remain host-side until their semantics are
-				// proven independently.
-				if (op == ValueOpcode::ImageWrite && use.operand == 2u) {
-					continue;
-				}
-				// ImageSampleRaw keeps its ImageResource and SamplerResource operands
-				// separately tracked; operand two is only the runtime ImageAddress.
-				// This is an allowed edge, not a terminal sink, because the sample
-				// result may flow into another unsupported resource use.
-				if (op == ValueOpcode::ImageSampleRaw && use.operand == 2u) {
-					if (!self(self, user)) return false;
-					continue;
-				}
-				return false;
+				if (!IsShaderSideImageOperand(op, use.operand)) return false;
+				// An image result can be scalarized and later become a descriptor
+				// operand. Continue through non-void operations so that identity uses
+				// remain a hard rejection rather than being hidden behind the image.
+				if (TypeOf(op) != Type::Void && !self(self, user)) return false;
+				continue;
 			}
 			if (op == ValueOpcode::LoadAddressU32) {
 				if (!IsShaderSideScalarRoot(program, *user)) return false;

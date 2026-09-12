@@ -1429,6 +1429,71 @@ void TestShaderSideEligibilityRejectsNativeConsumer() {
         "negative eligibility regression did not share the SRT slot across consumers");
 }
 
+void TestLoopPhiImagePredicateRemainsShaderSide() {
+  Fixture fixture;
+  auto *entry = fixture.block;
+  auto *loop = fixture.AddBlock();
+  entry->AddBranch(loop);
+  loop->AddBranch(loop);
+
+  const auto initial = fixture.UserData(0);
+  auto &phi = loop->AppendNewInst(ValueOpcode::Phi, {},
+                                  static_cast<uint64_t>(Type::U32));
+  auto &carried = loop->AppendNewInst(ValueOpcode::IAdd32,
+                                      {Value(&phi), Value(1u)});
+  phi.AddPhiOperand(entry, initial);
+  phi.AddPhiOperand(loop, Value(&carried));
+
+  const auto address_handle = fixture.Emit(
+      ValueOpcode::GetAddressResource, {Value(&phi), Value(0u)}, 0, loop);
+  MemoryInfo scalar;
+  scalar.kind = ResourceKind::ScalarAddress;
+  const auto root = fixture.Emit(
+      ValueOpcode::LoadAddressU32,
+      {address_handle, Value(0u), Value(0u), Value(true)},
+      fixture.AddMemory(scalar, 0x32a0), loop);
+  const auto child_handle = fixture.Emit(
+      ValueOpcode::GetAddressResource, {root, Value(0u)}, 0, loop);
+  const auto child = fixture.Emit(
+      ValueOpcode::LoadAddressU32,
+      {child_handle, Value(0u), Value(0u), Value(true)},
+      fixture.AddMemory(scalar, 0x32a1), loop);
+  fixture.Emit(ValueOpcode::ReferenceU32, {child}, 0, loop);
+
+  const auto image = fixture.Image({Value(0u), Value(0u), Value(0u), Value(0u),
+                                    Value(0u), Value(0u), Value(0u), Value(0u)},
+                                   0x32a4);
+  MemoryInfo image_memory;
+  image_memory.kind = ResourceKind::Image;
+  image_memory.image_dimension = Decoder::ImageDimension::Dim2D;
+  const auto condition = fixture.Emit(ValueOpcode::INotEqual32,
+                                      {root, Value(0u)}, 0, loop);
+  const auto image_address = fixture.ImageAddress();
+  const auto read = fixture.Emit(
+      ValueOpcode::ImageRead, {image, image_address, condition},
+      fixture.AddMemory(image_memory, 0x32a4), loop);
+  const auto component = fixture.Emit(
+      ValueOpcode::CompositeExtractU32x4, {read, Value(0u)}, 0, loop);
+  fixture.Emit(ValueOpcode::ReferenceU32, {component}, 0, loop);
+
+  fixture.PlanAndTrack();
+  uint32_t slot = UINT32_MAX;
+  for (uint32_t index = 0; index < fixture.program.srt_reads.size(); ++index) {
+    if (fixture.program.srt_reads[index].value.ResolveInstruction() == root.Instruction()) {
+      slot = index;
+      break;
+    }
+  }
+  Check(slot != UINT32_MAX && fixture.program.srt_reads[slot].shader_side,
+        "loop-carried scalar SRT value in an ImageRead predicate was not retained shader-side");
+
+  const auto plan = ExtractResourcePlan(fixture.program);
+  ResourceSnapshot snapshot;
+  ResourceSpecialization specialization;
+  Check(MaterializeResources(plan, {}, snapshot, specialization),
+        "shader-side ImageRead predicate still forced host PHI materialization");
+}
+
 void TestShaderSideEligibilityAllowsImageWriteData() {
   Fixture fixture;
   const auto table = fixture.Address(fixture.UserData(0), fixture.UserData(1), 0x1fa0);
@@ -2683,6 +2748,8 @@ int main() {
     Run("direct image SRT wrappers", TestDirectImageRecognizesSrtReadWrappers);
     Run("refresh shader-side SRT eligibility", TestShaderSideEligibilityRefreshAfterTracking);
     Run("reject native shader-side SRT consumer", TestShaderSideEligibilityRejectsNativeConsumer);
+    Run("retain loop-PHI ImageRead predicate SRT",
+        TestLoopPhiImagePredicateRemainsShaderSide);
     Run("allow ImageWrite data SRT", TestShaderSideEligibilityAllowsImageWriteData);
     Run("reject ImageResource identity SRT", TestShaderSideEligibilityRejectsImageResourceIdentity);
     Run("allow ImageSampleRaw address SRT", TestShaderSideEligibilityAllowsImageSampleAddress);
