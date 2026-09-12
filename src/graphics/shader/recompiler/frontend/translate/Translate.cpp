@@ -786,6 +786,11 @@ void Translator::AddBranchCondition(const CFG::BasicBlock& source, IR::BlockInfo
 		case CFG::BranchCondition::ExecNonZero:
 			condition = AnyLane(ir.GetExecLo(), ir.GetExecHi());
 			break;
+		case CFG::BranchCondition::DebugSystem:
+			// Kyty does not expose the hardware conditional-debug system bit to
+			// translated shaders. It is therefore clear, as on a non-debugged GPU.
+			condition = IR::U1(IR::Value(false));
+			break;
 		case CFG::BranchCondition::GotoVariable:
 			if (source.terminator.goto_variable == UINT32_MAX) {
 				EXIT("block %u reads an invalid goto variable", source.id);

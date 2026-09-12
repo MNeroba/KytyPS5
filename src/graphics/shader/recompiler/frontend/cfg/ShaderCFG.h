@@ -17,6 +17,7 @@ enum class BranchCondition {
 	VccNonZero,
 	ExecZero,
 	ExecNonZero,
+	DebugSystem,
 	GotoVariable,
 	Unknown
 };

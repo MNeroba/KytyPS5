@@ -102,6 +102,7 @@ constexpr OpcodeMap SOPP_OPCODE_LIST[] = {
     {0x07u, Opcode::S_CBRANCH_VCCNZ},
     {0x08u, Opcode::S_CBRANCH_EXECZ},
     {0x09u, Opcode::S_CBRANCH_EXECNZ},
+    {0x17u, Opcode::S_CBRANCH_CDBGSYS},
     {0x0au, Opcode::S_BARRIER},
     {0x0cu, Opcode::S_WAITCNT},
     {0x0eu, Opcode::S_SLEEP},

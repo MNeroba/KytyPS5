@@ -1659,6 +1659,43 @@ void TestNewShaderRecompilerSoppMarkers() {
   CheckSpirvBinaryValidates(result.spirv);
 }
 
+void TestNewShaderRecompilerSoppCdbgSys() {
+  // ASTRO MS 0x2b3be82b8235ac05 contains the production raw instruction
+  // 0xbf970024 at PC 0x3ca0: SOPP opcode 0x17, s_cbranch_cdbgsys +0x24.
+  // The emulator has no exposed system-debug condition, so this branch is
+  // modeled as a false condition while retaining its CFG edge.
+  const uint32_t shader[] = {
+      EncodeSopp(0x17, 1), // s_cbranch_cdbgsys to the instruction at PC 0x8
+      EncodeSopp(0x00, 0), // fallthrough
+      EncodeSopp(0x01, 0), // branch target / endpgm
+  };
+
+  ShaderRecompiler::Decoder::Program decoded;
+  ShaderRecompiler::Decoder::DecodeProgram(shader, decoded);
+  Check(decoded.instructions.front().opcode ==
+            ShaderRecompiler::Decoder::Opcode::S_CBRANCH_CDBGSYS,
+        "SOPP s_cbranch_cdbgsys was not decoded");
+  Check(Common::ContainsStr(
+            ShaderRecompiler::Decoder::InstructionToString(decoded.instructions.front()),
+                            "S_CBRANCH_CDBGSYS 0x00000008"),
+        "SOPP s_cbranch_cdbgsys target was not decoded");
+
+  const auto graph = ShaderRecompiler::CFG::BuildGraph(decoded);
+  Check(graph.blocks.size() == 3u &&
+            graph.blocks.front().terminator.kind ==
+                ShaderRecompiler::CFG::TerminatorKind::ConditionalBranch &&
+            graph.blocks.front().terminator.condition ==
+                ShaderRecompiler::CFG::BranchCondition::DebugSystem,
+        "SOPP s_cbranch_cdbgsys did not form a debug-system conditional CFG edge");
+
+  auto options = MakeCompileOptions(ShaderType::Compute);
+  options.dump_ir = true;
+  const auto result = RecompileForTest(shader, options);
+  Check(Common::ContainsStr(result.decoded_dump, "S_CBRANCH_CDBGSYS 0x00000008"),
+        "SOPP s_cbranch_cdbgsys was missing from the recompiler dump");
+  CheckSpirvBinaryValidates(result.spirv);
+}
+
 void TestNewShaderRecompilerSopkWaitcntMarkers() {
   const uint32_t shader[] = {
       EncodeSopk(0x17, 125, 0xffff), // s_waitcnt_vscnt null, 0xffff
@@ -12856,6 +12893,7 @@ int main() {
   // ShaderRecompilerComputeTests; keep the distinct decoder contract checks
   // here.
   TestNewShaderDecoderArchitecture();
+  TestNewShaderRecompilerSoppCdbgSys();
   TestImageAddressOperands();
   TestSopkCompareImmediateExtension();
   TestNewShaderRecompilerCapturedVopcSdwaCmpxClass();

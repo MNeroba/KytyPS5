@@ -180,7 +180,8 @@ bool EmbeddedFetchHasBranch(Decoder::Opcode opcode) {
 		case Decoder::Opcode::S_CBRANCH_VCCZ:
 		case Decoder::Opcode::S_CBRANCH_VCCNZ:
 		case Decoder::Opcode::S_CBRANCH_EXECZ:
-		case Decoder::Opcode::S_CBRANCH_EXECNZ: return true;
+		case Decoder::Opcode::S_CBRANCH_EXECNZ:
+		case Decoder::Opcode::S_CBRANCH_CDBGSYS: return true;
 		default: return false;
 	}
 }

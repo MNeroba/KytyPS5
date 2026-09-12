@@ -63,7 +63,8 @@ bool IsConditionalBranch(Opcode opcode) {
 		case Opcode::S_CBRANCH_VCCZ:
 		case Opcode::S_CBRANCH_VCCNZ:
 		case Opcode::S_CBRANCH_EXECZ:
-		case Opcode::S_CBRANCH_EXECNZ: return true;
+		case Opcode::S_CBRANCH_EXECNZ:
+		case Opcode::S_CBRANCH_CDBGSYS: return true;
 		default: return false;
 	}
 }
@@ -81,6 +82,7 @@ BranchCondition ConditionForOpcode(Opcode opcode) {
 		case Opcode::S_CBRANCH_VCCNZ: return BranchCondition::VccNonZero;
 		case Opcode::S_CBRANCH_EXECZ: return BranchCondition::ExecZero;
 		case Opcode::S_CBRANCH_EXECNZ: return BranchCondition::ExecNonZero;
+		case Opcode::S_CBRANCH_CDBGSYS: return BranchCondition::DebugSystem;
 		default: return BranchCondition::Unknown;
 	}
 }
@@ -1170,8 +1172,7 @@ bool IsEnclosingLinearExit(const Graph& graph, uint32_t header, uint32_t block_i
 	       block->successors.size() == 1u) {
 		block = graph.FindBlock(block->successors.front());
 	}
-	if (block == nullptr || graph.Dominates(header, block->id) ||
-	    block->predecessors.empty()) {
+	if (block == nullptr || graph.Dominates(header, block->id) || block->predecessors.empty()) {
 		return false;
 	}
 	return std::ranges::all_of(block->predecessors, [&](uint32_t predecessor) {
@@ -1810,7 +1811,7 @@ bool RouteOneSharedArm(Graph& graph, uint32_t original_block_count, uint32_t out
 				continue;
 			}
 
-			const auto continuation = graph.FindNearestCommonPostDominator(shared, body);
+			const auto  continuation       = graph.FindNearestCommonPostDominator(shared, body);
 			const auto* continuation_block = graph.FindBlock(continuation);
 			if (continuation_block == nullptr || continuation == other ||
 			    CanReachBefore(graph, other, continuation, UINT32_MAX)) {
@@ -1829,15 +1830,15 @@ bool RouteOneSharedArm(Graph& graph, uint32_t original_block_count, uint32_t out
 				}
 			}
 			const auto first_arm = std::min(continuation, other);
-			if (outer_predecessors.empty() || inner_predecessors.empty() ||
-			    external_predecessor || first_arm >= original_block_count ||
-			    outer_id >= inner_id || inner_id >= first_arm) {
+			if (outer_predecessors.empty() || inner_predecessors.empty() || external_predecessor ||
+			    first_arm >= original_block_count || outer_id >= inner_id ||
+			    inner_id >= first_arm) {
 				continue;
 			}
 
 			const auto route_select =
 			    AppendGotoSelectBlock(graph, route_variable, other, continuation);
-			const auto inner_merge  = AppendSyntheticBranchBlock(graph, route_select);
+			const auto inner_merge = AppendSyntheticBranchBlock(graph, route_select);
 			const auto outer_continue =
 			    AppendGotoSetBlock(graph, route_variable, false, route_select);
 			const auto inner_continue =
@@ -2246,6 +2247,7 @@ std::string BranchConditionToString(BranchCondition condition) {
 		case BranchCondition::VccNonZero: return "vccnz";
 		case BranchCondition::ExecZero: return "execz";
 		case BranchCondition::ExecNonZero: return "execnz";
+		case BranchCondition::DebugSystem: return "cdbgsys";
 		case BranchCondition::GotoVariable: return "goto_variable";
 		default: return "unknown";
 	}
