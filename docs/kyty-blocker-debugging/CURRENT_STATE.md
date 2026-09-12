@@ -1,6 +1,6 @@
 # Current KytyPS5 debugging state
 
-Last reconciled: 2026-09-12 15:05 Europe/Riga
+Last reconciled: 2026-09-12 20:10 Europe/Riga
 
 This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable mechanisms live in REFERENCE.md.
 
@@ -8,18 +8,18 @@ This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable
 
 Repository/worktree: G:/KytyPS5/repo
 Branch: astro/materialize-resources
-Repository HEAD at the start of this checkpoint: `0c2da1d11537e2f24f1a34593f38d8ec8b4f634e` (`gpu: initialize BDA page table before use`)
-Current semantic source HEAD: `0c2da1d11537e2f24f1a34593f38d8ec8b4f634e`
-Last ASTRO runtime source HEAD: `0c2da1d11537e2f24f1a34593f38d8ec8b4f634e`
-Runtime source HEAD at launch: `0c2da1d11537e2f24f1a34593f38d8ec8b4f634e`
-Working tree at the start of this checkpoint: clean at `0c2da1d`; local install tree was refreshed from this semantic build
+Repository HEAD at the start of this checkpoint: `5191c74ab1507a32f83b451307120fb219cf163f` (`docs: record BDA initialization runtime checkpoint`)
+Current semantic source HEAD: `0c2da1d11537e2f24f1a34593f38d8ec8b4f634e` (documentation-only commits follow)
+Last ASTRO runtime source HEAD: `5191c74ab1507a32f83b451307120fb219cf163f` with temporary dispatch-state diagnostics
+Runtime source HEAD at launch: `5191c74ab1507a32f83b451307120fb219cf163f` (diagnostic working tree; source trace was reverted afterward)
+Working tree at the start of this checkpoint: clean at `5191c74`
 Build: Release, CMake/Ninja, clang-cl, clang-lld_link-64
 Executable: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.exe
-Executable SHA-256: BAD51D31214F42F55B16E250378E868BDA11F07C150EE776AC56DCA435B3A9FF
-Executable size: 21,054,976 bytes; local install refreshed from semantic build `0c2da1d` before the progression run
-Build label: runtime log reports `Source build 0c2da1d`
-Matching PDB: G:/KytyPS5/repo/_Build/windows/kyty_emulator.pdb and local install copy; SHA-256 `F8683AB326BEF9AC7DF61FEDE333FB304549FADEE59130E7C14FF368DA63013E`
-Binary provenance: the progression run used the exact `0c2da1d` executable/PDB above
+Executable SHA-256: `8326FBF6AC6426763BAE5BBBD33B2753273EC0C44347B1B03C52CAEF6F821E90`
+Executable size: 21,055,488 bytes; local install refreshed from the clean `5191c74` source
+Build label: clean restored build; diagnostic run label was `Source build 5191c74-dirty`
+Matching PDB: G:/KytyPS5/repo/_Build/windows/kyty_emulator.pdb and local install copy; SHA-256 `CC54F3FDD0C14BB728494A4708EC9B8BCB0AD9BE01726CB46235D20983CBDAEE`
+Binary provenance: clean installed executable/PDB above are current; the diagnostic run used the temporary-trace hashes recorded below
 
 The system-wide CMake install prefix was not used because it requires administrator access.
 
@@ -374,3 +374,35 @@ diagnostic correction.
 
 Focused validation artifacts: `G:/KytyPS5/logs/GPU_FAULT_DIAG_FIX_20260912_scheduler-only-fresh.log`
 and `G:/KytyPS5/logs/GPU_FAULT_DIAG_FIX_20260912_full-tests-fresh.log`; both exit code 0.
+
+## Dispatch-state correlation checkpoint — 2026-09-12
+
+The static narrowing task did not establish a production mapping for guest code address
+`0x000000050052a400`. The exact AGC record at that address advertises a 160-word compute
+shader, but AGC address records are not authoritative for the active invocation: in the same
+capture, address `0x00000005007b7300` later reached `GraphicsDispatchState` as shader hash
+`0x9e3c6093e9c20738`, `code_words=160`, despite its earlier AGC record advertising
+`shader_size=0x13a0`. This proves address metadata can be stale/reused/interleaved; no
+pointer-to-hash or resource-state inference is allowed from that record alone.
+
+The valid bounded diagnostic capture is
+`G:/KytyPS5/logs/ASTRO_BDA_DISPATCH_STATE_20260912_1945/`. Its temporary generic trace emitted
+the capped 8192 dispatch-state records, but the target address never reached a
+`GraphicsDispatchState` or `GraphicsDispatchResources` record. The run ended at the known
+decoder baseline (`unknown RDNA2 instruction family`, `ShaderDecoder.cpp:388`) with wrapper
+status `321` (`0x141`), before the target dispatch; it produced no device-loss or BDA/resource
+causal evidence. The malformed earlier wrapper attempt
+`G:/KytyPS5/logs/ASTRO_BDA_DISPATCH_STATE_20260912_1930/` is not runtime evidence.
+
+No semantic source, renderer, scheduler, or address-binding diagnostic change was made. The
+temporary trace was reverted and the clean install now uses EXE SHA-256
+`8326FBF6AC6426763BAE5BBBD33B2753273EC0C44347B1B03C52CAEF6F821E90` with matching PDB SHA-256
+`CC54F3FDD0C14BB728494A4708EC9B8BCB0AD9BE01726CB46235D20983CBDAEE` from current HEAD
+`5191c74`. The async `VK_ERROR_DEVICE_LOST (-4)` remains the P0; no new runtime run or
+`VK_EXT_device_address_binding_report` capture is justified until an exact pointer-to-hash and
+resource snapshot is available.
+
+Next action: use existing source/log evidence to obtain one exact target dispatch-state record
+or identify a different stable causal boundary. If a future capture is required, keep it
+generic and bounded, record provenance, and stop at the first exact missing fact; do not reopen
+closed resource/remap, replay, pipeline-cache, or color findings.

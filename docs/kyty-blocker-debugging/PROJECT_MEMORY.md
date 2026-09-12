@@ -539,3 +539,23 @@ build label is stale (`246ea51-dirty`); use source HEAD `568f00bcc0f1086383c3970
 and executable/PDB hashes in `CURRENT_STATE.md` for provenance.
 
 RELATED CODE/COMMIT: `MasterSemaphore::Wait`, `gpuFaultDiagnostics.cpp`, `568f00b`.
+
+### Guest dispatch address records are not active-shader identity — PROVEN
+
+FACT: AGC records keyed by a guest code address can be stale, reused, or interleaved with
+later shader mappings. In `ASTRO_BDA_DISPATCH_STATE_20260912_1945`, address
+`0x00000005007b7300` had an earlier AGC record advertising `shader_size=0x13a0`, but a later
+active `GraphicsDispatchState` record for the same address reported shader hash
+`0x9e3c6093e9c20738` and `code_words=160`.
+
+WHY IT MATTERS: A guest VA or AGC code size alone cannot identify the pipeline or resource
+state that caused an asynchronous GPU fault. Require an active dispatch-side pointer-to-hash
+record before investigating BDA addresses, storage-image bindings, lifetime, or synchronization.
+
+EVIDENCE: The bounded generic trace in
+`G:/KytyPS5/logs/ASTRO_BDA_DISPATCH_STATE_20260912_1945/` emitted 8192 dispatch records but
+did not reach target address `0x000000050052a400`; the run ended at the known decoder baseline
+before that dispatch. No device-loss, BDA, or resource causal claim follows from this capture.
+
+RELATED CODE/COMMIT: `AgcCreateShader`, `ShaderMapUserData`, and
+`RenderExecutor::DispatchDirect`; diagnostic source was temporary and reverted.
