@@ -717,3 +717,24 @@ production-derived regression `TestDecoderStopsAfterCompletedBackedgeBeforeTailD
 
 RELATED CODE/COMMIT: `src/graphics/shader/recompiler/frontend/decode/ShaderDecoder.cpp`,
 `tests/shaderCfgTests.cpp`, semantic commit `5e2e219`.
+
+### MS decoder regression provenance — PROVEN
+
+FACT: The production-derived tail regression is independently runnable and passes. The
+`2a51379` CDBGSYS regression remains useful for SOPP/CFG coverage but is synthetic and does
+not validate raw `0xc2208080` or the mesh-stage stream.
+
+WHY IT MATTERS: A green CDBGSYS unit test must not be mistaken for proof that the old runtime
+failure word was a genuine instruction. The exact tail fixture proves the generic traversal
+boundary without adding a `Family::0x30` decoder case.
+
+EVIDENCE: `G:/KytyPS5/logs/MS_DECODER_EXACT_REGRESSION_20260912_2355/analysis.txt`; isolated
+`KYTY_EXACT_MS_REGRESSION=1 shader_cfg_tests.exe` exit 0; restored full `shader_cfg_tests.exe`
+exit 0; `git merge-base --is-ancestor 2a51379 5ebf00a` success. The old runtime record has
+stage MS/hash `0x2b3be82b8235ac05`, `code_words=4164`, `pc=0x3e74`, raw `0xc2208080`, but did
+not capture the preceding dword or explicit mode. The preserved raw stream supplies
+`0x08183d08` at `0x3e70` and one-dword width. The latest f55195 ASTRO run did not re-enter this
+MS hash, so exact runtime re-entry remains unproven.
+
+RELATED CODE/COMMIT: `tests/shaderCfgTests.cpp`, `5e2e219`, runtime artifacts
+`MS_RAW_CAPTURE_20260912_2240` and `ASTRO_DECODER_FIX_20260912_2340`.

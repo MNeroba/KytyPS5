@@ -1,6 +1,6 @@
 # Current KytyPS5 debugging state
 
-Last reconciled: 2026-09-12 23:30 Europe/Riga
+Last reconciled: 2026-09-12 23:23 Europe/Riga
 
 This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable mechanisms live in REFERENCE.md.
 
@@ -8,17 +8,18 @@ This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable
 
 Repository/worktree: G:/KytyPS5/repo
 Branch: astro/materialize-resources
-Repository HEAD: `5e2e21995c80a5b29bb84dde8e43d110c1cd6375` (`shader: stop decode at completed unreachable backedge`)
+Repository HEAD for runtime/test provenance: `f55195e25f9379b8503e47aebc034243741cd409` (`docs: supersede MS raw preservation gap`)
+Documentation checkpoint is the current tip; use `git rev-parse HEAD` for its generated commit id.
 Current semantic source HEAD: `5e2e21995c80a5b29bb84dde8e43d110c1cd6375`
-Last ASTRO runtime source HEAD: `44a52db92cc48b32096987b8e619874db0dbb607` (raw-program capture)
-Working tree for this checkpoint: clean after the semantic decoder fix
+Last ASTRO runtime source HEAD: `f55195e25f9379b8503e47aebc034243741cd409`
+Working tree for this checkpoint: clean
 Build: Release, CMake/Ninja, clang-cl, clang-lld_link-64
-Executable: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.exe
-Executable SHA-256: `D22B5CE4874090D6F867D76DECD01A14680CDADBDED26A0EECC8648A50E4142D`
-Executable size: 21,055,488 bytes; local install refreshed from `5ebf00a`
-Build label: `Source build 5ebf00a`
-Matching PDB: G:/KytyPS5/repo/_Build/windows/kyty_emulator.pdb and local install copy; SHA-256 `1E1ED04D7AABD48A54C31BCFF2D821562920473CD0B815CA0D58EDCC0D588646`
-Binary provenance: installed executable/PDB are the current bounded-snapshot build above
+Executable: G:/KytyPS5/repo/_Build/windows/kyty_emulator.exe
+Executable SHA-256: `088AB05BEB634BA142158AB2F10A32A89277142CCE0ABD9E22CE1675F6CC1A12`
+Executable size: 21,075,456 bytes; built from `f55195e`
+Build label: `Source build f55195e`
+Matching PDB: G:/KytyPS5/repo/_Build/windows/kyty_emulator.pdb; SHA-256 `49ADAEA0AC24DC66B8E0E9EB6B81493BB561F1DC50DF84CEDF8EC232B0A2D8FF`
+Binary provenance: build-tree executable/PDB used by the latest ASTRO run
 
 The system-wide CMake install prefix was not used because it requires administrator access.
 
@@ -29,13 +30,28 @@ Title ID: PPSA21567
 Game input: G:/PS5 Games/PPSA21567/extracted
 Current milestone: M5 main menu — reached in the validated title-screen progression run
 Next milestone: M6 gameplay
-Current P0: validate the generic MS decoder traversal fix at runtime; the prior `pc=0x00003e74`, raw `0xc2208080` failure was proven to be unreachable tail data after a completed debug backedge
-P0 class: frontend decode stream traversal (static root cause fixed; runtime validation pending)
-Last validated progress signal: offline production raw walk reaches `S_ENDPGM` at `0x3d30`, its CDBGSYS target path, and completed `S_BRANCH` backedge at `0x3dac`; focused decoder and compute tests pass. No ASTRO run has been made from `5e2e219` yet.
+Current P0: classify the first post-M4 `VK_ERROR_DEVICE_LOST (-4)` boundary after target CS dispatch tick `327678`/failing wait ticks `327701` and `327678`; the old MS tail invocation was not re-entered in the latest run
+P0 class: GPU execution/device loss (no stale resource or invalid range proven)
+Last validated progress signal: production-derived MS tail regression ran separately with exit 0 and the full `shader_cfg_tests` suite passed; the latest f55195 ASTRO run reached CS `0x657ad04626bf9d55` SPIR-V emission and then `vkDevice.waitSemaphores` returned `ErrorDeviceLost (-4)`.
 Known P1 likely blockers: incorrect color/output interpretation remains P1 and is not a current fix target
 Known P2: cold-start large dispatcher pipeline compilation latency; successful creates are not a hang. Cache persistence/load is proven, but a substantial warm-time reduction is not.
 
 M1, M2, M3, M4, and M5 are closed/reached. M6 gameplay is not proven. Do not reopen the cleared startup SRT/BDA-lifetime, pipeline-create, submission, visible-frame, bounded resource-remap, scalar-PHI materialization, or TTMP scalar-source conclusions without contradictory evidence.
+
+## Exact MS regression verification — 2026-09-12
+
+Artifact: `G:/KytyPS5/logs/MS_DECODER_EXACT_REGRESSION_20260912_2355/analysis.txt`.
+`git merge-base --is-ancestor 2a51379 5ebf00a` succeeded. The current discriminator still
+routes SOPP through opcode `0x7f`, while SMEM remains high-six-bit `0x3d`; no `Family::0x30`
+case was added. `TestNewShaderRecompilerSoppCdbgSys` from `2a51379` is in the normal
+`shader_cfg_tests` main but is synthetic (`EncodeSopp(0x17, ...)`) and does not exercise
+production raw `0xc2208080`. The production-derived `TestDecoderStopsAfterCompletedBackedgeBeforeTailData`
+was run alone (exit 0), then the restored full `shader_cfg_tests` suite also passed (exit 0).
+
+The old failing runtime record is stage MS, hash `0x2b3be82b8235ac05`, `code_words=4164`,
+`pc=0x3e74`, raw `0xc2208080`. Runtime did not persist the preceding dword or explicit mode;
+the exact preserved raw file supplies preceding `0x08183d08` at `0x3e70` and one-dword width.
+The latest f55195 ASTRO run did not log this MS hash, so exact runtime re-entry remains unproven.
 
 ## MS decoder tail traversal fix — 2026-09-12
 
