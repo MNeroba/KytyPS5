@@ -14,6 +14,15 @@ guest shader → decode → CFG/IR → SRT planning
 
 A later sink can originate in an earlier decision. IR values stored in side plans are not ordinary use edges; any plan that crosses rewriting or DCE must explicitly preserve, refresh, or own its inputs until extraction.
 
+## SOPP conditional debug control flow
+
+On the RDNA2/GCN encoding used by Kyty, SOPP opcode `0x17` is
+`S_CBRANCH_CDBGSYS`. It is a real PC-relative conditional branch, so decoding
+must retain its target and CFG edge. Kyty exposes no hardware system-debug bit
+to translated shaders; normal execution therefore supplies a clear condition
+while keeping the branch structurally represented. Do not silently decode it
+as an ordinary instruction or discard its target.
+
 ## SRT planning and liveness
 
 Key mechanisms: `BuildSrtPlan`, `PlanBuilder`, `srt_reads`, `ReadConst`, `GetSrtResource`, `planning_only`, `ShaderSideSrtReadFlag`, and `live_flat_slots`.

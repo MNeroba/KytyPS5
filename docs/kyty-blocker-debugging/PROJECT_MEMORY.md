@@ -68,6 +68,26 @@ EVIDENCE: The pre-fix target module in `ASTRO_DISPATCH_SRT_20260910_2320_debug` 
 
 RELATED CODE/COMMIT: `backend/spirv/spirvEmitterProgram.cpp`, `tests/shaderCfgTests.cpp` dispatcher alias fixture, semantic commit `1161113`.
 
+### Conditional debug-system branch — PROVEN
+
+FACT: RDNA2/GCN SOPP opcode `0x17` is `S_CBRANCH_CDBGSYS`; it branches by `SIMM16 * 4` when the system debug bit is set and otherwise behaves as a NOP. Kyty has no translated shader state for that hardware debug bit, so the generic implementation retains the CFG edge and supplies a constant false condition for normal execution.
+
+WHY IT MATTERS: An ASTRO mesh shader used raw `0xbf970024` at PC `0x3ca0`; the missing decoder entry previously stopped `ShaderCFG::BuildGraph` before emission. Do not treat this as a shader-hash exception or remove the branch edge.
+
+EVIDENCE: fail-before regression `G:/KytyPS5/logs/ASTRO_CFG_P0_20260912_1300/shader_cfg_fail_before_run2.log`; pass-after focused `shader_cfg_tests` and the ASTRO run `G:/KytyPS5/logs/ASTRO_CFG_FIX_20260912_1330/` passed this boundary. ISA reference: [AMD GCN3 Instruction Set Architecture](https://www.amd.com/content/dam/amd/en/documents/radeon-tech-docs/instruction-set-architectures/gcn3-instruction-set-architecture.pdf), SOPP opcode 23 (0x17).
+
+RELATED CODE/COMMIT: decoder/CFG/translator support in `2a51379`; next runtime boundary is documented in `CURRENT_STATE.md`.
+
+### Post-CDBGSYS runtime boundary — PROVEN
+
+FACT: The `2a51379` ASTRO run reached 46 CS, 34 PS, 21 VS, and 2 GS shader counts and passed the former MS `S_CBRANCH_CDBGSYS` failure. The first new failure is `unsupported scalar source operand 0x00000073 at PC 0x00003db0` in `ShaderDecoder.cpp:264` while decoding MS `0x2b3be82b8235ac05`.
+
+WHY IT MATTERS: This is the earliest current P0 for M6 progression. No SPIR-V or pipeline result exists for that MS invocation; the scalar-source value must be classified before any further runtime run or semantic change.
+
+EVIDENCE: `G:/KytyPS5/logs/ASTRO_CFG_FIX_20260912_1330/runtime.log` lines 779241–779259; process result `321` (`0x00000141`), no dump. Exact executable SHA-256 is recorded in `CURRENT_STATE.md`.
+
+RELATED CODE/COMMIT: `src/graphics/shader/recompiler/frontend/decode/ShaderDecoder.cpp`, `2a51379`.
+
 ### BVH and FaultBuffer boundaries — PROVEN
 
 Fact: `--stub-bvh` always misses and is only a downstream-progression aid. `FaultBuffer` is a page-fault bitmap.

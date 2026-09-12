@@ -1,6 +1,6 @@
 # Current KytyPS5 debugging state
 
-Last reconciled: 2026-09-12 12:16 Europe/Riga
+Last reconciled: 2026-09-12 12:40 Europe/Riga
 
 This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable mechanisms live in REFERENCE.md.
 
@@ -8,18 +8,18 @@ This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable
 
 Repository/worktree: G:/KytyPS5/repo
 Branch: astro/materialize-resources
-Repository HEAD at this checkpoint: `618d534` (`docs: record materialization fix and next blocker`)
-Current source HEAD: f6da96f (`shader: retain scalar SRT image value operands`)
-Last ASTRO runtime source HEAD: f6da96f7d89536fc931033f049a97e32d5baa1cd
-Runtime source HEAD at launch: f6da96f7d89536fc931033f049a97e32d5baa1cd
-Working tree before this checkpoint: clean at `f6da96f`; local install tree was refreshed from this build
+Repository HEAD at this checkpoint: `2a51379` (`shader: support conditional debug system branches`)
+Current source HEAD: `2a51379` (`shader: support conditional debug system branches`)
+Last ASTRO runtime source HEAD: `2a5137991b23b6a91371eaf8b03ec10c6c7c7228`
+Runtime source HEAD at launch: `2a5137991b23b6a91371eaf8b03ec10c6c7c7228`
+Working tree before this checkpoint: clean at `2a51379`; local install tree was refreshed from this build
 Build: Release, CMake/Ninja, clang-cl, clang-lld_link-64
 Executable: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.exe
-Executable SHA-256: 11135EDE0163F58E7B84E9C7EEEB82E63A8345EAA7B24CFCEED33B3855A6ED43
-Executable size: 21,051,392 bytes; local install refreshed from `f6da96f` before the progression run
-Build label: Source build f6da96f (runtime reported `f6da96f-dirty`); GPU fault/checkpoint diagnostics are enabled
-Matching PDB: G:/KytyPS5/repo/_Build/windows/kyty_emulator.pdb and local install copy; SHA-256 7C8611B5565144BC2D4402EA5C130F14C69631FF5B66437FC860A4F4F29C3CCB; size 24,068,096 bytes
-Binary provenance: the historical dump/run used 4374a9d above; this progression run used the exact f6da96f executable/PDB above
+Executable SHA-256: E9F6F6E3929BF6A331AEAF3FB2F69CBE1C37F4848C77768C052475CE69F5CF24
+Executable size: 21,051,392 bytes; local install refreshed from `2a51379` before the progression run
+Build label: Source build 2a51379; GPU fault/checkpoint diagnostics are enabled
+Matching PDB: G:/KytyPS5/repo/_Build/windows/kyty_emulator.pdb and local install copy; SHA-256 624214B04FEC4C86E30A168680DC8BBAD1A62C7B7C5EB5F68DE455A4C1466F4D; size 24,068,096 bytes
+Binary provenance: this progression run used the exact `2a51379` executable/PDB above
 
 The system-wide CMake install prefix was not used because it requires administrator access.
 
@@ -30,13 +30,19 @@ Title ID: PPSA21567
 Game input: G:/PS5 Games/PPSA21567/extracted
 Current milestone: M5 main menu — reached in the validated title-screen progression run
 Next milestone: M6 gameplay
-Current P0: unsupported MS shader control-flow opcode in `ShaderCFG` for hash `0x2b3be82b8235ac05` at PC `0x00003ca0` (`SOPP 0x17`, raw `0xbf970024`)
-P0 class: frontend CFG decode support; the prior `MaterializeResources` PHI blocker is closed
-Last validated progress signal: one post-fix run reached 46 compute shaders, completed CS `0xc8aec8bce60cd4a1` pipeline snapshot, and then failed while decoding MS `0x2b3be82b8235ac05`
+Current P0: unsupported scalar source operand `0x00000073` at PC `0x00003db0` while decoding MS shader hash `0x2b3be82b8235ac05`
+P0 class: frontend scalar-source decode; `S_CBRANCH_CDBGSYS` is now decoded and the prior CFG blocker is closed
+Last validated progress signal: post-fix run passed the prior MS `SOPP 0x17` boundary, reached 46 CS / 34 PS / 21 VS / 2 GS, and then failed in the same MS decode at scalar source `0x73`
 Known P1 likely blockers: incorrect color/output interpretation remains P1 and is not a current fix target
 Known P2: cold-start large dispatcher pipeline compilation latency; successful creates are not a hang. Cache persistence/load is proven, but a substantial warm-time reduction is not.
 
 M1, M2, M3, M4, and M5 are closed/reached. M6 gameplay is not proven. Do not reopen the cleared startup SRT/BDA-lifetime, pipeline-create, submission, visible-frame, bounded resource-remap, or scalar-PHI materialization conclusions without contradictory evidence.
+
+## Latest progression checkpoint
+
+Run: `G:/KytyPS5/logs/ASTRO_CFG_FIX_20260912_1330/`
+Launch: installed `kyty_emulator.exe --game "G:/PS5 Games/PPSA21567/extracted" --stub-bvh --shader-debug false --shader-log-direction Silent --graphics-debug-dump false --printf-direction File --printf-output-file "G:/KytyPS5/logs/ASTRO_CFG_FIX_20260912_1330/runtime.log"`
+Result: wrapper exit `321` (`0x00000141`); no crash dump. The run completed the previously failing MS `S_CBRANCH_CDBGSYS` path, then stopped at `unsupported scalar source operand 0x00000073 at pc 0x00003db0` (`ShaderDecoder.cpp:264`). No shader emission/pipeline result exists for the failing MS invocation. This is the first new post-fix boundary; no second ASTRO run or fix has been started.
 
 ## Exact runtime evidence
 
@@ -69,7 +75,7 @@ src/graphics/shader/recompiler/ShaderRecompiler.cpp — structured loop-exit val
 src/graphics/shader/recompiler/backend/spirv/spirvEmitterProgram.cpp — metadata/planning-only spill filtering and shader-side SRT alias resolution
 tests/shaderCfgTests.cpp — dispatcher shader-side SRT alias regression
 
-Semantic source checkpoint: `edc7d4f` keeps `.at()` and fixes the producer path: retained bounded `ReadConstBuffer` roots now register their descriptor source through `AddBuffer` and receive `AddMemoryPatch`; ordinary bounded reads remain deferred. No catch-all handler, unchecked access, clamp, substitution, or color change was made. Diagnostic and runtime artifacts remain outside the repository under G:/KytyPS5/logs/.
+Semantic source checkpoint: `edc7d4f` keeps `.at()` and fixes the producer path: retained bounded `ReadConstBuffer` roots now register their descriptor source through `AddBuffer` and receive `AddMemoryPatch`; ordinary bounded reads remain deferred. Commit `2a51379` adds generic `S_CBRANCH_CDBGSYS` decode/CFG handling and models the unavailable debug-system bit as clear. No catch-all handler, unchecked access, clamp, substitution, or color change was made. Diagnostic and runtime artifacts remain outside the repository under G:/KytyPS5/logs/.
 
 Producer regression: `TestBoundedRootScalarBufferResourceRemap` builds seven ordinary dense buffers, retains a dynamic scalar-buffer root through `PlanBoundedRootReads`/`ApplyBoundedRootReads`, and starts that root with frontend-style `memory.resource=7`. Before `edc7d4f`, `ExtractResourcePlan` failed with `invalid vector subscript`; after it, the root maps to dense buffer 7 and the plan contains eight buffers.
 
