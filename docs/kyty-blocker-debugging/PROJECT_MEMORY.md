@@ -245,9 +245,13 @@ EVIDENCE: `G:/KytyPS5/logs/GPU_TICK_SNAPSHOT_20260912_205915/decoder-cdbg-compar
 RELATED CODE/COMMIT: `src/graphics/shader/recompiler/frontend/decode/ShaderDecoder.cpp`,
 `tests/shaderCfgTests.cpp`, `2a51379`.
 
-### Target MS raw program preservation gap — PROVEN
+### Target MS raw program preservation gap — SUPERSEDED
 
-FACT: The complete raw MS program for `0x2b3be82b8235ac05` is not preserved in the project
+This entry records the pre-capture state only; the complete stream and its classification are
+recorded in `MS decoder unreachable-tail classification and fix — PROVEN` below.
+
+FACT (historical): Before the raw-capture diagnostic, the complete raw MS program for
+`0x2b3be82b8235ac05` was not preserved in the project
 artifacts. Existing logs provide `code_words=4164`, an old successful decode count of 2858, and
 the newer failure word `0xc2208080` at `pc=0x3e74`, but no target `.bin`/`.rdna2` or preceding
 dword. `DumpShaderRawBeforeCompile` is called after `TranslateProgram` (`pipelineCache.cpp:564-568`),
