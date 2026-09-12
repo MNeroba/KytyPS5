@@ -1,6 +1,6 @@
 # Current KytyPS5 debugging state
 
-Last reconciled: 2026-09-12 00:36 Europe/Riga
+Last reconciled: 2026-09-12 01:05 Europe/Riga
 
 This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable mechanisms live in REFERENCE.md.
 
@@ -8,7 +8,7 @@ This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable
 
 Repository/worktree: G:/KytyPS5/repo
 Branch: astro/materialize-resources
-Repository HEAD at this docs checkpoint: `3f4f6d9` (docs-only checkpoint; source/build revision remains `bd131e8`)
+Repository HEAD at the previous docs checkpoint: `4a52de2` (this checkpoint adds only documentation; source/build revision remains `bd131e8`)
 Current source HEAD: bd131e82212f9d60c2b23ed1e05850d9eee4fcf7 (`debug: dump recent submits on wait failure`)
 Last ASTRO runtime source HEAD: bd131e82212f9d60c2b23ed1e05850d9eee4fcf7
 Runtime source HEAD at launch: bd131e82212f9d60c2b23ed1e05850d9eee4fcf7
@@ -99,7 +99,7 @@ the build tree. `shader_recompiler_compute_tests` passed (`EXIT_CODE=0`, wall `8
 `G:/KytyPS5/logs/shader_recompiler_compute_tests_150a139.log`), and the replay test executable
 help path also returned 0 (`G:/KytyPS5/logs/shader_replay_tests_help_150a139.log`).
 
-Next action: classify the proven `ErrorDeviceLost (-4)` boundary from the saved submit ring and system evidence before any semantic fix. Keep color correctness P1 and cold pipeline latency P2.
+Next action: classify the proven `ErrorDeviceLost (-4)` boundary from the saved submit ring and system evidence before any semantic fix. Static review confirms the EOP wait is only the detection point; the last retained 16 records contain no direct draw/dispatch, so no causal command is proven yet. Keep color correctness P1 and cold pipeline latency P2. End-of-day checkpoint: no new ASTRO run, no semantic change, and no unproven hypothesis promoted to project memory.
 
 ## Bounded production-capture attempt
 
