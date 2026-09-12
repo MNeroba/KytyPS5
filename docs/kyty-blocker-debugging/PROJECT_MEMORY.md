@@ -687,3 +687,29 @@ page table, an 8 MiB fault buffer, and live non-null host buffers with valid BDA
 
 RELATED CODE/COMMIT: temporary trace in `renderCompute.cpp` (reverted); submit/wait ownership in
 `commandScheduler.cpp` and `masterSemaphore.cpp`; documentation checkpoint `f522eba`.
+
+### MS decoder unreachable-tail classification and fix — PROVEN
+
+FACT: The complete production mesh-shader stream for `0x2b3be82b8235ac05` is preserved at
+`G:/KytyPS5/logs/MS_RAW_CAPTURE_20260912_2240/shaders/original/precompile_ms_2b3be82b8235ac05.bin`
+(4164 dwords; SHA-256 `A3D856918B88B05D05CFFC079E625D109261920FABBF4C7E5D32E03D7584DF49`).
+A sequential walk from a known boundary reaches `S_ENDPGM` at `0x3d30`, the
+`S_CBRANCH_CDBGSYS` target path, and the completed unconditional backedge `S_BRANCH 0x3ca4`
+at `0x3dac`. There is no branch target in `[0x3db0,0x3e74]`; `0x3e70` is a one-dword
+`V_SUB_F32`, so `0xc2208080` is unreachable post-backedge tail data, not an instruction start.
+Kyty and Prosper agree that high-six-bit `0x30` is unsupported/unknown, while public RDNA2
+SMEM uses `0x3d`; no PS5-specific `0x30` encoding is established.
+
+WHY IT MATTERS: Do not add a Family::0x30 decoder case or reuse the isolated word as an ISA
+lead. `DecodeProgram` now tracks unvisited forward targets, ignores out-of-span targets, and
+stops after a completed unconditional backedge once the post-END target path is visited. This
+preserves required post-END CDBGSYS control flow while avoiding linear decode of unreachable
+metadata/tail bytes.
+
+EVIDENCE: `G:/KytyPS5/logs/MS_RAW_CAPTURE_20260912_2240/target-sequential-decode.clean.txt`,
+`branch-targets.txt`, `target-prosper-decode.txt`, and `boundary-audit-final.txt`. The
+production-derived regression `TestDecoderStopsAfterCompletedBackedgeBeforeTailData` and
+`shader_cfg_tests`, `ctest -R ^shader_cfg$`, and `shader_recompiler_compute_tests` all pass.
+
+RELATED CODE/COMMIT: `src/graphics/shader/recompiler/frontend/decode/ShaderDecoder.cpp`,
+`tests/shaderCfgTests.cpp`, semantic commit `5e2e219`.

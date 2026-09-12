@@ -1,6 +1,6 @@
 # Current KytyPS5 debugging state
 
-Last reconciled: 2026-09-12 22:05 Europe/Riga
+Last reconciled: 2026-09-12 23:30 Europe/Riga
 
 This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable mechanisms live in REFERENCE.md.
 
@@ -8,11 +8,10 @@ This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable
 
 Repository/worktree: G:/KytyPS5/repo
 Branch: astro/materialize-resources
-Repository HEAD at the start of this checkpoint: `d8238387e2e19c2ce5e1ed10163b1aba1a8898e4` (`docs: classify runtime decoder fixture mismatch`)
-Current semantic source HEAD: `5ebf00a201e2b1701451110c5c7550760d7ad964` (diagnostic-only commit)
-Last ASTRO runtime source HEAD: `5ebf00a201e2b1701451110c5c7550760d7ad964`
-Runtime source HEAD at launch: `5ebf00a201e2b1701451110c5c7550760d7ad964`
-Working tree for this checkpoint: clean after the bounded diagnostic commit
+Repository HEAD: `5e2e21995c80a5b29bb84dde8e43d110c1cd6375` (`shader: stop decode at completed unreachable backedge`)
+Current semantic source HEAD: `5e2e21995c80a5b29bb84dde8e43d110c1cd6375`
+Last ASTRO runtime source HEAD: `44a52db92cc48b32096987b8e619874db0dbb607` (raw-program capture)
+Working tree for this checkpoint: clean after the semantic decoder fix
 Build: Release, CMake/Ninja, clang-cl, clang-lld_link-64
 Executable: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.exe
 Executable SHA-256: `D22B5CE4874090D6F867D76DECD01A14680CDADBDED26A0EECC8648A50E4142D`
@@ -30,13 +29,28 @@ Title ID: PPSA21567
 Game input: G:/PS5 Games/PPSA21567/extracted
 Current milestone: M5 main menu — reached in the validated title-screen progression run
 Next milestone: M6 gameplay
-Current P0: MS `0x2b3be82b8235ac05` decoder failure, `unknown RDNA2 instruction family` at `pc=0x00003e74`, raw `0xc2208080`; the complete target raw stream is not preserved, so boundary status is unproven
-P0 class: frontend decode stream-alignment / incomplete-artifact classification (C)
-Last validated progress signal: the bounded-snapshot run reached 46 CS / 34 PS / 21 VS / 2 GS with successful pipeline, submit, wait, and flip activity; the earlier successful target dispatch and separate submit-6256 device-loss evidence remain historical leads.
+Current P0: validate the generic MS decoder traversal fix at runtime; the prior `pc=0x00003e74`, raw `0xc2208080` failure was proven to be unreachable tail data after a completed debug backedge
+P0 class: frontend decode stream traversal (static root cause fixed; runtime validation pending)
+Last validated progress signal: offline production raw walk reaches `S_ENDPGM` at `0x3d30`, its CDBGSYS target path, and completed `S_BRANCH` backedge at `0x3dac`; focused decoder and compute tests pass. No ASTRO run has been made from `5e2e219` yet.
 Known P1 likely blockers: incorrect color/output interpretation remains P1 and is not a current fix target
 Known P2: cold-start large dispatcher pipeline compilation latency; successful creates are not a hang. Cache persistence/load is proven, but a substantial warm-time reduction is not.
 
 M1, M2, M3, M4, and M5 are closed/reached. M6 gameplay is not proven. Do not reopen the cleared startup SRT/BDA-lifetime, pipeline-create, submission, visible-frame, bounded resource-remap, scalar-PHI materialization, or TTMP scalar-source conclusions without contradictory evidence.
+
+## MS decoder tail traversal fix — 2026-09-12
+
+Production raw program: `G:/KytyPS5/logs/MS_RAW_CAPTURE_20260912_2240/shaders/original/precompile_ms_2b3be82b8235ac05.bin`, 16656 bytes / 4164 dwords, SHA-256 `A3D856918B88B05D05CFFC079E625D109261920FABBF4C7E5D32E03D7584DF49`.
+The bounded sequential walk from `0x3c00` reaches `S_ENDPGM` at `0x3d30`, its
+`S_CBRANCH_CDBGSYS` target at `0x3d34`, and the unconditional debug backedge
+`S_BRANCH 0x3ca4` at `0x3dac`. No branch target enters `[0x3db0,0x3e74]`; the preceding
+`0x3e70` is a one-dword `V_SUB_F32`, so `0xc2208080` is unreachable tail data. Kyty and
+Prosper both classify high-six-bit `0x30` as unknown; public RDNA2 SMEM uses `0x3d`.
+
+Commit `5e2e219` generically tracks pending forward targets, ignores branch targets beyond
+the code span, and stops after a completed unconditional backedge once the post-END target
+path is visited. `shader_cfg_tests`, `ctest -R ^shader_cfg$`, and
+`shader_recompiler_compute_tests` pass. This is static closure only; runtime validation and
+the next genuine blocker remain outstanding. Do not add a Family::0x30 decoder case.
 
 ## Prosper-class GDS audit and bounded snapshot result — 2026-09-12
 
@@ -62,9 +76,9 @@ with the command in `command.txt`, source `5ebf00a`, EXE SHA-256
 `GPU_COMMAND_SNAPSHOT_WINDOW` was emitted because device loss was not reached. The snapshot run is
 complete; do not rerun ASTRO or fix this decoder blocker in the same checkpoint.
 
-NEXT ACTION: obtain one narrow target raw-program artifact before `TranslateProgram`/`DecodeProgram`, then walk a bounded window from a known-good boundary; do not add a family case or rerun ASTRO until alignment is proven.
+NEXT ACTION: run one narrow runtime validation from `5e2e219`; if the decoder passes, classify only the first later runtime blocker. Do not add a Family::0x30 case.
 
-## Decoder regression comparison — 2026-09-12
+## Decoder regression comparison — superseded by 5e2e219
 
 `git merge-base --is-ancestor 2a51379 5ebf00a` succeeded. Current
 `ShaderDecoder.cpp` still recognizes SOPP through the unchanged family discriminator
@@ -82,25 +96,21 @@ production preceding dword. The runtime failure is mesh stage, hash `0x2b3be82b8
 `0x00003e74` (4-byte aligned); the preceding dword was not captured. Comparison artifact:
 `G:/KytyPS5/logs/GPU_TICK_SNAPSHOT_20260912_205915/decoder-cdbg-comparison.txt`.
 
-NEXT ACTION: the required preceding raw dword and target stream are absent. Persist them before
-decode in a future narrow diagnostic capture; do not treat the CDBGSYS regression or another
-shader's same-PC listing as coverage for this runtime word.
+The production stream and bounded walk are now preserved in `MS_RAW_CAPTURE_20260912_2240`;
+the generic traversal regression and focused tests are recorded in the superseding section above.
 
-## MS decoder boundary audit — 2026-09-12
+## MS decoder boundary audit — superseded by 5e2e219
 
-Artifact: `G:/KytyPS5/logs/MS_BOUNDARY_AUDIT_20260912_2205/boundary-audit.txt`.
-The target hash appears in runtime text only. The older run records `code_words=4164` and
-`decode instructions=2858`; the newer bounded run reaches `pc=0x3e74`, raw `0xc2208080`, and
-fails in `ShaderDecoder.cpp:388`. No target `.bin`/`.rdna2` exists in `G:/KytyPS5/logs`, the
-repository install shader directory, or `G:/KytyPS5/_Shaders`; no 16656-byte raw file exists.
+The earlier artifact `G:/KytyPS5/logs/MS_BOUNDARY_AUDIT_20260912_2205/boundary-audit.txt`
+captured only the missing-stream state. The complete target is now preserved at
+`G:/KytyPS5/logs/MS_RAW_CAPTURE_20260912_2240/shaders/original/precompile_ms_2b3be82b8235ac05.bin`
+(16656 bytes; SHA-256 `A3D856918B88B05D05CFFC079E625D109261920FABBF4C7E5D32E03D7584DF49`).
 
-`ProgramCache::Get` calls `TranslateProgram` before `DumpShaderRawBeforeCompile` in
-`pipelineCache.cpp:564-568`, so a decode failure precedes raw persistence. Kyty and Prosper both
-classify the isolated word as neither SOPP nor SMEM (`word >> 26 == 0x30`; SMEM is `0x3d`).
-Archive listings at the same PC belong to other hashes and are deliberately not reused. The only
-proven result is classification C: incomplete preserved program/PC mapping. A genuine first word,
-a continuation/literal, and a PS5-specific encoding remain undecidable without the target's
-preceding dword and sequential stream. No source semantic change or ASTRO run was made.
+The bounded walk reaches `S_ENDPGM` at `0x3d30`, its CDBGSYS target, and the unconditional
+debug backedge `S_BRANCH 0x3ca4` at `0x3dac`; no branch target enters `[0x3db0,0x3e74]`.
+The preceding `0x3e70` is a one-dword `V_SUB_F32`, and Prosper independently agrees that
+high-six-bit `0x30` is unknown while RDNA2 SMEM uses `0x3d`. The former runtime word is
+therefore unreachable tail data (classification C), not a new instruction family.
 
 ## Static submit-6256 reconstruction checkpoint — 2026-09-12
 

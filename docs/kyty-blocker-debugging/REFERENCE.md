@@ -23,6 +23,16 @@ to translated shaders; normal execution therefore supplies a clear condition
 while keeping the branch structurally represented. Do not silently decode it
 as an ordinary instruction or discard its target.
 
+## Decoder traversal after terminal instructions
+
+`DecodeProgram` may need to visit a forward target after `S_ENDPGM` when a conditional
+debug-system branch preserves a structurally reachable path. Track discovered forward targets
+until those targets have been decoded, then honor the no-fallthrough edge of an unconditional
+`S_BRANCH`: once its backedge is complete and no forward target remains pending, stop instead of
+linearizing metadata or padding words after the CFG. Branch targets outside the code span are
+ignored. This keeps post-END control flow available without interpreting unreachable tail data as
+new ISA families.
+
 ## RDNA2 scalar trap-temporary operands
 
 RDNA2 scalar source and destination codes 108–123 name the privileged trap-temporary registers
