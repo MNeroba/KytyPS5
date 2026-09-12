@@ -1,6 +1,6 @@
 # Current KytyPS5 debugging state
 
-Last reconciled: 2026-09-12 21:52 Europe/Riga
+Last reconciled: 2026-09-12 22:05 Europe/Riga
 
 This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable mechanisms live in REFERENCE.md.
 
@@ -8,7 +8,7 @@ This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable
 
 Repository/worktree: G:/KytyPS5/repo
 Branch: astro/materialize-resources
-Repository HEAD at the start of this checkpoint: `5ebf00a201e2b1701451110c5c7550760d7ad964` (`graphics: retain bounded GPU fault command snapshots`)
+Repository HEAD at the start of this checkpoint: `d8238387e2e19c2ce5e1ed10163b1aba1a8898e4` (`docs: classify runtime decoder fixture mismatch`)
 Current semantic source HEAD: `5ebf00a201e2b1701451110c5c7550760d7ad964` (diagnostic-only commit)
 Last ASTRO runtime source HEAD: `5ebf00a201e2b1701451110c5c7550760d7ad964`
 Runtime source HEAD at launch: `5ebf00a201e2b1701451110c5c7550760d7ad964`
@@ -30,8 +30,8 @@ Title ID: PPSA21567
 Game input: G:/PS5 Games/PPSA21567/extracted
 Current milestone: M5 main menu — reached in the validated title-screen progression run
 Next milestone: M6 gameplay
-Current P0: MS `0x2b3be82b8235ac05` decoder failure, `unknown RDNA2 instruction family` at `pc=0x00003e74`, raw `0xc2208080`
-P0 class: frontend decode boundary reached before the deferred post-M5 device-loss window
+Current P0: MS `0x2b3be82b8235ac05` decoder failure, `unknown RDNA2 instruction family` at `pc=0x00003e74`, raw `0xc2208080`; the complete target raw stream is not preserved, so boundary status is unproven
+P0 class: frontend decode stream-alignment / incomplete-artifact classification (C)
 Last validated progress signal: the bounded-snapshot run reached 46 CS / 34 PS / 21 VS / 2 GS with successful pipeline, submit, wait, and flip activity; the earlier successful target dispatch and separate submit-6256 device-loss evidence remain historical leads.
 Known P1 likely blockers: incorrect color/output interpretation remains P1 and is not a current fix target
 Known P2: cold-start large dispatcher pipeline compilation latency; successful creates are not a hang. Cache persistence/load is proven, but a substantial warm-time reduction is not.
@@ -62,8 +62,7 @@ with the command in `command.txt`, source `5ebf00a`, EXE SHA-256
 `GPU_COMMAND_SNAPSHOT_WINDOW` was emitted because device loss was not reached. The snapshot run is
 complete; do not rerun ASTRO or fix this decoder blocker in the same checkpoint.
 
-NEXT ACTION: classify this exact MS instruction from source/ISA evidence in a future session; keep
-the deferred asynchronous device-loss P0 and Prosper/GDS audit closed.
+NEXT ACTION: obtain one narrow target raw-program artifact before `TranslateProgram`/`DecodeProgram`, then walk a bounded window from a known-good boundary; do not add a family case or rerun ASTRO until alignment is proven.
 
 ## Decoder regression comparison — 2026-09-12
 
@@ -83,8 +82,25 @@ production preceding dword. The runtime failure is mesh stage, hash `0x2b3be82b8
 `0x00003e74` (4-byte aligned); the preceding dword was not captured. Comparison artifact:
 `G:/KytyPS5/logs/GPU_TICK_SNAPSHOT_20260912_205915/decoder-cdbg-comparison.txt`.
 
-NEXT ACTION: classify raw `0xc2208080` from MS/RDNA2 source or ISA evidence before any semantic
-change or ASTRO rerun. Do not treat the CDBGSYS regression as coverage for this runtime word.
+NEXT ACTION: the required preceding raw dword and target stream are absent. Persist them before
+decode in a future narrow diagnostic capture; do not treat the CDBGSYS regression or another
+shader's same-PC listing as coverage for this runtime word.
+
+## MS decoder boundary audit — 2026-09-12
+
+Artifact: `G:/KytyPS5/logs/MS_BOUNDARY_AUDIT_20260912_2205/boundary-audit.txt`.
+The target hash appears in runtime text only. The older run records `code_words=4164` and
+`decode instructions=2858`; the newer bounded run reaches `pc=0x3e74`, raw `0xc2208080`, and
+fails in `ShaderDecoder.cpp:388`. No target `.bin`/`.rdna2` exists in `G:/KytyPS5/logs`, the
+repository install shader directory, or `G:/KytyPS5/_Shaders`; no 16656-byte raw file exists.
+
+`ProgramCache::Get` calls `TranslateProgram` before `DumpShaderRawBeforeCompile` in
+`pipelineCache.cpp:564-568`, so a decode failure precedes raw persistence. Kyty and Prosper both
+classify the isolated word as neither SOPP nor SMEM (`word >> 26 == 0x30`; SMEM is `0x3d`).
+Archive listings at the same PC belong to other hashes and are deliberately not reused. The only
+proven result is classification C: incomplete preserved program/PC mapping. A genuine first word,
+a continuation/literal, and a PS5-specific encoding remain undecidable without the target's
+preceding dword and sequential stream. No source semantic change or ASTRO run was made.
 
 ## Static submit-6256 reconstruction checkpoint — 2026-09-12
 

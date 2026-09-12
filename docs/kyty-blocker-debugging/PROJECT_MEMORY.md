@@ -245,6 +245,29 @@ EVIDENCE: `G:/KytyPS5/logs/GPU_TICK_SNAPSHOT_20260912_205915/decoder-cdbg-compar
 RELATED CODE/COMMIT: `src/graphics/shader/recompiler/frontend/decode/ShaderDecoder.cpp`,
 `tests/shaderCfgTests.cpp`, `2a51379`.
 
+### Target MS raw program preservation gap — PROVEN
+
+FACT: The complete raw MS program for `0x2b3be82b8235ac05` is not preserved in the project
+artifacts. Existing logs provide `code_words=4164`, an old successful decode count of 2858, and
+the newer failure word `0xc2208080` at `pc=0x3e74`, but no target `.bin`/`.rdna2` or preceding
+dword. `DumpShaderRawBeforeCompile` is called after `TranslateProgram` (`pipelineCache.cpp:564-568`),
+so a decoder failure occurs before that sidecar is written.
+
+WHY IT MATTERS: The logged PC is 4-byte aligned but is not proof of an instruction boundary. A
+sequential width audit cannot distinguish a genuine first word from a continuation/literal without
+the target stream. Do not add a `Family::0x30` case, infer a width fix, or reuse another shader's
+same-PC disassembly until raw bytes are captured before decode.
+
+EVIDENCE: `G:/KytyPS5/logs/MS_BOUNDARY_AUDIT_20260912_2205/boundary-audit.txt`; target hash search
+across `G:/KytyPS5/logs`, `G:/KytyPS5/repo`, and `G:/KytyPS5/_Shaders`; `ShaderDecoder.cpp` family
+dispatch; Prosper `rdna2_decode.cpp` default/SMEM cases. Prosper and public RDNA2 identify SMEM
+as high-six-bit `0x3d`; local LLVM has no `llvm-mc.exe` and `llvm-objdump` cannot disassemble Kyty
+raw `.bin` files as object inputs. Archive streams at `pc=0x3e74` belong to other hashes and are
+not valid target evidence.
+
+RELATED CODE/COMMIT: `src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp:564-568`;
+`src/graphics/shader/recompiler/frontend/decode/ShaderDecoder.cpp`; audit artifact above.
+
 ### BVH and FaultBuffer boundaries — PROVEN
 
 Fact: `--stub-bvh` always misses and is only a downstream-progression aid. `FaultBuffer` is a page-fault bitmap.
