@@ -182,6 +182,13 @@ Key mechanisms: `DeviceAddressFromWords`, `GuestAddress`, `GetBdaPointer`, `Load
 
 Guest-address translation and mapped-memory behavior are distinct from descriptor bounds. Preserve base, stride, record count, access width, alignment, and page-table/fault behavior independently.
 
+`BufferCache::m_bda_pagetable_buffer` is a 512 MiB device-local table indexed by guest address
+pages. Vulkan/VMA allocation does not guarantee zeroed contents. `InitializeBdaPageTable` records a
+single scheduler-active full zero-fill before the first buffer registration and is also called by
+`GpuResourceManager::PrepareBda` for the empty-table case. `ChangeRegister<true>` must initialize
+before publishing device-address entries; unregister fills released ranges with zero. The one-time
+fill is a resource-validity requirement, not a shader workaround.
+
 ## BVH and fault tracking
 
 `--stub-bvh` provides an always-miss control-flow path for downstream diagnosis. It does not implement node layout, traversal, ray intersection, or address semantics.

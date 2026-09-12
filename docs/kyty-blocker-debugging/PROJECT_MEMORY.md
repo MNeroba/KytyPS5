@@ -138,6 +138,30 @@ The installed executable hash was
 RELATED CODE/COMMIT: `MasterSemaphore::Wait`, `CommandScheduler::Submit`,
 `src/graphics/host_gpu/renderer/gpuFaultDiagnostics.cpp`; no device-loss semantic fix was made.
 
+### BDA page-table initialization contract — PROVEN
+
+FACT: Vulkan device-local allocations do not provide a zero-content contract. Kyty's 512 MiB
+BDA page-table buffer therefore must receive one scheduler-active full zero-fill before the first
+page-table entry is registered; `PrepareBda` repeats the idempotent initialization for a BDA use
+with no registered buffers. Register writes then publish device addresses, while unregister fills
+released ranges with zero.
+
+WHY IT MATTERS: The BDA emitter treats zero entries as unmapped and any stale nonzero entry as a
+physical address. Initialization must occur before the first `ChangeRegister<true>` write; doing it
+after `FindBuffers` would erase entries already recorded in the current command.
+
+EVIDENCE: The authentic fail-before selector failed at first `FindBuffer` with
+`BDA page table was not initialized before the first buffer registration` in
+`G:/KytyPS5/logs/BDA_PAGE_TABLE_FAIL_BEFORE_20260912_1720.log`; the post-fix selector and focused
+shader/resource suites passed in `G:/KytyPS5/logs/BDA_PAGE_TABLE_FOCUSED_20260912_1745/`.
+Commit `0c2da1d` implements `InitializeBdaPageTable` in `BufferCache` and calls it from registration
+and `GpuResourceManager::PrepareBda`. The subsequent single ASTRO run
+`G:/KytyPS5/logs/ASTRO_BDA_FIX_20260912_1800/` still reached `ErrorDeviceLost (-4)` at
+`MasterSemaphore::Wait`; this does not prove that the initialization caused or resolved the GPU fault.
+
+RELATED CODE/COMMIT: `bufferCache.{h,cpp}`, `gpuResourceManager.cpp`,
+`tests/ShaderRecompilerComputeTests.cpp`, `0c2da1d`.
+
 ### BVH and FaultBuffer boundaries — PROVEN
 
 Fact: `--stub-bvh` always misses and is only a downstream-progression aid. `FaultBuffer` is a page-fault bitmap.
