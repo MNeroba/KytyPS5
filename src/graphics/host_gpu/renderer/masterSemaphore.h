@@ -33,18 +33,29 @@ public:
 	void Refresh();
 	void Wait(uint64_t tick);
 	void RecordSubmitDebug(uint64_t tick, uint32_t debug_op, uint64_t debug_submit, uint32_t arg0,
-	                       uint32_t arg1, uint32_t arg2, uint32_t arg3, uint64_t arg4);
+	                       uint32_t arg1, uint32_t arg2, uint32_t arg3, uint64_t arg4,
+	                       uint32_t last_non_eop_op, uint64_t last_non_eop_submit,
+	                       uint32_t last_non_eop_arg0, uint32_t last_non_eop_arg1,
+	                       uint32_t last_non_eop_arg2, uint32_t last_non_eop_arg3,
+	                       uint64_t last_non_eop_arg4);
 
 private:
 	struct SubmitDebugInfo {
-		uint64_t tick         = UINT64_MAX;
-		uint32_t debug_op     = 0;
-		uint64_t debug_submit = 0;
-		uint32_t arg0         = 0;
-		uint32_t arg1         = 0;
-		uint32_t arg2         = 0;
-		uint32_t arg3         = 0;
-		uint64_t arg4         = 0;
+		uint64_t tick                = UINT64_MAX;
+		uint32_t debug_op            = 0;
+		uint64_t debug_submit        = 0;
+		uint32_t arg0                = 0;
+		uint32_t arg1                = 0;
+		uint32_t arg2                = 0;
+		uint32_t arg3                = 0;
+		uint64_t arg4                = 0;
+		uint32_t last_non_eop_op     = UINT32_MAX;
+		uint64_t last_non_eop_submit = 0;
+		uint32_t last_non_eop_arg0   = 0;
+		uint32_t last_non_eop_arg1   = 0;
+		uint32_t last_non_eop_arg2   = 0;
+		uint32_t last_non_eop_arg3   = 0;
+		uint64_t last_non_eop_arg4   = 0;
 	};
 
 	void LogSubmitDebug(uint64_t tick) const;

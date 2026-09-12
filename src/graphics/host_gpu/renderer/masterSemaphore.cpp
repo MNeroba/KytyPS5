@@ -30,27 +30,48 @@ MasterSemaphore::~MasterSemaphore() {
 
 void MasterSemaphore::RecordSubmitDebug(uint64_t tick, uint32_t debug_op, uint64_t debug_submit,
                                         uint32_t arg0, uint32_t arg1, uint32_t arg2, uint32_t arg3,
-                                        uint64_t arg4) {
+                                        uint64_t arg4, uint32_t last_non_eop_op,
+                                        uint64_t last_non_eop_submit, uint32_t last_non_eop_arg0,
+                                        uint32_t last_non_eop_arg1, uint32_t last_non_eop_arg2,
+                                        uint32_t last_non_eop_arg3, uint64_t last_non_eop_arg4) {
 	std::lock_guard lock(m_submit_history_mutex);
-	auto&           record = m_submit_history[tick % SubmitHistorySize];
-	record.tick            = tick;
-	record.debug_op        = debug_op;
-	record.debug_submit    = debug_submit;
-	record.arg0            = arg0;
-	record.arg1            = arg1;
-	record.arg2            = arg2;
-	record.arg3            = arg3;
-	record.arg4            = arg4;
+	auto&           record     = m_submit_history[tick % SubmitHistorySize];
+	record.tick                = tick;
+	record.debug_op            = debug_op;
+	record.debug_submit        = debug_submit;
+	record.arg0                = arg0;
+	record.arg1                = arg1;
+	record.arg2                = arg2;
+	record.arg3                = arg3;
+	record.arg4                = arg4;
+	record.last_non_eop_op     = last_non_eop_op;
+	record.last_non_eop_submit = last_non_eop_submit;
+	record.last_non_eop_arg0   = last_non_eop_arg0;
+	record.last_non_eop_arg1   = last_non_eop_arg1;
+	record.last_non_eop_arg2   = last_non_eop_arg2;
+	record.last_non_eop_arg3   = last_non_eop_arg3;
+	record.last_non_eop_arg4   = last_non_eop_arg4;
 }
 
 void MasterSemaphore::LogSubmitDebug(uint64_t tick) const {
 	std::lock_guard lock(m_submit_history_mutex);
-	const auto&     record = m_submit_history[tick % SubmitHistorySize];
+	const auto      log_last_non_eop = [](const char* prefix, const auto& record) {
+		if (record.last_non_eop_op == UINT32_MAX) {
+			LOGF("%s metadata=missing\n", prefix);
+			return;
+		}
+		LOGF("%s op=%u submit=%" PRIu64 " args=%u,%u,%u,%u,0x%016" PRIx64 "\n", prefix,
+		     record.last_non_eop_op, record.last_non_eop_submit, record.last_non_eop_arg0,
+		     record.last_non_eop_arg1, record.last_non_eop_arg2, record.last_non_eop_arg3,
+		     record.last_non_eop_arg4);
+	};
+	const auto& record = m_submit_history[tick % SubmitHistorySize];
 	if (record.tick == tick) {
 		LOGF("wait failure submit: tick=%" PRIu64 " debug_op=%u debug_submit=%" PRIu64
 		     " args=%u,%u,%u,%u,0x%016" PRIx64 "\n",
 		     record.tick, record.debug_op, record.debug_submit, record.arg0, record.arg1,
 		     record.arg2, record.arg3, record.arg4);
+		log_last_non_eop("wait failure last non-EOP:", record);
 	} else {
 		LOGF("wait failure submit: tick=%" PRIu64 " metadata=missing\n", tick);
 	}
@@ -63,6 +84,7 @@ void MasterSemaphore::LogSubmitDebug(uint64_t tick) const {
 			     " args=%u,%u,%u,%u,0x%016" PRIx64 "\n",
 			     history.tick, history.debug_op, history.debug_submit, history.arg0, history.arg1,
 			     history.arg2, history.arg3, history.arg4);
+			log_last_non_eop("wait failure recent last non-EOP:", history);
 		}
 	}
 }

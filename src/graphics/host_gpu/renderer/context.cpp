@@ -30,7 +30,14 @@ vk::CommandBuffer CommandBuffer::Handle() const {
 
 void CommandBuffer::Begin() {
 	EXIT_IF(m_rendering || IsInvalid());
-	auto buffer = Handle();
+	m_last_non_eop_debug_op        = UINT32_MAX;
+	m_last_non_eop_debug_submit_id = 0;
+	m_last_non_eop_debug_arg0      = 0;
+	m_last_non_eop_debug_arg1      = 0;
+	m_last_non_eop_debug_arg2      = 0;
+	m_last_non_eop_debug_arg3      = 0;
+	m_last_non_eop_debug_arg4      = 0;
+	auto buffer                    = Handle();
 
 	vk::CommandBufferBeginInfo begin_info {};
 	begin_info.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit;
@@ -58,6 +65,17 @@ void CommandBuffer::SetDebugInfo(uint32_t op, uint64_t submit_id, uint32_t arg0,
 	m_debug_arg2      = arg2;
 	m_debug_arg3      = arg3;
 	m_debug_arg4      = arg4;
+	if (op == static_cast<uint32_t>(CommandBufferDebugOp::DispatchDirect) ||
+	    op == static_cast<uint32_t>(CommandBufferDebugOp::DrawIndex) ||
+	    op == static_cast<uint32_t>(CommandBufferDebugOp::DrawIndexAuto)) {
+		m_last_non_eop_debug_op        = op;
+		m_last_non_eop_debug_submit_id = submit_id;
+		m_last_non_eop_debug_arg0      = arg0;
+		m_last_non_eop_debug_arg1      = arg1;
+		m_last_non_eop_debug_arg2      = arg2;
+		m_last_non_eop_debug_arg3      = arg3;
+		m_last_non_eop_debug_arg4      = arg4;
+	}
 }
 
 void CommandBuffer::SetGpuCheckpoint(GpuCheckpointPhase phase) {

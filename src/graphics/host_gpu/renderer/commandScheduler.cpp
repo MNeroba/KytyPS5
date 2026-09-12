@@ -359,9 +359,11 @@ uint64_t CommandScheduler::Submit(SubmitInfo submit) {
 
 	vk::Result result;
 	uint64_t   tick;
-	const auto submit_begin = std::chrono::steady_clock::now();
-	const auto debug_op     = m_command.m_debug_op;
-	const auto debug_submit = m_command.m_debug_submit_id;
+	const auto submit_begin        = std::chrono::steady_clock::now();
+	const auto debug_op            = m_command.m_debug_op;
+	const auto debug_submit        = m_command.m_debug_submit_id;
+	const auto last_non_eop_op     = m_command.m_last_non_eop_debug_op;
+	const auto last_non_eop_submit = m_command.m_last_non_eop_debug_submit_id;
 	if (graphics_debug_dump_enabled()) {
 		LOGF("HostSubmit begin cmd=%p waits=%u signals=%u debug_op=%u debug_submit=%" PRIu64 "\n",
 		     static_cast<void*>(buffer), submit.num_wait_semaphores,
@@ -396,9 +398,12 @@ uint64_t CommandScheduler::Submit(SubmitInfo submit) {
 
 		result = graphics.queue.submit(1, &submit_info, nullptr);
 	}
-	m_master.RecordSubmitDebug(tick, debug_op, debug_submit, m_command.m_debug_arg0,
-	                           m_command.m_debug_arg1, m_command.m_debug_arg2,
-	                           m_command.m_debug_arg3, m_command.m_debug_arg4);
+	m_master.RecordSubmitDebug(
+	    tick, debug_op, debug_submit, m_command.m_debug_arg0, m_command.m_debug_arg1,
+	    m_command.m_debug_arg2, m_command.m_debug_arg3, m_command.m_debug_arg4, last_non_eop_op,
+	    last_non_eop_submit, m_command.m_last_non_eop_debug_arg0,
+	    m_command.m_last_non_eop_debug_arg1, m_command.m_last_non_eop_debug_arg2,
+	    m_command.m_last_non_eop_debug_arg3, m_command.m_last_non_eop_debug_arg4);
 
 	if (result != vk::Result::eSuccess) {
 		if (graphics.gpu_fault_diagnostics != nullptr) {
