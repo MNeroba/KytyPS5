@@ -8,8 +8,8 @@ This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable
 
 Repository/worktree: G:/KytyPS5/repo
 Branch: astro/materialize-resources
-Repository HEAD at this checkpoint: `235c800` (`docs: record GPU fault diagnostic checkpoint`)
-Current source HEAD: 624fb5d657b23ac2bece3e5448b88b1f97fa580a (`diag: capture Vulkan device-loss provenance`)
+Repository HEAD at this checkpoint: `50bb5ad` (`diag: preserve GPU fault batches and partial vendor data`)
+Current source HEAD: 50bb5ad (`diag: preserve GPU fault batches and partial vendor data`)
 Last ASTRO runtime source HEAD: 624fb5d657b23ac2bece3e5448b88b1f97fa580a
 Runtime source HEAD at launch: 624fb5d657b23ac2bece3e5448b88b1f97fa580a
 Working tree before this checkpoint: clean at `624fb5d`; local install tree was refreshed from this build
@@ -278,3 +278,16 @@ test machine; it does not classify the separate post-M5 `ErrorDeviceLost (-4)` c
 Next action: preserve this run and return to static evidence for the existing device-loss P0.
 Do not start a second ASTRO run in this checkpoint and do not change shader, resource, sync, or
 render semantics.
+
+## GPU fault diagnostic ownership correction — 2026-09-12
+
+Source commit `50bb5ad` moves `CommitSubmit(tick, markers)` to immediately after timeline-tick
+allocation and before `vkQueueSubmit`, preserving checkpoint pointers when submission fails or
+device-loss reporting runs before normal post-submit bookkeeping. `DumpDeviceFault` now keeps
+the advertised vendor-binary size, passes the capped allocated capacity through
+`VkDeviceFaultCountsEXT` for the second query, and treats `VK_INCOMPLETE` as partial evidence
+while still logging returned address/vendor records. No ASTRO run was performed for this
+diagnostic correction.
+
+Focused validation artifacts: `G:/KytyPS5/logs/GPU_FAULT_DIAG_FIX_20260912_scheduler-only-fresh.log`
+and `G:/KytyPS5/logs/GPU_FAULT_DIAG_FIX_20260912_full-tests-fresh.log`; both exit code 0.

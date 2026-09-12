@@ -350,3 +350,17 @@ boundary, so it produced no fault/checkpoint payload and does not classify the s
 
 RELATED CODE/COMMIT: `src/graphics/host_gpu/graphicContext.cpp`,
 `src/graphics/host_gpu/renderer/gpuFaultDiagnostics.{h,cpp}`, commit `624fb5d`.
+
+### Fault-diagnostic ownership and partial results — PROVEN
+
+FACT: Checkpoint batches are retained as soon as a submission receives its timeline tick and
+before `vkQueueSubmit`; fault collection keeps the original vendor-binary size separately,
+passes the allocated capacity on the second query, and preserves address/vendor records when
+the driver returns `VK_INCOMPLETE`.
+
+WHY IT MATTERS: A submit or asynchronous device-loss failure can now resolve its last command
+markers without exposing a short vendor buffer to the Vulkan driver. This changes diagnostics
+only; failed Vulkan results are still fatal and are never retried or ignored.
+
+EVIDENCE: `gpuFaultDiagnostics.cpp`, `commandScheduler.cpp`, semantic diagnostic commit
+`50bb5ad`; scheduler-only and full `shader_recompiler_compute_tests` both exited 0.

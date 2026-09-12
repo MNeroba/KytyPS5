@@ -192,4 +192,8 @@ boundary. Fault data is driver evidence, while checkpoint pointers are only mean
 corresponding marker remains retained from command recording through submit and timeline
 retirement. Validate marker magic/version before decoding and treat an unknown pointer as
 untrusted. These diagnostics must not retry, suppress, or otherwise alter the failed Vulkan
-operation.
+operation. The submit path registers the current marker batch immediately after assigning its
+timeline tick and before `vkQueueSubmit`, so a submit failure can still resolve the checkpoint
+pointer. For `vkGetDeviceFaultInfoEXT`, preserve the driver's advertised `vendorBinarySize`,
+set the second-query count to the actual allocated capacity, and treat `VK_INCOMPLETE` as
+partial evidence while still emitting the address and vendor records returned by the driver.
