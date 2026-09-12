@@ -8,7 +8,7 @@ This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable
 
 Repository/worktree: G:/KytyPS5/repo
 Branch: astro/materialize-resources
-Repository HEAD at this checkpoint: `2a51379` (`shader: support conditional debug system branches`)
+Repository HEAD at this checkpoint: `c355ca3` (`docs: record post-CDBGSYS runtime boundary`)
 Current source HEAD: `2a51379` (`shader: support conditional debug system branches`)
 Last ASTRO runtime source HEAD: `2a5137991b23b6a91371eaf8b03ec10c6c7c7228`
 Runtime source HEAD at launch: `2a5137991b23b6a91371eaf8b03ec10c6c7c7228`
