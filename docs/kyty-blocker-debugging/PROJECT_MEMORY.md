@@ -559,3 +559,25 @@ before that dispatch. No device-loss, BDA, or resource causal claim follows from
 
 RELATED CODE/COMMIT: `AgcCreateShader`, `ShaderMapUserData`, and
 `RenderExecutor::DispatchDirect`; diagnostic source was temporary and reverted.
+
+### Target dispatch provenance and non-causal success — PROVEN
+
+FACT: In the active dispatch path, guest code address `0x000000050052a400` maps to CS hash
+`0x657ad04626bf9d55` for a `4096x1x1` dispatch. In the bounded capture, that dispatch was
+submitted as `debug_submit=6683` at timeline tick `353333`; its submit and waits completed
+successfully, and the same submit stream continued through tick `353496`.
+
+WHY IT MATTERS: The address/hash pair is a valid lead from the earlier fault run, but a successful
+production dispatch with the same target path means the shader or dispatch alone is not proven to
+be the deterministic cause of `VK_ERROR_DEVICE_LOST`. Keep the P0 at the asynchronous device-loss
+boundary and require a concrete lifetime, range, synchronization, or GPU fault correlation before
+changing semantics.
+
+EVIDENCE: `G:/KytyPS5/logs/ASTRO_DEVICE_LOSS_DISPATCH_20260912_2022/analysis.txt` and its
+`runtime.log`; the fault comparison is
+`G:/KytyPS5/logs/ASTRO_NON_EOP_DIAG_20260912_1340/runtime.log`, where submit `6256` (ticks
+`329214`/`329237`) returned `ErrorDeviceLost`. The target after-rebind snapshot recorded a 512 MiB
+page table, an 8 MiB fault buffer, and live non-null host buffers with valid BDAs.
+
+RELATED CODE/COMMIT: temporary trace in `renderCompute.cpp` (reverted); submit/wait ownership in
+`commandScheduler.cpp` and `masterSemaphore.cpp`; documentation checkpoint `f522eba`.

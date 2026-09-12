@@ -1,6 +1,6 @@
 # Current KytyPS5 debugging state
 
-Last reconciled: 2026-09-12 20:10 Europe/Riga
+Last reconciled: 2026-09-12 20:24 Europe/Riga
 
 This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable mechanisms live in REFERENCE.md.
 
@@ -8,11 +8,11 @@ This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable
 
 Repository/worktree: G:/KytyPS5/repo
 Branch: astro/materialize-resources
-Repository HEAD at the start of this checkpoint: `5191c74ab1507a32f83b451307120fb219cf163f` (`docs: record BDA initialization runtime checkpoint`)
-Current semantic source HEAD: `0c2da1d11537e2f24f1a34593f38d8ec8b4f634e` (documentation-only commits follow)
-Last ASTRO runtime source HEAD: `5191c74ab1507a32f83b451307120fb219cf163f` with temporary dispatch-state diagnostics
-Runtime source HEAD at launch: `5191c74ab1507a32f83b451307120fb219cf163f` (diagnostic working tree; source trace was reverted afterward)
-Working tree at the start of this checkpoint: clean at `5191c74`
+Repository HEAD at the start of this checkpoint: `f522eba136e22e42368383bb1acd9e22c7a40131` (`docs: record unresolved dispatch-state correlation`)
+Current semantic source HEAD: `f522eba136e22e42368383bb1acd9e22c7a40131` (documentation-only commits follow)
+Last ASTRO runtime source HEAD: `f522eba136e22e42368383bb1acd9e22c7a40131` with temporary dispatch-state diagnostics
+Runtime source HEAD at launch: `f522eba136e22e42368383bb1acd9e22c7a40131` (diagnostic working tree; source trace was reverted afterward)
+Working tree at the start of this checkpoint: clean at `f522eba`
 Build: Release, CMake/Ninja, clang-cl, clang-lld_link-64
 Executable: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.exe
 Executable SHA-256: `8326FBF6AC6426763BAE5BBBD33B2753273EC0C44347B1B03C52CAEF6F821E90`
@@ -32,11 +32,42 @@ Current milestone: M5 main menu — reached in the validated title-screen progre
 Next milestone: M6 gameplay
 Current P0: `VK_ERROR_DEVICE_LOST` (`-4`) returned by `vkDevice.waitSemaphores` in `MasterSemaphore::Wait` at `masterSemaphore.cpp:149`
 P0 class: host Vulkan/device-loss wait boundary after successful shader emission and pipeline/submit progress
-Last validated progress signal: post-fix ASTRO emitted CS `0x657ad04626bf9d55` with 124012 SPIR-V words and reached 40 CS / 22 PS / 14 VS / 1 GS before the device-loss wait
+Last validated progress signal: active dispatch mapping for CS `0x657ad04626bf9d55` at submit `6683`/tick `353333` completed submit and waits successfully; that submit stream continued through tick `353496`. The separate fault run remains submit `6256`.
 Known P1 likely blockers: incorrect color/output interpretation remains P1 and is not a current fix target
 Known P2: cold-start large dispatcher pipeline compilation latency; successful creates are not a hang. Cache persistence/load is proven, but a substantial warm-time reduction is not.
 
 M1, M2, M3, M4, and M5 are closed/reached. M6 gameplay is not proven. Do not reopen the cleared startup SRT/BDA-lifetime, pipeline-create, submission, visible-frame, bounded resource-remap, scalar-PHI materialization, or TTMP scalar-source conclusions without contradictory evidence.
+
+## Submit 6683 correlation checkpoint — 2026-09-12
+
+Run/artifact: `G:/KytyPS5/logs/ASTRO_DEVICE_LOSS_DISPATCH_20260912_2022/`. The temporary
+bounded trace was launched from source HEAD `f522eba136e22e42368383bb1acd9e22c7a40131`;
+its exact build hashes and command are in `provenance.txt` and `command.txt`. The trace was
+reverted afterward, and the installed executable/PDB were restored to the clean hashes recorded
+above.
+
+The target guest address `0x000000050052a400` is now proven, in the active dispatch path, to map
+to CS `0x657ad04626bf9d55` with groups `4096x1x1`. Its `after_cmd_dispatch` marker precedes
+`HostSubmit done ... tick=353333 result=Success`; the corresponding wait began with
+`known=353332 current=353334` and completed successfully in 26 ms. Submits carrying
+`debug_submit=6683` continued through tick `353496`; the latest observed wait (tick `353490`)
+also completed successfully.
+
+This capture contains no `ErrorDeviceLost`, `GPU_DEVICE_FAULT`, or `GPU_CHECKPOINT` record. It
+ended with wrapper status `321` (`0x141`) at the known decoder baseline
+(`ShaderDecoder.cpp:388`), without a new crash dump or clean-shutdown record. The target
+after-rebind snapshot shows the expected 512 MiB page table and 8 MiB fault buffer; every
+non-null target host buffer was live (`deleted=false`) with a valid BDA.
+
+Therefore submit `6683`/tick `353333` is not on the failing device-loss chain in this run. The
+prior fault artifact still records `ErrorDeviceLost` on submit `6256` (ticks `329214` and
+`329237`) with the same guest address, so the address/shader remains a causal lead, but this
+successful dispatch path disproves a deterministic target-dispatch-only cause. No new ASTRO run,
+address-binding report, or semantic change is justified until static evidence identifies a
+specific missing lifetime/range/synchronization fact.
+
+The bounded comparison is preserved in
+`G:/KytyPS5/logs/ASTRO_DEVICE_LOSS_DISPATCH_20260912_2022/analysis.txt`.
 
 ## Latest device-loss diagnostic checkpoint — 2026-09-12
 
