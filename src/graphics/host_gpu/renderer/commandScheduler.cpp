@@ -371,6 +371,12 @@ uint64_t CommandScheduler::Submit(SubmitInfo submit) {
 		Common::LockGuard lock(graphics.queue_mutex);
 		tick = m_master.NextTick();
 		submit.AddSignal(m_master.Handle(), tick);
+		// Register the batch before vkQueueSubmit.  A failed submit or an
+		// asynchronous device loss may trigger diagnostics before the submit
+		// path reaches its normal post-submit bookkeeping.
+		if (graphics.gpu_fault_diagnostics != nullptr) {
+			graphics.gpu_fault_diagnostics->CommitSubmit(tick, std::move(checkpoint_markers));
+		}
 
 		vk::TimelineSemaphoreSubmitInfo timeline_info {};
 		timeline_info.waitSemaphoreValueCount   = submit.num_wait_semaphores;
@@ -413,9 +419,6 @@ uint64_t CommandScheduler::Submit(SubmitInfo submit) {
 		     debug_op, debug_submit);
 	}
 	EXIT_NOT_IMPLEMENTED(result != vk::Result::eSuccess);
-	if (graphics.gpu_fault_diagnostics != nullptr) {
-		graphics.gpu_fault_diagnostics->CommitSubmit(tick, std::move(checkpoint_markers));
-	}
 
 	m_command.m_buffer = nullptr;
 	return tick;

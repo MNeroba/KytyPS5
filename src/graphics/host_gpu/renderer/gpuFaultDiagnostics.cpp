@@ -92,7 +92,7 @@ void GpuFaultDiagnostics::DumpDeviceFault(const char* source, uint64_t tick) {
 	vk::DeviceFaultCountsEXT counts {};
 	counts.sType            = vk::StructureType::eDeviceFaultCountsEXT;
 	const auto count_result = m_graphics->device.getFaultInfoEXT(&counts, nullptr);
-	if (count_result != vk::Result::eSuccess) {
+	if (count_result != vk::Result::eSuccess && count_result != vk::Result::eIncomplete) {
 		LOGF("GPU_DEVICE_FAULT source=%s tick=%" PRIu64 " query_result=%s (%d)\n", source, tick,
 		     vk::to_string(count_result).c_str(), static_cast<int>(count_result));
 		return;
@@ -101,8 +101,13 @@ void GpuFaultDiagnostics::DumpDeviceFault(const char* source, uint64_t tick) {
 	std::vector<vk::DeviceFaultAddressInfoEXT> addresses(counts.addressInfoCount);
 	std::vector<vk::DeviceFaultVendorInfoEXT>  vendors(counts.vendorInfoCount);
 	const auto                                 max_binary = vk::DeviceSize {16u * 1024u * 1024u};
-	const auto             binary_size = std::min(counts.vendorBinarySize, max_binary);
-	std::vector<uint8_t>   binary(static_cast<size_t>(binary_size));
+	const auto                                 advertised_binary_size = counts.vendorBinarySize;
+	const auto binary_capacity = std::min(advertised_binary_size, max_binary);
+	// vendorBinarySize is an input capacity on the second query.  Keep the
+	// driver's advertised size separately, but pass the actual allocation size
+	// so pVendorBinaryData satisfies the Vulkan pointer/length contract.
+	counts.vendorBinarySize = binary_capacity;
+	std::vector<uint8_t>   binary(static_cast<size_t>(binary_capacity));
 	vk::DeviceFaultInfoEXT info {};
 	info.sType             = vk::StructureType::eDeviceFaultInfoEXT;
 	info.pAddressInfos     = addresses.empty() ? nullptr : addresses.data();
@@ -110,15 +115,20 @@ void GpuFaultDiagnostics::DumpDeviceFault(const char* source, uint64_t tick) {
 	info.pVendorBinaryData = binary.empty() ? nullptr : binary.data();
 	const auto info_result = m_graphics->device.getFaultInfoEXT(&counts, &info);
 	LOGF("GPU_DEVICE_FAULT\nsource=%s\ntick=%" PRIu64 "\ndescription=\"%s\"\n"
-	     "address_count=%u\nvendor_count=%u\nvendor_binary_size=%" PRIu64
-	     " vendor_binary_available=%s\n",
+	     "address_count=%u\nvendor_count=%u\nvendor_binary_size_advertised=%" PRIu64
+	     "\nvendor_binary_capacity=%" PRIu64 "\nvendor_binary_available=%s\n"
+	     "count_result=%s (%d)\n",
 	     source, tick, info.description.data(), counts.addressInfoCount, counts.vendorInfoCount,
-	     static_cast<uint64_t>(counts.vendorBinarySize), binary.empty() ? "false" : "true");
-	if (info_result != vk::Result::eSuccess) {
+	     static_cast<uint64_t>(advertised_binary_size), static_cast<uint64_t>(binary_capacity),
+	     binary.empty() ? "false" : "true", vk::to_string(count_result).c_str(),
+	     static_cast<int>(count_result));
+	if (info_result != vk::Result::eSuccess && info_result != vk::Result::eIncomplete) {
 		LOGF("GPU_DEVICE_FAULT info_result=%s (%d)\n", vk::to_string(info_result).c_str(),
 		     static_cast<int>(info_result));
 		return;
 	}
+	LOGF("GPU_DEVICE_FAULT info_result=%s (%d) partial=%s\n", vk::to_string(info_result).c_str(),
+	     static_cast<int>(info_result), info_result == vk::Result::eIncomplete ? "true" : "false");
 	for (uint32_t i = 0; i < counts.addressInfoCount; ++i) {
 		const auto& address = addresses[i];
 		LOGF("address[%u]: type=%u address=0x%016" PRIx64 " precision=0x%016" PRIx64 "\n", i,
