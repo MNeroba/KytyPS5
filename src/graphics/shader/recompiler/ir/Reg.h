@@ -7,8 +7,11 @@ namespace Libs::Graphics::ShaderRecompiler::IR {
 enum class ScalarReg : uint16_t {};
 enum class VectorReg : uint16_t {};
 
-constexpr uint32_t NumScalarRegs = 106;
-constexpr uint32_t NumVectorRegs = 256;
+constexpr uint32_t NumScalarRegs      = 106;
+constexpr uint32_t TtmpBase           = NumScalarRegs;
+constexpr uint32_t NumTtmpRegs        = 16;
+constexpr uint32_t NumScalarStateRegs = TtmpBase + NumTtmpRegs;
+constexpr uint32_t NumVectorRegs      = 256;
 
 constexpr uint32_t RegIndex(ScalarReg reg) {
 	return static_cast<uint32_t>(reg);

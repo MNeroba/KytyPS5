@@ -1696,6 +1696,34 @@ void TestNewShaderRecompilerSoppCdbgSys() {
   CheckSpirvBinaryValidates(result.spirv);
 }
 
+void TestNewShaderRecompilerTtmpOperands() {
+  // RDNA2 scalar source code 0x73 names TTMP7.  Keep both source and
+  // destination forms here because trap temporaries use a separate register
+  // namespace from ordinary SGPRs.
+  const uint32_t shader[] = {
+      EncodeSMovB32(0, 0x73),      // s_mov_b32 s0, ttmp7
+      EncodeSMovB32(0x73, 129),    // s_mov_b32 ttmp7, 1
+      EncodeSMovB32(1, 0x73),      // s_mov_b32 s1, ttmp7
+      EncodeSopp(0x01),            // s_endpgm
+  };
+
+  ShaderRecompiler::Decoder::Program decoded;
+  ShaderRecompiler::Decoder::DecodeProgram(shader, decoded);
+  Check(Common::ContainsStr(ShaderRecompiler::Decoder::ProgramToString(decoded),
+                            "S_MOV_B32 s0, ttmp7") &&
+            Common::ContainsStr(ShaderRecompiler::Decoder::ProgramToString(decoded),
+                               "S_MOV_B32 ttmp7, 1") &&
+            Common::ContainsStr(ShaderRecompiler::Decoder::ProgramToString(decoded),
+                               "S_MOV_B32 s1, ttmp7"),
+        "RDNA2 TTMP7 operands were not decoded in their trap-temp namespace");
+
+  auto options = MakeCompileOptions(ShaderType::Compute);
+  options.dump_ir = true;
+  const auto result = RecompileForTest(shader, options);
+  Check(!result.spirv.empty(), "TTMP operand shader produced no SPIR-V");
+  CheckSpirvBinaryValidates(result.spirv);
+}
+
 void TestNewShaderRecompilerSopkWaitcntMarkers() {
   const uint32_t shader[] = {
       EncodeSopk(0x17, 125, 0xffff), // s_waitcnt_vscnt null, 0xffff
@@ -12894,6 +12922,7 @@ int main() {
   // here.
   TestNewShaderDecoderArchitecture();
   TestNewShaderRecompilerSoppCdbgSys();
+  TestNewShaderRecompilerTtmpOperands();
   TestImageAddressOperands();
   TestSopkCompareImmediateExtension();
   TestNewShaderRecompilerCapturedVopcSdwaCmpxClass();

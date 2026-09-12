@@ -9,6 +9,21 @@
 
 namespace Libs::Graphics::ShaderRecompiler::Frontend {
 
+bool Translator::IsScalarRegister(const Decoder::Operand& operand) const {
+	return operand.kind == Decoder::OperandKind::Sgpr || operand.kind == Decoder::OperandKind::Ttmp;
+}
+
+IR::ScalarReg Translator::ScalarRegister(const Decoder::Operand& operand) const {
+	if (operand.kind == Decoder::OperandKind::Sgpr) {
+		return static_cast<IR::ScalarReg>(operand.reg);
+	}
+	if (operand.kind == Decoder::OperandKind::Ttmp) {
+		return static_cast<IR::ScalarReg>(IR::TtmpBase + operand.reg);
+	}
+	EXIT("decoded operand is not a scalar register");
+	return static_cast<IR::ScalarReg>(0);
+}
+
 const Decoder::Operand& Translator::SourceAt(const Decoder::Instruction& inst, uint32_t index) {
 	switch (index) {
 		case 0: return inst.src0;
@@ -48,6 +63,10 @@ Decoder::Operand Translator::OffsetOperand(const Decoder::Operand& operand, uint
 	switch (result.kind) {
 		case Decoder::OperandKind::Sgpr:
 		case Decoder::OperandKind::Vgpr: result.reg += offset; break;
+		case Decoder::OperandKind::Ttmp:
+			EXIT_IF(result.reg + offset >= IR::NumTtmpRegs);
+			result.reg += offset;
+			break;
 		case Decoder::OperandKind::VccLo:
 			EXIT_IF(offset != 1u);
 			result.kind = Decoder::OperandKind::VccHi;
@@ -68,6 +87,7 @@ Decoder::Operand Translator::ScalarDestinationOperand(const Decoder::Operand& op
 	uint32_t code = 0;
 	switch (operand.kind) {
 		case Decoder::OperandKind::Sgpr: code = operand.reg; break;
+		case Decoder::OperandKind::Ttmp: code = 108u + operand.reg; break;
 		case Decoder::OperandKind::VccLo: code = 106u; break;
 		case Decoder::OperandKind::VccHi: code = 107u; break;
 		default: EXIT("invalid scalar-memory destination");
@@ -77,6 +97,9 @@ Decoder::Operand Translator::ScalarDestinationOperand(const Decoder::Operand& op
 	if (code < 106u) {
 		result.kind = Decoder::OperandKind::Sgpr;
 		result.reg  = code;
+	} else if (code >= 108u && code <= 123u) {
+		result.kind = Decoder::OperandKind::Ttmp;
+		result.reg  = code - 108u;
 	} else {
 		switch (code) {
 			case 106u: result.kind = Decoder::OperandKind::VccLo; break;
@@ -123,7 +146,7 @@ IR::U32 Translator::ReadRawU32(const Decoder::Operand& operand) {
 		case Decoder::OperandKind::Null:
 		case Decoder::OperandKind::PopsExitingWaveId: return IR::U32(IR::Value(0u));
 		case Decoder::OperandKind::Sgpr:
-			return ir.GetScalarReg(static_cast<IR::ScalarReg>(operand.reg));
+		case Decoder::OperandKind::Ttmp: return ir.GetScalarReg(ScalarRegister(operand));
 		case Decoder::OperandKind::Vgpr:
 			return ir.GetVectorReg(static_cast<IR::VectorReg>(operand.reg));
 		case Decoder::OperandKind::VccLo: return ir.GetVccLo();
@@ -151,6 +174,9 @@ IR::U32 Translator::ReadRawU32(const Decoder::Operand& operand) {
 IR::U32 Translator::ReadScalarCode(uint32_t code) {
 	if (code < 106u) {
 		return ir.GetScalarReg(static_cast<IR::ScalarReg>(code));
+	}
+	if (code >= 108u && code <= 123u) {
+		return ir.GetScalarReg(static_cast<IR::ScalarReg>(IR::TtmpBase + code - 108u));
 	}
 	switch (code) {
 		case 106u: return ir.GetVccLo();
@@ -287,13 +313,18 @@ void Translator::WriteRawU32(const Decoder::Operand& operand, IR::U32 value) {
 		}
 	}
 	switch (operand.kind) {
-		case Decoder::OperandKind::Sgpr: {
-			const auto reg = static_cast<IR::ScalarReg>(operand.reg);
+		case Decoder::OperandKind::Sgpr:
+		case Decoder::OperandKind::Ttmp: {
+			const auto reg = ScalarRegister(operand);
 			ir.SetScalarReg(reg, value);
 			ir.SetScalarMaskTag(reg, IR::U1(IR::Value(false)));
-			if (IR::RegIndex(reg) > 0u) {
-				ir.SetScalarMaskTag(static_cast<IR::ScalarReg>(IR::RegIndex(reg) - 1u),
-				                    IR::U1(IR::Value(false)));
+			if ((operand.kind == Decoder::OperandKind::Sgpr && operand.reg > 0u) ||
+			    (operand.kind == Decoder::OperandKind::Ttmp && operand.reg > 0u)) {
+				const auto previous =
+				    operand.kind == Decoder::OperandKind::Sgpr
+				        ? static_cast<IR::ScalarReg>(operand.reg - 1u)
+				        : static_cast<IR::ScalarReg>(IR::TtmpBase + operand.reg - 1u);
+				ir.SetScalarMaskTag(previous, IR::U1(IR::Value(false)));
 			}
 			break;
 		}
@@ -463,7 +494,8 @@ std::array<IR::U32, 2> Translator::ReadU32Pair(const Decoder::Operand& operand) 
 	}
 	const auto low = ApplyBitSourceModifiers(operand, ReadRawU32(operand));
 	IR::U32    high(IR::Value(0u));
-	if (operand.kind == Decoder::OperandKind::Sgpr || operand.kind == Decoder::OperandKind::Vgpr) {
+	if (operand.kind == Decoder::OperandKind::Sgpr || operand.kind == Decoder::OperandKind::Ttmp ||
+	    operand.kind == Decoder::OperandKind::Vgpr) {
 		high = ReadRawU32(OffsetOperand(operand, 1));
 	} else if (operand.kind == Decoder::OperandKind::IntegerInlineConstant &&
 	           operand.signed_val < 0) {
@@ -593,7 +625,8 @@ void Translator::WriteU32Pair(const Decoder::Operand&       operand,
 			ir.SetVccLo(value[0]);
 			ir.SetVccHi(value[1]);
 			return;
-		case Decoder::OperandKind::Sgpr: break;
+		case Decoder::OperandKind::Sgpr:
+		case Decoder::OperandKind::Ttmp: break;
 		default: break;
 	}
 	WriteRawU32(operand, value[0]);
@@ -621,8 +654,9 @@ IR::U1 Translator::ReadMask(const Decoder::Operand& operand) {
 		return ThreadBit(ReadU32Pair(operand));
 	}
 	switch (operand.kind) {
-		case Decoder::OperandKind::Sgpr: {
-			const auto reg  = static_cast<IR::ScalarReg>(operand.reg);
+		case Decoder::OperandKind::Sgpr:
+		case Decoder::OperandKind::Ttmp: {
+			const auto reg  = ScalarRegister(operand);
 			const auto mask = program.wave_size == 64u
 			                      ? ReadU32Pair(operand)
 			                      : std::array {ReadRawU32(operand), IR::U32(IR::Value(0u))};
@@ -663,7 +697,7 @@ IR::U1 Translator::ReadMaskValid(const Decoder::Operand& operand) {
 		case Decoder::OperandKind::Null:
 		case Decoder::OperandKind::PopsExitingWaveId: return IR::U1(IR::Value(true));
 		case Decoder::OperandKind::Sgpr:
-			return ir.GetScalarMaskTag(static_cast<IR::ScalarReg>(operand.reg));
+		case Decoder::OperandKind::Ttmp: return ir.GetScalarMaskTag(ScalarRegister(operand));
 		case Decoder::OperandKind::ExecLo:
 		case Decoder::OperandKind::ExecHi:
 		case Decoder::OperandKind::VccLo:
@@ -679,18 +713,25 @@ std::array<IR::U32, 2> Translator::WriteMask(const Decoder::Operand& operand, IR
                                              bool write_64) {
 	const auto mask = BallotMask(value);
 	switch (operand.kind) {
-		case Decoder::OperandKind::Sgpr: {
-			const auto reg = static_cast<IR::ScalarReg>(operand.reg);
+		case Decoder::OperandKind::Sgpr:
+		case Decoder::OperandKind::Ttmp: {
+			const auto reg = ScalarRegister(operand);
 			ir.SetThreadBitScalarReg(reg, value);
 			ir.SetScalarMaskTag(reg, IR::U1(IR::Value(true)));
-			if (IR::RegIndex(reg) > 0u) {
-				ir.SetScalarMaskTag(static_cast<IR::ScalarReg>(IR::RegIndex(reg) - 1u),
-				                    IR::U1(IR::Value(false)));
+			if ((operand.kind == Decoder::OperandKind::Sgpr && operand.reg > 0u) ||
+			    (operand.kind == Decoder::OperandKind::Ttmp && operand.reg > 0u)) {
+				const auto previous =
+				    operand.kind == Decoder::OperandKind::Sgpr
+				        ? static_cast<IR::ScalarReg>(operand.reg - 1u)
+				        : static_cast<IR::ScalarReg>(IR::TtmpBase + operand.reg - 1u);
+				ir.SetScalarMaskTag(previous, IR::U1(IR::Value(false)));
 			}
 			ir.SetScalarReg(reg, mask[0]);
 			// A wave32 VALU mask destination must not overwrite the neighboring SGPR.
-			if ((write_64 || program.wave_size == 64u) &&
-			    IR::RegIndex(reg) + 1u < IR::NumScalarRegs) {
+			const auto register_limit = operand.kind == Decoder::OperandKind::Ttmp
+			                                ? IR::NumScalarStateRegs
+			                                : IR::NumScalarRegs;
+			if ((write_64 || program.wave_size == 64u) && IR::RegIndex(reg) + 1u < register_limit) {
 				const auto high = static_cast<IR::ScalarReg>(IR::RegIndex(reg) + 1u);
 				ir.SetScalarReg(high, mask[1]);
 				ir.SetThreadBitScalarReg(high, IR::U1(IR::Value(false)));

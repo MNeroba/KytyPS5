@@ -245,6 +245,11 @@ void DecodeScalarSource(uint32_t code, uint32_t pc, Operand& operand) {
 		return;
 	}
 
+	if (code >= 108u && code <= 123u) {
+		operand.kind = OperandKind::Ttmp;
+		operand.reg  = code - 108u;
+		return;
+	}
 	switch (code) {
 		case 106u: operand.kind = OperandKind::VccLo; return;
 		case 107u: operand.kind = OperandKind::VccHi; return;
@@ -274,6 +279,11 @@ void DecodeScalarDestination(uint32_t code, uint32_t pc, Operand& operand) {
 		return;
 	}
 
+	if (code >= 108u && code <= 123u) {
+		operand.kind = OperandKind::Ttmp;
+		operand.reg  = code - 108u;
+		return;
+	}
 	switch (code) {
 		case 106u: operand.kind = OperandKind::VccLo; return;
 		case 107u: operand.kind = OperandKind::VccHi; return;
@@ -419,6 +429,7 @@ std::string OperandToString(const Operand& operand) {
 			text = fmt::format("{:f}", std::bit_cast<float>(operand.value));
 			break;
 		case OperandKind::Sgpr: text = fmt::format("s{}", operand.reg); break;
+		case OperandKind::Ttmp: text = fmt::format("ttmp{}", operand.reg); break;
 		case OperandKind::Vgpr: text = fmt::format("v{}", operand.reg); break;
 		case OperandKind::VccLo: text = "vcc_lo"; break;
 		case OperandKind::VccHi: text = "vcc_hi"; break;

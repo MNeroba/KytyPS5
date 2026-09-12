@@ -94,6 +94,7 @@ bool IsRegister(const Decoder::Operand& operand, Decoder::OperandKind kind, uint
 bool ScalarOperandCode(const Decoder::Operand& operand, uint32_t& code) {
 	switch (operand.kind) {
 		case Decoder::OperandKind::Sgpr: code = operand.reg; return true;
+		case Decoder::OperandKind::Ttmp: code = 108u + operand.reg; return true;
 		case Decoder::OperandKind::VccLo: code = 106u; return true;
 		case Decoder::OperandKind::VccHi: code = 107u; return true;
 		case Decoder::OperandKind::M0: code = 124u; return true;

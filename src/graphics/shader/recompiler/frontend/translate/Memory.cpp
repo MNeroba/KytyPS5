@@ -1,7 +1,6 @@
-#include "graphics/shader/recompiler/frontend/translate/Translator.h"
-#include "graphics/shader/recompiler/frontend/decode/ImageOps.h"
-
 #include "common/logging/log.h"
+#include "graphics/shader/recompiler/frontend/decode/ImageOps.h"
+#include "graphics/shader/recompiler/frontend/translate/Translator.h"
 
 #include <algorithm>
 #include <array>
@@ -43,7 +42,11 @@ Decoder::Operand OffsetDecodedRegister(const Decoder::Operand& operand, uint32_t
 	result.dpp_fetch_inactive = false;
 	result.dpp_bound_ctrl     = false;
 	result.dpp                = false;
-	if (result.kind == Decoder::OperandKind::Vgpr || result.kind == Decoder::OperandKind::Sgpr) {
+	if (result.kind == Decoder::OperandKind::Vgpr || result.kind == Decoder::OperandKind::Sgpr ||
+	    result.kind == Decoder::OperandKind::Ttmp) {
+		if (result.kind == Decoder::OperandKind::Ttmp) {
+			EXIT_IF(result.reg + index >= IR::NumTtmpRegs);
+		}
 		result.reg += index;
 	}
 	return result;
@@ -89,7 +92,7 @@ ResourceKind MemoryKind(const Decoder::Instruction& decoded) {
 	switch (decoded.family) {
 		case Decoder::Family::SMEM:
 			return IsScalarAddressLoad(decoded.opcode) ? ResourceKind::ScalarAddress
-			                                          : ResourceKind::ScalarBuffer;
+			                                           : ResourceKind::ScalarBuffer;
 		case Decoder::Family::MUBUF:
 		case Decoder::Family::MTBUF: return ResourceKind::Buffer;
 		case Decoder::Family::FLAT: return FlatSegmentResourceKind(decoded.memory_segment);
@@ -154,7 +157,6 @@ IR::MemoryInfo MemoryInfoFromDecoded(const Decoder::Instruction& decoded) {
 	}
 	return memory;
 }
-
 
 bool IsScalarBufferLoad(Decoder::Opcode opcode) {
 	switch (opcode) {
@@ -297,8 +299,7 @@ Translator::AddressOperands Translator::ReadAddressOperands(const Decoder::Instr
 		    high_or_base.kind != Decoder::OperandKind::Vgpr ? ReadU32(high_or_base) : low;
 		return {ir.Emit(IR::ValueOpcode::GetScratchResource), offset, IR::Value(0u)};
 	}
-	if (kind == IR::ResourceKind::Global &&
-	    high_or_base.kind != Decoder::OperandKind::Vgpr) {
+	if (kind == IR::ResourceKind::Global && high_or_base.kind != Decoder::OperandKind::Vgpr) {
 		const auto base_low  = ReadU32(high_or_base);
 		const auto base_high = ReadU32(OffsetOperand(high_or_base, 1u));
 		return {GetAddressResource(base_low, base_high), low, IR::Value(0u)};
@@ -536,10 +537,9 @@ bool Translator::BUFFER_ATOMIC(const Decoder::Instruction& inst, IR::ValueOpcode
 	} else {
 		const IR::Value value =
 		    memory.data_dwords == 2u ? IR::Value(ReadU64(data_src)) : IR::Value(ReadU32(data_src));
-		result = ir.Emit(opcode,
-		                 {resource, address.index, address.offset, address.soffset, value,
-		                  ir.GetExec()},
-		                 flags);
+		result = ir.Emit(
+		    opcode, {resource, address.index, address.offset, address.soffset, value, ir.GetExec()},
+		    flags);
 	}
 	if (inst.glc) {
 		WriteOperand(inst.dst, result);

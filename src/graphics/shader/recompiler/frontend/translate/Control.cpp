@@ -205,6 +205,11 @@ void Translator::S_GETPC_B64(const Decoder::Instruction& inst) {
 				     inst.pc);
 			}
 			break;
+		case Decoder::OperandKind::Ttmp:
+			EXIT_IF(inst.dst.reg + 1u >= IR::NumTtmpRegs);
+			high.kind = Decoder::OperandKind::Ttmp;
+			high.reg++;
+			break;
 		case Decoder::OperandKind::VccLo: high.kind = Decoder::OperandKind::VccHi; break;
 		case Decoder::OperandKind::M0: high.kind = Decoder::OperandKind::Null; break;
 		case Decoder::OperandKind::ExecLo: high.kind = Decoder::OperandKind::ExecHi; break;
@@ -237,8 +242,8 @@ void Translator::ScalarSelect64(const Decoder::Instruction& inst,
 	}
 	WriteU32Pair(inst.dst,
 	             {ir.Select(condition, lhs[0], rhs[0]), ir.Select(condition, lhs[1], rhs[1])});
-	if (inst.dst.kind == Decoder::OperandKind::Sgpr) {
-		const auto dst = static_cast<IR::ScalarReg>(inst.dst.reg);
+	if (IsScalarRegister(inst.dst)) {
+		const auto dst = ScalarRegister(inst.dst);
 		ir.SetThreadBitScalarReg(dst, selected_mask);
 		ir.SetScalarMaskTag(dst, selected_mask_valid);
 	}
@@ -253,7 +258,7 @@ void Translator::MOV_B32(const Decoder::Instruction& inst, bool apply_float_modi
 }
 
 void Translator::S_MOV_B64(const Decoder::Instruction& inst) {
-	const bool mask_source = inst.src0.kind == Decoder::OperandKind::Sgpr ||
+	const bool mask_source = IsScalarRegister(inst.src0) ||
 	                         inst.src0.kind == Decoder::OperandKind::ExecLo ||
 	                         inst.src0.kind == Decoder::OperandKind::VccLo;
 	IR::U1     source_mask;
@@ -272,8 +277,9 @@ void Translator::S_MOV_B64(const Decoder::Instruction& inst) {
 			case Decoder::OperandKind::ExecLo: ir.SetExec(source_mask); break;
 			case Decoder::OperandKind::VccLo: ir.SetVcc(source_mask); break;
 			case Decoder::OperandKind::Sgpr:
-				ir.SetThreadBitScalarReg(static_cast<IR::ScalarReg>(inst.dst.reg), source_mask);
-				ir.SetScalarMaskTag(static_cast<IR::ScalarReg>(inst.dst.reg), source_mask_valid);
+			case Decoder::OperandKind::Ttmp:
+				ir.SetThreadBitScalarReg(ScalarRegister(inst.dst), source_mask);
+				ir.SetScalarMaskTag(ScalarRegister(inst.dst), source_mask_valid);
 				break;
 			default: break;
 		}
@@ -285,8 +291,8 @@ void Translator::S_WQM_B64(const Decoder::Instruction& inst) {
 	const auto result =
 	    IR::U64(ir.Emit(IR::ValueOpcode::WqmU64, {ReadOperand(inst.src0, IR::Type::U64)}));
 	WriteOperand(DestinationOperand(inst), result);
-	if (inst.dst.kind == Decoder::OperandKind::Sgpr) {
-		const auto dst = static_cast<IR::ScalarReg>(inst.dst.reg);
+	if (IsScalarRegister(inst.dst)) {
+		const auto dst = ScalarRegister(inst.dst);
 		ir.SetThreadBitScalarReg(dst, ThreadBit(ExtractU64(result)));
 		ir.SetScalarMaskTag(dst, mask_valid);
 	}
@@ -298,12 +304,13 @@ void Translator::S_WQM_B32(const Decoder::Instruction& inst) {
 		const auto mask_valid = ReadMaskValid(inst.src0);
 		const auto invocation_result =
 		    IR::U1(ir.Emit(IR::ValueOpcode::WqmMask, {ReadMask(inst.src0)}));
-		const auto wide = IR::U64(ir.Emit(
-		    IR::ValueOpcode::WqmU64, {ir.ConstructU64(ReadU32(inst.src0), IR::U32(IR::Value(0u)))}));
+		const auto wide =
+		    IR::U64(ir.Emit(IR::ValueOpcode::WqmU64,
+		                    {ir.ConstructU64(ReadU32(inst.src0), IR::U32(IR::Value(0u)))}));
 		const auto result = ir.CompositeExtract(wide, 0);
 		WriteOperand(DestinationOperand(inst), result);
-		if (inst.dst.kind == Decoder::OperandKind::Sgpr) {
-			const auto dst = static_cast<IR::ScalarReg>(inst.dst.reg);
+		if (IsScalarRegister(inst.dst)) {
+			const auto dst = ScalarRegister(inst.dst);
 			ir.SetThreadBitScalarReg(dst, invocation_result);
 			ir.SetScalarMaskTag(dst, mask_valid);
 			const auto raw_nonzero = ir.INotEqual(result, IR::U32(IR::Value(0u)));

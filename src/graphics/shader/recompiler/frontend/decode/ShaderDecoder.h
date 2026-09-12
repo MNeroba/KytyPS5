@@ -603,6 +603,7 @@ enum class OperandKind {
 	IntegerInlineConstant,
 	FloatInlineConstant,
 	Sgpr,
+	Ttmp,
 	VccLo,
 	VccHi,
 	VccZ,

@@ -18,6 +18,8 @@ public:
 	void AddBranchCondition(const CFG::BasicBlock& source, IR::BlockInfo& info);
 
 private:
+	bool                    IsScalarRegister(const Decoder::Operand& operand) const;
+	IR::ScalarReg           ScalarRegister(const Decoder::Operand& operand) const;
 	const Decoder::Operand& SourceAt(const Decoder::Instruction& inst, uint32_t index);
 	Decoder::Operand        DestinationOperand(const Decoder::Instruction& inst);
 	Decoder::Operand        OffsetOperand(const Decoder::Operand& operand, uint32_t offset);

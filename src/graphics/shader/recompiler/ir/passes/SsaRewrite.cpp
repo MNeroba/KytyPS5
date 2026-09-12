@@ -52,31 +52,31 @@ using ValueMap = std::unordered_map<Block*, Value>;
 
 struct DefTable {
 	const Value& Get(Block* block, ScalarReg reg) {
-		if (RegIndex(reg) >= NumScalarRegs) {
+		if (RegIndex(reg) >= NumScalarStateRegs) {
 			EXIT("SSA scalar read index is out of range: %u", RegIndex(reg));
 		}
 		return block->ssa_sreg_values[RegIndex(reg)];
 	}
 	void Set(Block* block, ScalarReg reg, Value value) {
-		if (RegIndex(reg) >= NumScalarRegs) {
+		if (RegIndex(reg) >= NumScalarStateRegs) {
 			EXIT("SSA scalar write index is out of range: %u", RegIndex(reg));
 		}
 		block->ssa_sreg_values[RegIndex(reg)] = value;
 	}
 	const Value& Get(Block* block, ThreadBitScalarReg value) {
-		EXIT_IF(RegIndex(value.reg) >= NumScalarRegs);
+		EXIT_IF(RegIndex(value.reg) >= NumScalarStateRegs);
 		return block->ssa_thread_bit_sreg_values[RegIndex(value.reg)];
 	}
 	void Set(Block* block, ThreadBitScalarReg value, Value definition) {
-		EXIT_IF(RegIndex(value.reg) >= NumScalarRegs);
+		EXIT_IF(RegIndex(value.reg) >= NumScalarStateRegs);
 		block->ssa_thread_bit_sreg_values[RegIndex(value.reg)] = definition;
 	}
 	const Value& Get(Block* block, ScalarMaskTag value) {
-		EXIT_IF(RegIndex(value.reg) >= NumScalarRegs);
+		EXIT_IF(RegIndex(value.reg) >= NumScalarStateRegs);
 		return block->ssa_sreg_mask_tags[RegIndex(value.reg)];
 	}
 	void Set(Block* block, ScalarMaskTag value, Value definition) {
-		EXIT_IF(RegIndex(value.reg) >= NumScalarRegs);
+		EXIT_IF(RegIndex(value.reg) >= NumScalarStateRegs);
 		block->ssa_sreg_mask_tags[RegIndex(value.reg)] = definition;
 	}
 
