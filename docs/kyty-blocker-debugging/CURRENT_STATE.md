@@ -1,6 +1,6 @@
 # Current KytyPS5 debugging state
 
-Last reconciled: 2026-09-12 13:45 Europe/Riga
+Last reconciled: 2026-09-12 14:00 Europe/Riga
 
 This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable mechanisms live in REFERENCE.md.
 
@@ -8,11 +8,11 @@ This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable
 
 Repository/worktree: G:/KytyPS5/repo
 Branch: astro/materialize-resources
-Repository HEAD at this checkpoint: `4f476f0` (`docs: record non-EOP device-loss checkpoint`)
+Repository HEAD at the start of this checkpoint: `597e7fddfa3bffdf10e9f27f7c0f50f4d59b3f19` (`docs: record non-EOP device-loss checkpoint`)
 Current semantic source HEAD: `568f00bcc0f1086383c39705216ec35c06c47942` (`diag: preserve last non-EOP submit provenance`)
 Last ASTRO runtime source HEAD: `568f00bcc0f1086383c39705216ec35c06c47942`
 Runtime source HEAD at launch: `568f00bcc0f1086383c39705216ec35c06c47942`
-Working tree at this checkpoint: clean at `4f476f0`; local install tree was refreshed from semantic build `568f00b`
+Working tree at the start of this checkpoint: clean at `597e7fd`; local install tree was refreshed from semantic build `568f00b`
 Build: Release, CMake/Ninja, clang-cl, clang-lld_link-64
 Executable: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.exe
 Executable SHA-256: B504D737687A2FDD0C94F5B21F6C9AD29D1B26DF4D727DC3A3495464582CC023
