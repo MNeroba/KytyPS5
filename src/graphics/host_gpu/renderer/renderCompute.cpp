@@ -405,6 +405,21 @@ void RenderExecutor::DispatchDirect(uint64_t submit_id, CommandBuffer& buffer,
 		ShaderWriteHazardBarrier(vk_buffer, vk::PipelineStageFlagBits::eComputeShader);
 	}
 	vk_buffer.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline.pipeline);
+	GpuCommandSnapshot snapshot {};
+	snapshot.debug_op         = static_cast<uint32_t>(CommandBufferDebugOp::DispatchDirect);
+	snapshot.guest_submit     = submit_id;
+	snapshot.pipeline         = GpuSnapshotHandleValue(pipeline.pipeline);
+	snapshot.shader_hashes[0] = compute_program.shader_hash;
+	snapshot.arguments        = {thread_group_x,
+	                             thread_group_y,
+	                             thread_group_z,
+	                             mode,
+	                             sh_ctx.GetCs().cs_regs.data_addr,
+	                             0,
+	                             0,
+	                             0};
+	AppendBindingSnapshots(snapshot, bindings, static_cast<uint32_t>(ShaderType::Compute));
+	buffer.RecordGpuCommandSnapshot(std::move(snapshot));
 	buffer.SetGpuCheckpoint(GpuCheckpointPhase::Before);
 	vk_buffer.dispatch(thread_group_x, thread_group_y, thread_group_z);
 	buffer.SetGpuCheckpoint(GpuCheckpointPhase::After);

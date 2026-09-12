@@ -21,6 +21,7 @@
 #include "graphics/host_gpu/renderer/cache/textureCache.h"
 #include "graphics/host_gpu/renderer/colorRenderTarget.h"
 #include "graphics/host_gpu/renderer/depthRenderTarget.h"
+#include "graphics/host_gpu/renderer/gpuFaultDiagnostics.h"
 #include "graphics/host_gpu/renderer/image/blitHelper.h"
 #include "graphics/host_gpu/renderer/image/image.h"
 #include "graphics/host_gpu/renderer/image/imageView.h"
@@ -105,6 +106,44 @@
 #endif
 
 namespace Libs::Graphics {
+
+struct GpuFaultDiagnosticsTestAccess {
+  static void ClearSnapshots(GpuFaultDiagnostics &diagnostics) {
+    std::lock_guard lock(diagnostics.m_mutex);
+    diagnostics.m_snapshot_batches.clear();
+  }
+
+  static size_t SnapshotBatchCount(GpuFaultDiagnostics &diagnostics) {
+    std::lock_guard lock(diagnostics.m_mutex);
+    return diagnostics.m_snapshot_batches.size();
+  }
+
+  static bool HasSnapshot(GpuFaultDiagnostics &diagnostics, uint64_t tick,
+                          uint64_t guest_submit, uint32_t operation_order,
+                          uint64_t shader_hash) {
+    std::lock_guard lock(diagnostics.m_mutex);
+    return std::ranges::any_of(
+        diagnostics.m_snapshot_batches, [&](const auto &batch) {
+          return batch.tick == tick &&
+                 std::ranges::any_of(batch.snapshots.commands,
+                                     [&](const auto &command) {
+                                       return command.guest_submit == guest_submit &&
+                                              command.operation_order == operation_order &&
+                                              command.shader_hashes[0] == shader_hash;
+                                     });
+        });
+  }
+
+  static std::pair<uint64_t, uint64_t>
+  SnapshotTickRange(GpuFaultDiagnostics &diagnostics) {
+    std::lock_guard lock(diagnostics.m_mutex);
+    if (diagnostics.m_snapshot_batches.empty()) {
+      return {};
+    }
+    return {diagnostics.m_snapshot_batches.front().tick,
+            diagnostics.m_snapshot_batches.back().tick};
+  }
+};
 
 template <typename Cache>
 concept HasGetDownloadBuffer =
@@ -2956,6 +2995,7 @@ public:
     constexpr uint64_t memory_src = fault_base + 0x4000;
     constexpr uint64_t memory_copy_dst = fault_base + 0x6000;
     constexpr uint64_t memory_dst = fault_base + 0x8000;
+    constexpr uint64_t gds_zero_reset_dst = fault_base + 0x9000;
     constexpr uint64_t l2_copy_dst = fault_base + 0xa000;
     constexpr uint64_t nowhere_dst = fault_base + 0xc000;
     constexpr uint64_t clean_cached_fill = fault_base + 0x3000;
@@ -2973,7 +3013,7 @@ public:
     std::memcpy(reinterpret_cast<void *>(clean_cached_source),
                 clean_copy_words.data(), sizeof(clean_copy_words));
 
-    std::array<uint32_t, 56> dma_commands{};
+    std::array<uint32_t, 70> dma_commands{};
     size_t dma_cursor = 0;
     const auto append_dma = [&](uint8_t dst_sel, uint64_t dst, uint8_t src_sel,
                                 uint64_t src, uint32_t bytes,
@@ -2995,6 +3035,9 @@ public:
     append_dma(1, gds_immediate_offset, 2, immediate_value,
                sizeof(source_words));
     append_dma(0, immediate_dst, 1, gds_immediate_offset, sizeof(source_words));
+    append_dma(1, gds_immediate_offset, 2, 0, sizeof(source_words));
+    append_dma(0, gds_zero_reset_dst, 1, gds_immediate_offset,
+               sizeof(source_words));
     append_dma(1, gds_memory_offset, 0, memory_src, sizeof(source_words));
     append_dma(0, memory_dst, 1, gds_memory_offset, sizeof(source_words));
     append_dma(0, immediate_memory_dst, 2, immediate_value,
@@ -3047,6 +3090,9 @@ public:
     Require("GpuCommandLane", "DMA_DATA memory GDS readback",
             resources.HandleFault(PageFaultAccess::Read, memory_dst),
             "memory-to-GDS-to-memory copy did not publish GPU bytes");
+    Require("GpuCommandLane", "DMA_DATA immediate-zero GDS readback",
+            resources.HandleFault(PageFaultAccess::Read, gds_zero_reset_dst),
+            "immediate-zero GDS reset did not publish GPU bytes");
     Require("GpuCommandLane", "DMA_DATA immediate memory readback",
             resources.HandleFault(PageFaultAccess::Read, immediate_memory_dst),
             "immediate-to-memory copy did not publish GPU bytes");
@@ -3061,6 +3107,7 @@ public:
             "clean host DMA was not reflected in the cached buffer");
     std::array<uint32_t, 2> immediate_words{};
     std::array<uint32_t, 2> copied_words{};
+    std::array<uint32_t, 2> zero_reset_words{};
     std::array<uint32_t, 2> immediate_memory_words{};
     std::array<uint32_t, 2> memory_copy_words{};
     std::array<uint32_t, 2> l2_copy_words{};
@@ -3070,6 +3117,9 @@ public:
                 sizeof(immediate_words));
     std::memcpy(copied_words.data(), reinterpret_cast<const void *>(memory_dst),
                 sizeof(copied_words));
+    std::memcpy(zero_reset_words.data(),
+                reinterpret_cast<const void *>(gds_zero_reset_dst),
+                sizeof(zero_reset_words));
     std::memcpy(immediate_memory_words.data(),
                 reinterpret_cast<const void *>(immediate_memory_dst),
                 sizeof(immediate_memory_words));
@@ -3089,6 +3139,9 @@ public:
     Require("GpuCommandLane", "DMA_DATA memory GDS contents",
             copied_words == source_words,
             "memory-to-GDS-to-memory bytes do not match");
+    Require("GpuCommandLane", "DMA_DATA immediate-zero GDS contents",
+            zero_reset_words == std::array<uint32_t, 2>{0, 0},
+            "immediate-zero GDS reset did not clear the selected counters");
     Require("GpuCommandLane", "DMA_DATA immediate memory contents",
             immediate_memory_words ==
                 std::array<uint32_t, 2>{immediate_value, immediate_value},
@@ -4320,6 +4373,46 @@ public:
     HW::UserConfig user_config{};
     HW::Shader shaders{};
     scheduler.Begin(registers, user_config, shaders);
+
+    auto &fault_diagnostics = *m_runtime_context.gpu_fault_diagnostics;
+    GpuFaultDiagnosticsTestAccess::ClearSnapshots(fault_diagnostics);
+    GpuCommandSnapshot command_snapshot{};
+    command_snapshot.debug_op =
+        static_cast<uint32_t>(CommandBufferDebugOp::DispatchDirect);
+    command_snapshot.guest_submit = 0x1234;
+    command_snapshot.shader_hashes[0] = 0x0102030405060708ull;
+    scheduler.Current().RecordGpuCommandSnapshot(std::move(command_snapshot));
+    const auto snapshot_tick = scheduler.CurrentTick();
+    scheduler.Flush();
+    Require("SchedulerTimeline", "fault snapshot submit association",
+            GpuFaultDiagnosticsTestAccess::HasSnapshot(
+                fault_diagnostics, snapshot_tick, 0x1234, 0,
+                0x0102030405060708ull),
+            "command snapshot was not retained under its pre-submit timeline tick");
+    fault_diagnostics.RetireCompleted(snapshot_tick);
+    Require("SchedulerTimeline", "fault snapshot retirement",
+            GpuFaultDiagnosticsTestAccess::SnapshotBatchCount(
+                fault_diagnostics) == 0,
+            "completed command snapshot remained in the fault window");
+
+    GpuFaultDiagnostics bounded_diagnostics(m_runtime_context);
+    for (uint64_t tick = 1;
+         tick <= GpuFaultDiagnostics::MaxSubmittedSnapshotBatches + 1; ++tick) {
+      GpuCommandSnapshotBatch batch{};
+      batch.total_commands = 1;
+      batch.commands.emplace_back();
+      bounded_diagnostics.CommitSubmit(tick, {}, std::move(batch));
+    }
+    const auto [first_retained_tick, last_retained_tick] =
+        GpuFaultDiagnosticsTestAccess::SnapshotTickRange(bounded_diagnostics);
+    Require("SchedulerTimeline", "fault snapshot bound",
+            GpuFaultDiagnosticsTestAccess::SnapshotBatchCount(
+                bounded_diagnostics) ==
+                    GpuFaultDiagnostics::MaxSubmittedSnapshotBatches &&
+                first_retained_tick == 2 &&
+                last_retained_tick ==
+                    GpuFaultDiagnostics::MaxSubmittedSnapshotBatches + 1,
+            "fault snapshot ring did not discard its oldest submitted tick");
 
     auto &cache = context.GetGpuResources().GetBufferCache();
     Require(name, "precondition",

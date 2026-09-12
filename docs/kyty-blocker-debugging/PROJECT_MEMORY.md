@@ -183,6 +183,31 @@ and `GpuResourceManager::PrepareBda`. The subsequent single ASTRO run
 RELATED CODE/COMMIT: `bufferCache.{h,cpp}`, `gpuResourceManager.cpp`,
 `tests/ShaderRecompilerComputeTests.cpp`, `0c2da1d`.
 
+### GDS and indirect command audit — PROVEN
+
+FACT: Kyty lowers DS GDS operations to one descriptor binding selected by `NativeBinding`; the
+compute binding is 45 and the same helper is used by SPIR-V decorations, Vulkan layouts, and
+descriptor writes. Binding allocation follows DCE and precedes emission, with no later remap.
+
+WHY IT MATTERS: Prosper's binding 127 is not a Kyty invariant. A missing or renumbered GDS
+resource is not supported by current source or the available ASTRO evidence.
+
+EVIDENCE: `Memory.cpp`, `BindingLayout.cpp`, `spirvEmitterModule.cpp`, `pipeline/shaders.cpp`,
+`pipeline/descriptors.cpp`; five ASTRO CS hashes in
+`G:/KytyPS5/logs/GPU_TICK_SNAPSHOT_20260912_205915/astro-gds-module-census.txt` reached successful
+SPIR-V emission and were decorated at binding 45. `GpuCommandLane` covers PM4 immediate, memory,
+and immediate-zero GDS reset/readback and passes.
+
+FACT: Kyty has no Vulkan indirect-command consumer. PM4 indirect handlers read guest argument
+structures on the CPU; GPU-dirty protection routes a CPU read fault through synchronous download
+and scheduler wait before dereference.
+
+WHY IT MATTERS: A missing `eIndirectCommandRead` barrier is not an applicable defect in this
+architecture. Continue to investigate the device-loss P0 through the bounded host-tick snapshot.
+
+EVIDENCE: `graphicsRun.cpp`, `runtimeLinker.cpp`, `GpuResourceManager::HandleFault`,
+`BufferCache::ReadMemoryOnGpu`, and the existing `GpuCommandLane` dirty-fault checks.
+
 ### BVH and FaultBuffer boundaries — PROVEN
 
 Fact: `--stub-bvh` always misses and is only a downstream-progression aid. `FaultBuffer` is a page-fault bitmap.

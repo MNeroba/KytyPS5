@@ -681,6 +681,7 @@ struct PreparedIndexBuffer {
 	vk::Buffer     buffer = nullptr;
 	vk::DeviceSize offset = 0;
 	vk::IndexType  type   = vk::IndexType::eUint16;
+	Buffer*        owner  = nullptr;
 };
 
 static uint64_t VertexBufferDescriptorSize(const ShaderVertexInputBuffer& buffer,
@@ -718,6 +719,9 @@ struct PreparedVertexBuffers {
 
 	std::array<vk::Buffer, MaxBuffers>     buffers {};
 	std::array<vk::DeviceSize, MaxBuffers> offsets {};
+	std::array<Buffer*, MaxBuffers>        owners {};
+	std::array<uint64_t, MaxBuffers>       guest_addresses {};
+	std::array<uint64_t, MaxBuffers>       ranges {};
 	uint32_t                               count = 0;
 };
 
@@ -787,6 +791,7 @@ static PreparedVertexBuffers AcquireVertexBuffers(CommandBuffer&               b
 			}
 			prepared.buffers[i] = null_buffer;
 			prepared.offsets[i] = 0;
+			prepared.owners[i]  = &cache.GetBuffer(NULL_BUFFER_ID);
 			continue;
 		}
 
@@ -800,8 +805,11 @@ static PreparedVertexBuffers AcquireVertexBuffers(CommandBuffer&               b
 			     vertex.addr);
 		}
 
-		prepared.buffers[i] = range->binding.first->Handle();
-		prepared.offsets[i] = range->binding.second + vertex.addr - range->base_address;
+		prepared.buffers[i]         = range->binding.first->Handle();
+		prepared.offsets[i]         = range->binding.second + vertex.addr - range->base_address;
+		prepared.owners[i]          = range->binding.first;
+		prepared.guest_addresses[i] = vertex.addr;
+		prepared.ranges[i]          = size;
 		SetVulkanObjectNameF(
 		    buffer.GetContext().GetGraphics().device, prepared.buffers[i],
 		    "Kyty.VertexBuffer[slot={} guest=0x{:016x} size=0x{:x} stride={} records={}]", i,
@@ -976,11 +984,13 @@ static PreparedIndexBuffer PrepareIndexBuffer(CommandBuffer&               buffe
 		auto& stream = buffer.GetContext().GetBufferCache().GetUtilityBuffer(MemoryUsage::Stream);
 		prepared.offset = stream.Copy(source.host_data, source.size, 16);
 		prepared.buffer = stream.Handle();
+		prepared.owner  = &stream;
 	} else {
 		auto [buffer_ptr, offset] =
 		    buffer.GetContext().GetBufferCache().ObtainBuffer(source.address, source.size, false);
 		prepared.buffer = buffer_ptr->Handle();
 		prepared.offset = offset;
+		prepared.owner  = buffer_ptr;
 	}
 	if (source.host_data != nullptr) {
 		SetVulkanObjectNameF(buffer.GetContext().GetGraphics().device, prepared.buffer,
@@ -1010,6 +1020,69 @@ static void CommitIndexBuffer(vk::CommandBuffer vk_buffer, const PreparedIndexBu
 		return;
 	}
 	vk_buffer.bindIndexBuffer(prepared.buffer, prepared.offset, prepared.type);
+}
+
+static void AppendDrawBufferSnapshot(GpuCommandSnapshot& snapshot, GpuSnapshotBufferKind kind,
+                                     uint32_t resource_index, vk::Buffer handle,
+                                     uint64_t guest_address, uint64_t offset, uint64_t range,
+                                     Buffer* owner, uint32_t shader_stage) {
+	if (snapshot.buffers.size() == GpuFaultDiagnostics::MaxBuffersPerCommand) {
+		snapshot.dropped_buffers++;
+		return;
+	}
+	GpuBufferSnapshot resource {};
+	resource.kind              = static_cast<uint32_t>(kind);
+	resource.shader_stage      = shader_stage;
+	resource.resource_index    = resource_index;
+	resource.vk_buffer         = GpuSnapshotHandleValue(handle);
+	resource.guest_address     = guest_address;
+	resource.descriptor_offset = offset;
+	resource.descriptor_range  = range;
+	resource.access            = 1;
+	if (owner != nullptr) {
+		resource.host_bda         = owner->DeviceAddressOrZero();
+		resource.allocation_guest = owner->CpuAddress();
+		resource.allocation_size  = owner->Size();
+		resource.deleted          = owner->is_deleted;
+		resource.allocation_live  = owner->Handle() != nullptr && !owner->is_deleted;
+	} else {
+		resource.allocation_live = handle != nullptr;
+	}
+	snapshot.buffers.push_back(resource);
+}
+
+static void AppendDrawImageSnapshot(GpuCommandSnapshot& snapshot, RenderContext& context,
+                                    GpuSnapshotImageKind kind, uint32_t resource_index, ImageId id,
+                                    vk::ImageView view, vk::Format view_format) {
+	if (!id || snapshot.images.size() == GpuFaultDiagnostics::MaxImagesPerCommand) {
+		if (id) {
+			snapshot.dropped_images++;
+		}
+		return;
+	}
+	const auto&      image = context.GetTextureCache().GetImage(id);
+	GpuImageSnapshot resource {};
+	resource.kind            = static_cast<uint32_t>(kind);
+	resource.resource_index  = resource_index;
+	resource.slot_index      = id.index;
+	resource.slot_generation = id.generation;
+	resource.vk_image        = GpuSnapshotHandleValue(image.backing.image);
+	resource.vk_image_view   = GpuSnapshotHandleValue(view);
+	resource.guest_address   = image.info.data.address;
+	resource.guest_size      = image.info.data.size;
+	resource.image_format    = static_cast<uint32_t>(image.backing.format);
+	resource.view_format     = static_cast<uint32_t>(view_format);
+	resource.extent          = {image.backing.extent.width, image.backing.extent.height,
+	                            image.backing.extent.depth};
+	resource.layout          = static_cast<uint32_t>(image.backing.state.layout);
+	resource.access_mask     = static_cast<uint64_t>(image.backing.state.access_mask);
+	resource.pipeline_stage  = static_cast<uint64_t>(image.backing.state.pl_stage);
+	resource.access          = 2;
+	resource.allocation_live =
+	    image.backing.image != nullptr && image.backing.allocation != nullptr;
+	resource.registered = image.registered;
+	resource.retired    = !image.registered && !image.info.data.Empty();
+	snapshot.images.push_back(resource);
 }
 
 static void LogDrawStateIfNeeded(const CommandBuffer& buffer, const DrawCallInfo& draw,
@@ -1105,12 +1178,13 @@ void RenderExecutor::ExecutePreparedDraw(uint64_t submit_id, CommandBuffer& buff
 		}
 	}
 
+	BufferId mesh_index_id {};
 	if (mesh_active && emit.indexed) {
 		// Register the original guest indices for shader reads; PrepareGraphicsBindings
 		// synchronizes registered BDA ranges before any draw commands are committed.
-		(void)m_context.GetBufferCache().FindBuffer(index_source.address,
-		                                            static_cast<uint64_t>(draw.index_count) *
-		                                                index_source.guest_element_size);
+		mesh_index_id = m_context.GetBufferCache().FindBuffer(
+		    index_source.address,
+		    static_cast<uint64_t>(draw.index_count) * index_source.guest_element_size);
 	}
 	LogDrawPhase(draw.name, "PrepareBindings");
 	auto bindings = PrepareGraphicsBindings(state.vs_input_info.stage, state.ps_input_info.stage,
@@ -1191,6 +1265,57 @@ void RenderExecutor::ExecutePreparedDraw(uint64_t submit_id, CommandBuffer& buff
 	}
 	m_context.GetCommandScheduler().BeginRendering(rendering);
 	vk_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline.pipeline);
+	GpuCommandSnapshot snapshot {};
+	snapshot.debug_op         = static_cast<uint32_t>(draw.debug_op);
+	snapshot.guest_submit     = submit_id;
+	snapshot.pipeline         = GpuSnapshotHandleValue(pipeline.pipeline);
+	snapshot.shader_hashes[0] = state.programs.vertex.shader_hash;
+	snapshot.shader_hashes[1] = state.ps_active ? state.programs.pixel.shader_hash : 0;
+	snapshot.arguments        = {draw.index_count,
+	                             draw.instance_count,
+	                             static_cast<uint64_t>(static_cast<int64_t>(emit.vertex_offset)),
+	                             emit.first_vertex,
+	                             emit.first_instance,
+	                             index_source.address,
+	                             index_source.size,
+	                             static_cast<uint32_t>(topology) |
+	                                 (primitive_restart_enable ? uint64_t {1} << 32u : 0)};
+	AppendBindingSnapshots(snapshot, bindings.vertex,
+	                       static_cast<uint32_t>(state.vs_input_info.stage.program->stage));
+	if (bindings.pixel) {
+		AppendBindingSnapshots(snapshot, *bindings.pixel, static_cast<uint32_t>(ShaderType::Pixel));
+	}
+	const auto vertex_stage = static_cast<uint32_t>(state.vs_input_info.stage.program->stage);
+	for (uint32_t i = 0; i < vertex_bindings.count; ++i) {
+		AppendDrawBufferSnapshot(snapshot, GpuSnapshotBufferKind::Vertex, i,
+		                         vertex_bindings.buffers[i], vertex_bindings.guest_addresses[i],
+		                         vertex_bindings.offsets[i], vertex_bindings.ranges[i],
+		                         vertex_bindings.owners[i], vertex_stage);
+	}
+	if (emit.indexed) {
+		Buffer*    index_owner  = index_binding.owner;
+		uint64_t   index_offset = index_binding.offset;
+		vk::Buffer index_handle = index_binding.buffer;
+		if (mesh_active) {
+			index_owner  = m_context.GetBufferCache().TryGetBuffer(mesh_index_id);
+			index_offset = index_owner == nullptr ? 0 : index_owner->Offset(index_source.address);
+			index_handle = index_owner == nullptr ? vk::Buffer {} : index_owner->Handle();
+		}
+		AppendDrawBufferSnapshot(snapshot, GpuSnapshotBufferKind::Index, 0, index_handle,
+		                         index_source.address, index_offset, index_source.size, index_owner,
+		                         vertex_stage);
+	}
+	for (uint32_t i = 0; i < state.color_count; ++i) {
+		AppendDrawImageSnapshot(
+		    snapshot, m_context, GpuSnapshotImageKind::ColorTarget, i, state.color_info[i].image_id,
+		    rendering.color_attachments[i].image_view, state.color_info[i].desc.view_info.format);
+	}
+	if (state.depth_info.image_id) {
+		AppendDrawImageSnapshot(
+		    snapshot, m_context, GpuSnapshotImageKind::DepthTarget, 0, state.depth_info.image_id,
+		    rendering.depth_stencil_attachment.image_view, state.depth_info.desc.view_info.format);
+	}
+	buffer.RecordGpuCommandSnapshot(std::move(snapshot));
 	if (set_auto_debug) {
 		SetDrawDebugPhase(buffer, submit_id, draw, 0x500u);
 	}

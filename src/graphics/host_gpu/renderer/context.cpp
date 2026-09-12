@@ -30,6 +30,7 @@ vk::CommandBuffer CommandBuffer::Handle() const {
 
 void CommandBuffer::Begin() {
 	EXIT_IF(m_rendering || IsInvalid());
+	m_pending_gpu_snapshots        = {};
 	m_last_non_eop_debug_op        = UINT32_MAX;
 	m_last_non_eop_debug_submit_id = 0;
 	m_last_non_eop_debug_arg0      = 0;
@@ -92,6 +93,19 @@ void CommandBuffer::SetGpuCheckpoint(GpuCheckpointPhase phase) {
 
 std::vector<GpuFaultDiagnostics::Marker> CommandBuffer::TakeGpuCheckpointMarkers() {
 	return std::exchange(m_pending_gpu_checkpoints, {});
+}
+
+void CommandBuffer::RecordGpuCommandSnapshot(GpuCommandSnapshot&& snapshot) {
+	snapshot.operation_order = m_pending_gpu_snapshots.total_commands++;
+	if (m_pending_gpu_snapshots.commands.size() == GpuFaultDiagnostics::MaxCommandsPerBuffer) {
+		m_pending_gpu_snapshots.commands.pop_front();
+		m_pending_gpu_snapshots.dropped_commands++;
+	}
+	m_pending_gpu_snapshots.commands.push_back(std::move(snapshot));
+}
+
+GpuCommandSnapshotBatch CommandBuffer::TakeGpuCommandSnapshots() {
+	return std::exchange(m_pending_gpu_snapshots, {});
 }
 
 void CommandBuffer::BeginRendering(const RenderState& state) const {

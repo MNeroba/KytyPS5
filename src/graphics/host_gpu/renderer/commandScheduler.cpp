@@ -354,6 +354,7 @@ uint64_t CommandScheduler::Submit(SubmitInfo submit) {
 	m_command.End();
 	const auto buffer             = m_command.m_buffer;
 	auto       checkpoint_markers = m_command.TakeGpuCheckpointMarkers();
+	auto       command_snapshots  = m_command.TakeGpuCommandSnapshots();
 	auto&      graphics           = m_graphics;
 	EXIT_IF(graphics.queue == nullptr);
 
@@ -377,7 +378,8 @@ uint64_t CommandScheduler::Submit(SubmitInfo submit) {
 		// asynchronous device loss may trigger diagnostics before the submit
 		// path reaches its normal post-submit bookkeeping.
 		if (graphics.gpu_fault_diagnostics != nullptr) {
-			graphics.gpu_fault_diagnostics->CommitSubmit(tick, std::move(checkpoint_markers));
+			graphics.gpu_fault_diagnostics->CommitSubmit(tick, std::move(checkpoint_markers),
+			                                             std::move(command_snapshots));
 		}
 
 		vk::TimelineSemaphoreSubmitInfo timeline_info {};

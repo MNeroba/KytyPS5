@@ -112,8 +112,10 @@ public:
 	                  uint32_t arg2 = 0, uint32_t arg3 = 0, uint64_t arg4 = 0);
 	void SetGpuCheckpoint(GpuCheckpointPhase phase);
 	[[nodiscard]] std::vector<GpuFaultDiagnostics::Marker> TakeGpuCheckpointMarkers();
-	void BeginRendering(const RenderState& state) const;
-	void EndRendering() const;
+	void                                  RecordGpuCommandSnapshot(GpuCommandSnapshot&& snapshot);
+	[[nodiscard]] GpuCommandSnapshotBatch TakeGpuCommandSnapshots();
+	void                                  BeginRendering(const RenderState& state) const;
+	void                                  EndRendering() const;
 
 	[[nodiscard]] vk::CommandBuffer Handle() const;
 	[[nodiscard]] GraphicContext&   GetGraphics() const noexcept { return m_graphics; }
@@ -151,6 +153,7 @@ private:
 	uint32_t                                 m_last_non_eop_debug_arg3      = 0;
 	uint64_t                                 m_last_non_eop_debug_arg4      = 0;
 	std::vector<GpuFaultDiagnostics::Marker> m_pending_gpu_checkpoints;
+	GpuCommandSnapshotBatch                  m_pending_gpu_snapshots;
 	mutable RenderState                      m_render_state;
 	mutable bool                             m_rendering   = false;
 	HW::Context*                             m_registers   = nullptr;
@@ -212,6 +215,8 @@ private:
 	void               BindRenderTarget(ImageId id);
 	void               TrackImageBinding(ImageId id);
 	void               ResetBindings();
+	void AppendBindingSnapshots(GpuCommandSnapshot& snapshot, const PreparedBindings& bindings,
+	                            uint32_t shader_stage);
 	[[nodiscard]] bool TryConsumeComputeMetaClear(const ShaderComputeInputInfo& input,
 	                                              const CommandBuffer&          buffer);
 	[[nodiscard]] bool TryConsumeComputeImageClear(const ShaderComputeInputInfo& input,

@@ -3,6 +3,7 @@
 
 #include "graphics/host_gpu/vulkanCommon.h"
 
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <deque>
@@ -40,9 +41,101 @@ enum class GpuCheckpointPhase : uint32_t {
 	After  = 1,
 };
 
+enum class GpuSnapshotBufferKind : uint32_t {
+	Descriptor,
+	Vertex,
+	Index,
+	Gds,
+	BdaPageTable,
+	FaultBuffer,
+	FlattenedSrt,
+	ShaderData,
+};
+
+enum class GpuSnapshotImageKind : uint32_t {
+	Descriptor,
+	ColorTarget,
+	DepthTarget,
+};
+
+template <typename Handle>
+[[nodiscard]] uint64_t GpuSnapshotHandleValue(Handle handle) {
+	using Native = typename Handle::CType;
+	if constexpr (std::is_pointer_v<Native>) {
+		return static_cast<uint64_t>(reinterpret_cast<uintptr_t>(static_cast<Native>(handle)));
+	} else {
+		return static_cast<uint64_t>(static_cast<Native>(handle));
+	}
+}
+
+struct GpuBufferSnapshot {
+	uint32_t kind              = 0;
+	uint32_t shader_stage      = 0;
+	uint32_t resource_index    = 0;
+	uint32_t slot_index        = UINT32_MAX;
+	uint32_t slot_generation   = 0;
+	uint64_t vk_buffer         = 0;
+	uint64_t guest_address     = 0;
+	uint64_t host_bda          = 0;
+	uint64_t descriptor_offset = 0;
+	uint64_t descriptor_range  = 0;
+	uint64_t allocation_guest  = 0;
+	uint64_t allocation_size   = 0;
+	uint32_t access            = 0;
+	bool     allocation_live   = false;
+	bool     deleted           = false;
+};
+
+struct GpuImageSnapshot {
+	uint32_t                kind            = 0;
+	uint32_t                shader_stage    = 0;
+	uint32_t                resource_index  = 0;
+	uint32_t                slot_index      = UINT32_MAX;
+	uint32_t                slot_generation = 0;
+	uint64_t                vk_image        = 0;
+	uint64_t                vk_image_view   = 0;
+	uint64_t                guest_address   = 0;
+	uint64_t                guest_size      = 0;
+	uint32_t                image_format    = 0;
+	uint32_t                view_format     = 0;
+	std::array<uint32_t, 3> extent {};
+	uint32_t                layout          = 0;
+	uint64_t                access_mask     = 0;
+	uint64_t                pipeline_stage  = 0;
+	uint32_t                access          = 0;
+	bool                    allocation_live = false;
+	bool                    registered      = false;
+	bool                    retired         = false;
+};
+
+struct GpuCommandSnapshot {
+	uint32_t                       operation_order = 0;
+	uint32_t                       debug_op        = 0;
+	uint64_t                       guest_submit    = 0;
+	uint64_t                       pipeline        = 0;
+	std::array<uint64_t, 2>        shader_hashes {};
+	std::array<uint64_t, 8>        arguments {};
+	std::vector<GpuBufferSnapshot> buffers;
+	std::vector<GpuImageSnapshot>  images;
+	uint32_t                       dropped_buffers = 0;
+	uint32_t                       dropped_images  = 0;
+};
+
+struct GpuCommandSnapshotBatch {
+	std::deque<GpuCommandSnapshot> commands;
+	uint32_t                       total_commands   = 0;
+	uint32_t                       dropped_commands = 0;
+};
+
+struct GpuFaultDiagnosticsTestAccess;
+
 class GpuFaultDiagnostics {
 public:
-	using Marker = std::unique_ptr<GpuCheckpointMarker>;
+	using Marker                                        = std::unique_ptr<GpuCheckpointMarker>;
+	static constexpr size_t MaxSubmittedSnapshotBatches = 64;
+	static constexpr size_t MaxCommandsPerBuffer        = 128;
+	static constexpr size_t MaxBuffersPerCommand        = 96;
+	static constexpr size_t MaxImagesPerCommand         = 96;
 
 	explicit GpuFaultDiagnostics(GraphicContext& graphics): m_graphics(&graphics) {}
 	~GpuFaultDiagnostics() = default;
@@ -52,7 +145,8 @@ public:
 	                                uint64_t debug_submit, uint32_t arg0, uint32_t arg1,
 	                                uint32_t arg2, uint32_t arg3, uint64_t arg4);
 
-	void CommitSubmit(uint64_t tick, std::vector<Marker>&& markers);
+	void CommitSubmit(uint64_t tick, std::vector<Marker>&& markers,
+	                  GpuCommandSnapshotBatch&& snapshots);
 	void RetireCompleted(uint64_t known_tick);
 	void ReportDeviceLost(const char* source, vk::Result result, uint64_t tick);
 
@@ -61,16 +155,24 @@ private:
 		uint64_t            tick = 0;
 		std::vector<Marker> markers;
 	};
+	struct SubmittedSnapshotBatch {
+		uint64_t                tick = 0;
+		GpuCommandSnapshotBatch snapshots;
+	};
 
 	[[nodiscard]] const GpuCheckpointMarker* FindMarkerLocked(const void* marker) const;
 	void                                     DumpDeviceFault(const char* source, uint64_t tick);
 	void                                     DumpCheckpoints();
+	void                                     DumpCommandSnapshots(uint64_t failing_tick);
 
-	GraphicContext*            m_graphics = nullptr;
-	std::mutex                 m_mutex;
-	std::deque<SubmittedBatch> m_submitted;
-	std::atomic<uint64_t>      m_next_sequence {1};
-	bool                       m_reported = false;
+	GraphicContext*                    m_graphics = nullptr;
+	std::mutex                         m_mutex;
+	std::deque<SubmittedBatch>         m_submitted;
+	std::deque<SubmittedSnapshotBatch> m_snapshot_batches;
+	std::atomic<uint64_t>              m_next_sequence {1};
+	bool                               m_reported = false;
+
+	friend struct GpuFaultDiagnosticsTestAccess;
 };
 
 } // namespace Libs::Graphics

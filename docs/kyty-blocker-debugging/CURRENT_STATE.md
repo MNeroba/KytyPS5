@@ -1,6 +1,6 @@
 # Current KytyPS5 debugging state
 
-Last reconciled: 2026-09-12 20:40 Europe/Riga
+Last reconciled: 2026-09-12 21:29 Europe/Riga
 
 This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable mechanisms live in REFERENCE.md.
 
@@ -12,7 +12,7 @@ Repository HEAD at the start of this checkpoint: `f522eba136e22e42368383bb1acd9e
 Current semantic source HEAD: `f522eba136e22e42368383bb1acd9e22c7a40131` (documentation-only commits follow)
 Last ASTRO runtime source HEAD: `f522eba136e22e42368383bb1acd9e22c7a40131` with temporary dispatch-state diagnostics
 Runtime source HEAD at launch: `f522eba136e22e42368383bb1acd9e22c7a40131` (diagnostic working tree; source trace was reverted afterward)
-Working tree at the start of this checkpoint: clean at `f522eba`
+Working tree for this checkpoint: bounded diagnostic snapshot changes are under review on top of `f522eba`
 Build: Release, CMake/Ninja, clang-cl, clang-lld_link-64
 Executable: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.exe
 Executable SHA-256: `8326FBF6AC6426763BAE5BBBD33B2753273EC0C44347B1B03C52CAEF6F821E90`
@@ -37,6 +37,24 @@ Known P1 likely blockers: incorrect color/output interpretation remains P1 and i
 Known P2: cold-start large dispatcher pipeline compilation latency; successful creates are not a hang. Cache persistence/load is proven, but a substantial warm-time reduction is not.
 
 M1, M2, M3, M4, and M5 are closed/reached. M6 gameplay is not proven. Do not reopen the cleared startup SRT/BDA-lifetime, pipeline-create, submission, visible-frame, bounded resource-remap, scalar-PHI materialization, or TTMP scalar-source conclusions without contradictory evidence.
+
+## Prosper-class GDS audit and bounded snapshot preparation — 2026-09-12
+
+Static audit artifact: `G:/KytyPS5/logs/GPU_TICK_SNAPSHOT_20260912_205915/gds-audit.txt`.
+Kyty's GDS lowering, binding/layout assignment, PM4 DMA_DATA GDS handling (including immediate
+zero reset), and CPU-mediated PM4 indirect argument visibility are proven by source and focused
+tests. Five ASTRO GDS compute modules reached successful emission at compute binding 45; no
+rejection, omission, or pipeline failure was logged. Prosper's binding 127 is not applicable.
+
+The generic bounded tick-keyed GPU command/resource snapshot is implemented but not yet committed
+or run against ASTRO. It retains at most 64 submitted host-tick batches, 128 commands per command
+buffer, and 96 buffers/images per command, and is dumped from the existing device-loss path.
+Focused build and tests passed: `shader_recompiler_compute_tests --scheduler-only`, full
+`shader_recompiler_compute_tests`, and `shader_cfg_tests` (exit 0). No ASTRO run has been made for
+this snapshot yet.
+
+NEXT ACTION: review and commit the diagnostic, rebuild/install with provenance, then perform exactly
+one `--stub-bvh` ASTRO run to classify the first concrete violation in the failing tick window.
 
 ## Static submit-6256 reconstruction checkpoint — 2026-09-12
 

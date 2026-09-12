@@ -251,8 +251,7 @@ static void ValidateSampledDepthBinding(const ShaderRecompiler::IR::ImageResourc
 	     "descriptor_type=%u base_array=%u depth=%u descriptor_pitch=%u target_pitch=%u "
 	     "addr=0x%016" PRIx64 " size=0x%016" PRIx64
 	     " dwords=%08x,%08x,%08x,%08x,%08x,%08x,%08x,%08x\n",
-	     resource_ok, encoding_ok, view_ok,
-	     static_cast<uint32_t>(resource.resource_class),
+	     resource_ok, encoding_ok, view_ok, static_cast<uint32_t>(resource.resource_class),
 	     static_cast<uint32_t>(resource.numeric_class), static_cast<uint32_t>(resource.dimension),
 	     static_cast<uint32_t>(resource.mip_mode), resource.read, resource.written, resource.atomic,
 	     resource.depth_compare, static_cast<uint32_t>(descriptor.Format()),
@@ -363,14 +362,14 @@ static bool IsSupportedStorageTextureEncoding(const ShaderRecompiler::IR::ImageR
 
 void ValidateStorageTexture(const ShaderRecompiler::IR::ImageResource& resource,
                             const ShaderTextureResource& descriptor, uint64_t size) {
-	const auto format        = descriptor.Format();
-	const bool resource_ok   = IsSupportedStorageImageResource(resource);
-	const bool descriptor_ok = IsSupportedStorageTextureDescriptor(resource, descriptor);
-	const bool encoding_ok   = IsSupportedStorageTextureEncoding(resource, descriptor);
+	const auto format           = descriptor.Format();
+	const bool resource_ok      = IsSupportedStorageImageResource(resource);
+	const bool descriptor_ok    = IsSupportedStorageTextureDescriptor(resource, descriptor);
+	const bool encoding_ok      = IsSupportedStorageTextureEncoding(resource, descriptor);
 	const bool uint_resource    = resource.numeric_class == Prospero::TextureNumericClass::Uint;
 	const bool raw_sint_storage = format == Prospero::BufferFormat::k32SInt && uint_resource &&
 	                              resource.written && !resource.read && !resource.atomic;
-	const auto numeric_class = Prospero::SampledTextureNumericClass(format);
+	const auto numeric_class    = Prospero::SampledTextureNumericClass(format);
 	const bool format_ok =
 	    raw_sint_storage ||
 	    (numeric_class != Prospero::TextureNumericClass::Unsupported &&
@@ -541,8 +540,8 @@ static ImageViewInfo TextureViewInfo(const ShaderRecompiler::IR::ImageResource& 
 
 TextureBinding RenderExecutor::ResolveTexture(const ShaderRecompiler::IR::ImageResource&   resource,
                                               const ShaderRecompiler::IR::DescriptorValue& value) {
-	auto descriptor = DecodeNativeDescriptor<ShaderTextureResource>(value);
-	const bool storage = resource.written;
+	auto       descriptor = DecodeNativeDescriptor<ShaderTextureResource>(value);
+	const bool storage    = resource.written;
 	if (storage) {
 		ValidateStorageImageResource(resource);
 	}
@@ -696,10 +695,10 @@ TextureBinding RenderExecutor::ResolveTexture(const ShaderRecompiler::IR::ImageR
 	return {id, nullptr, std::move(desc)};
 }
 
-static vk::Sampler NativeSampler(RenderContext&                       context,
+static vk::Sampler NativeSampler(RenderContext&                                  context,
                                  const ShaderRecompiler::IR::CompiledShaderInfo& program,
-                                 uint32_t index,
-                                 const ShaderRecompiler::IR::DescriptorValue& value) {
+                                 uint32_t                                        index,
+                                 const ShaderRecompiler::IR::DescriptorValue&    value) {
 	auto descriptor = DecodeNativeDescriptor<ShaderSamplerResource>(value);
 	if (!program.info.samplers[index].depth_compare) {
 		descriptor.fields[0] &= ~(0x7u << 12u);
@@ -755,11 +754,153 @@ void RenderExecutor::ResetBindings() {
 	m_bound_images.clear();
 }
 
+void RenderExecutor::AppendBindingSnapshots(GpuCommandSnapshot&     snapshot,
+                                            const PreparedBindings& bindings,
+                                            uint32_t                shader_stage) {
+	EXIT_IF(bindings.runtime == nullptr || !*bindings.runtime);
+	const auto& program = *bindings.runtime->program;
+	auto&       buffers = m_context.GetBufferCache();
+	auto&       images  = m_context.GetTextureCache();
+
+	auto append_buffer = [&](GpuSnapshotBufferKind kind, uint32_t resource_index,
+	                         const vk::DescriptorBufferInfo& view, uint64_t guest_address,
+	                         const Buffer* owner, BufferId id = {}) {
+		if (snapshot.buffers.size() == GpuFaultDiagnostics::MaxBuffersPerCommand) {
+			snapshot.dropped_buffers++;
+			return;
+		}
+		GpuBufferSnapshot resource {};
+		resource.kind              = static_cast<uint32_t>(kind);
+		resource.shader_stage      = shader_stage;
+		resource.resource_index    = resource_index;
+		resource.slot_index        = id.index;
+		resource.slot_generation   = id.generation;
+		resource.vk_buffer         = GpuSnapshotHandleValue(view.buffer);
+		resource.guest_address     = guest_address;
+		resource.descriptor_offset = view.offset;
+		resource.descriptor_range  = view.range;
+		if (owner != nullptr) {
+			resource.host_bda         = owner->DeviceAddressOrZero();
+			resource.allocation_guest = owner->CpuAddress();
+			resource.allocation_size  = owner->Size();
+			resource.deleted          = owner->is_deleted;
+			resource.allocation_live  = owner->Handle() != nullptr && !owner->is_deleted;
+		} else {
+			resource.allocation_live = view.buffer != nullptr;
+		}
+		snapshot.buffers.push_back(resource);
+	};
+
+	EXIT_IF(bindings.buffers.size() != program.info.buffers.size() ||
+	        bindings.buffer_sources.size() != program.info.buffers.size() ||
+	        bindings.images.size() != program.info.images.size());
+	for (uint32_t i = 0; i < program.info.buffers.size(); ++i) {
+		if (snapshot.buffers.size() == GpuFaultDiagnostics::MaxBuffersPerCommand) {
+			snapshot.dropped_buffers++;
+			continue;
+		}
+		const auto& source = bindings.buffer_sources[i];
+		auto*       owner  = buffers.TryGetBuffer(source.id);
+		append_buffer(GpuSnapshotBufferKind::Descriptor, i, bindings.buffers[i], source.address,
+		              owner, source.id);
+		auto&       captured = snapshot.buffers.back();
+		const auto& metadata = program.info.buffers[i];
+		captured.access =
+		    (metadata.read ? 1u : 0u) | (metadata.written ? 2u : 0u) | (metadata.atomic ? 4u : 0u);
+	}
+
+	for (uint32_t i = 0; i < program.info.images.size(); ++i) {
+		const auto& binding  = bindings.images[i];
+		const auto* image    = images.m_slot_images.try_get(binding.image_id);
+		const auto& metadata = program.info.images[i];
+		const auto  access =
+		    (metadata.read ? 1u : 0u) | (metadata.written ? 2u : 0u) | (metadata.atomic ? 4u : 0u);
+		auto append_image = [&](vk::ImageView view) {
+			if (snapshot.images.size() == GpuFaultDiagnostics::MaxImagesPerCommand) {
+				snapshot.dropped_images++;
+				return;
+			}
+			GpuImageSnapshot resource {};
+			resource.kind            = static_cast<uint32_t>(GpuSnapshotImageKind::Descriptor);
+			resource.shader_stage    = shader_stage;
+			resource.resource_index  = i;
+			resource.slot_index      = binding.image_id.index;
+			resource.slot_generation = binding.image_id.generation;
+			resource.vk_image_view   = GpuSnapshotHandleValue(view);
+			resource.view_format     = static_cast<uint32_t>(binding.desc.view_info.format);
+			resource.access          = access;
+			if (image != nullptr) {
+				resource.vk_image      = GpuSnapshotHandleValue(image->backing.image);
+				resource.guest_address = image->info.data.address;
+				resource.guest_size    = image->info.data.size;
+				resource.image_format  = static_cast<uint32_t>(image->backing.format);
+				resource.extent        = {image->backing.extent.width, image->backing.extent.height,
+				                          image->backing.extent.depth};
+				resource.layout        = static_cast<uint32_t>(image->backing.state.layout);
+				resource.access_mask   = static_cast<uint64_t>(image->backing.state.access_mask);
+				resource.pipeline_stage = static_cast<uint64_t>(image->backing.state.pl_stage);
+				resource.allocation_live =
+				    image->backing.image != nullptr && image->backing.allocation != nullptr;
+				resource.registered = image->registered;
+				resource.retired    = !image->registered && !image->info.data.Empty();
+			}
+			snapshot.images.push_back(resource);
+		};
+		if (binding.mip_views.empty()) {
+			append_image(binding.image_view);
+		} else {
+			for (const auto view: binding.mip_views) {
+				append_image(view);
+			}
+		}
+	}
+
+	for (const auto& descriptor: program.bindings.descriptors) {
+		const vk::DescriptorBufferInfo* view  = nullptr;
+		const Buffer*                   owner = nullptr;
+		GpuSnapshotBufferKind           kind  = GpuSnapshotBufferKind::Descriptor;
+		switch (descriptor.kind) {
+			case BindingKind::Gds:
+				kind  = GpuSnapshotBufferKind::Gds;
+				view  = &bindings.gds;
+				owner = buffers.GetGdsBuffer();
+				break;
+			case BindingKind::BdaPagetable:
+				kind  = GpuSnapshotBufferKind::BdaPageTable;
+				owner = buffers.GetBdaPageTableBuffer();
+				break;
+			case BindingKind::FaultBuffer:
+				kind  = GpuSnapshotBufferKind::FaultBuffer;
+				owner = buffers.GetFaultBuffer();
+				break;
+			case BindingKind::FlattenedSrt:
+				kind  = GpuSnapshotBufferKind::FlattenedSrt;
+				view  = &bindings.flattened_srt;
+				owner = &buffers.GetUtilityBuffer(MemoryUsage::Upload);
+				break;
+			case BindingKind::ShaderData:
+				kind  = GpuSnapshotBufferKind::ShaderData;
+				view  = &bindings.shader_data_buffer;
+				owner = &buffers.GetUtilityBuffer(MemoryUsage::Upload);
+				break;
+			default: continue;
+		}
+		vk::DescriptorBufferInfo owned_view {};
+		if (owner != nullptr && view == nullptr) {
+			owned_view = {owner->Handle(), 0, owner->Size()};
+			view       = &owned_view;
+		}
+		if (view != nullptr && view->buffer != nullptr) {
+			append_buffer(kind, 0, *view, 0, owner);
+		}
+	}
+}
+
 PreparedBindings RenderExecutor::PrepareBindings(const ShaderStageRuntime& runtime) {
 	KYTY_PROFILER_FUNCTION();
 	EXIT_IF(!runtime);
-	const auto& program  = *runtime.program;
-	const auto& snapshot = runtime.resources;
+	const auto&      program  = *runtime.program;
+	const auto&      snapshot = runtime.resources;
 	PreparedBindings prepared;
 	prepared.runtime = &runtime;
 	prepared.images.reserve(program.info.images.size());
@@ -794,10 +935,10 @@ void RenderExecutor::FindBuffers(PreparedBindings& prepared) {
 	prepared.buffer_sources.clear();
 	prepared.buffer_sources.reserve(program.info.buffers.size());
 	for (uint32_t i = 0; i < program.info.buffers.size(); i++) {
-		auto descriptor = DecodeNativeDescriptor<ShaderBufferResource>(snapshot.buffers[i]);
-		const auto address = descriptor.Base48();
-		const auto stride  = descriptor.Stride();
-		const auto records = descriptor.NumRecords();
+		auto       descriptor = DecodeNativeDescriptor<ShaderBufferResource>(snapshot.buffers[i]);
+		const auto address    = descriptor.Base48();
+		const auto stride     = descriptor.Stride();
+		const auto records    = descriptor.NumRecords();
 		// The descriptor has a 14-bit stride and 32-bit record count, so the product fits u64.
 		const auto requested_size = stride != 0 ? static_cast<uint64_t>(stride) * records : records;
 		if (address == 0 || requested_size == 0) {
@@ -812,16 +953,16 @@ void RenderExecutor::FindBuffers(PreparedBindings& prepared) {
 void RenderExecutor::RebindBuffers(PreparedBindings& prepared) {
 	KYTY_PROFILER_FUNCTION();
 	EXIT_IF(prepared.runtime == nullptr || !*prepared.runtime);
-	const auto& program   = *prepared.runtime->program;
-	const auto& snapshot  = prepared.runtime->resources;
-	const auto& layout    = program.bindings;
+	const auto& program  = *prepared.runtime->program;
+	const auto& snapshot = prepared.runtime->resources;
+	const auto& layout   = program.bindings;
 	EXIT_IF(prepared.buffer_sources.size() != program.info.buffers.size());
 
 	prepared.buffers.clear();
 	prepared.buffers.reserve(program.info.buffers.size());
 	EXIT_IF(prepared.shader_data.size() != layout.ShaderDataDwords());
-	std::fill(prepared.shader_data.begin() + layout.memory_offset_dword,
-	          prepared.shader_data.end(), 0);
+	std::fill(prepared.shader_data.begin() + layout.memory_offset_dword, prepared.shader_data.end(),
+	          0);
 	auto pack_memory_offset = [&](uint32_t index, uint32_t offset) {
 		const auto dword = layout.memory_offset_dword + index / 4u;
 		const auto shift = (index % 4u) * 8u;
@@ -926,11 +1067,11 @@ void RenderExecutor::CommitBindings(CommandBuffer&                     buffer,
                                     const PipelineCache::Pipeline&     pipeline,
                                     std::span<PreparedBindings* const> prepared_bindings) {
 	KYTY_PROFILER_FUNCTION();
-	auto   vk_buffer        = buffer.Handle();
-	size_t descriptor_count = 0;
-	size_t write_count      = 0;
+	auto                           vk_buffer        = buffer.Handle();
+	size_t                         descriptor_count = 0;
+	size_t                         write_count      = 0;
 	ShaderRecompiler::IR::PushData push_data;
-	bool                           has_push_data = false;
+	bool                           has_push_data  = false;
 	constexpr auto                 GraphicsStages = vk::ShaderStageFlagBits::eVertex |
 	                                                vk::ShaderStageFlagBits::eMeshEXT |
 	                                                vk::ShaderStageFlagBits::eFragment;

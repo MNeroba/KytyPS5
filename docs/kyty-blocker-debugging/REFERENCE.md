@@ -189,6 +189,22 @@ single scheduler-active full zero-fill before the first buffer registration and 
 before publishing device-address entries; unregister fills released ranges with zero. The one-time
 fill is a resource-validity requirement, not a shader workaround.
 
+## GDS and indirect command visibility
+
+Decoded DS operations carrying the GDS bit become `ResourceKind::Gds`; the SPIR-V emitter uses one
+runtime-array GDS variable and the runtime descriptor/layout code uses the same `NativeBinding`
+helper. `DescriptorBindingKind::Gds` is 45, so compute GDS is binding 45; Prosper-specific binding
+numbers do not transfer to Kyty. Binding allocation happens after DCE and before emission, with no
+later renumbering pass.
+
+`CommandProcessor::DmaData` treats selector 1 as GDS and selector 2 as an immediate fill. GDS
+ranges are checked against the 64 KiB GDS buffer, and `StreamBuffer::Fill` orders
+`vkCmdFillBuffer` with transfer-to-shader barriers. Kyty's PM4 indirect dispatch/draw paths read
+guest argument structures on the CPU and call direct draw/dispatch entry points; there are no
+Vulkan indirect-command calls. GPU-written guest ranges are protected and a CPU read fault
+downloads dirty bytes and waits for completion before dereference, so `eIndirectCommandRead` is
+not a required Vulkan stage in this execution model.
+
 ## BVH and fault tracking
 
 `--stub-bvh` provides an always-miss control-flow path for downstream diagnosis. It does not implement node layout, traversal, ray intersection, or address semantics.

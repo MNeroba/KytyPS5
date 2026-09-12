@@ -36,6 +36,29 @@ const char* DebugOpName(uint32_t op) {
 	}
 }
 
+const char* BufferKindName(uint32_t kind) {
+	switch (static_cast<GpuSnapshotBufferKind>(kind)) {
+		case GpuSnapshotBufferKind::Descriptor: return "descriptor";
+		case GpuSnapshotBufferKind::Vertex: return "vertex";
+		case GpuSnapshotBufferKind::Index: return "index";
+		case GpuSnapshotBufferKind::Gds: return "gds";
+		case GpuSnapshotBufferKind::BdaPageTable: return "bda_page_table";
+		case GpuSnapshotBufferKind::FaultBuffer: return "fault_buffer";
+		case GpuSnapshotBufferKind::FlattenedSrt: return "flattened_srt";
+		case GpuSnapshotBufferKind::ShaderData: return "shader_data";
+		default: return "unknown";
+	}
+}
+
+const char* ImageKindName(uint32_t kind) {
+	switch (static_cast<GpuSnapshotImageKind>(kind)) {
+		case GpuSnapshotImageKind::Descriptor: return "descriptor";
+		case GpuSnapshotImageKind::ColorTarget: return "color_target";
+		case GpuSnapshotImageKind::DepthTarget: return "depth_target";
+		default: return "unknown";
+	}
+}
+
 } // namespace
 
 GpuFaultDiagnostics::Marker GpuFaultDiagnostics::MakeMarker(GpuCheckpointPhase phase,
@@ -56,18 +79,30 @@ GpuFaultDiagnostics::Marker GpuFaultDiagnostics::MakeMarker(GpuCheckpointPhase p
 	return marker;
 }
 
-void GpuFaultDiagnostics::CommitSubmit(uint64_t tick, std::vector<Marker>&& markers) {
-	if (markers.empty()) {
+void GpuFaultDiagnostics::CommitSubmit(uint64_t tick, std::vector<Marker>&& markers,
+                                       GpuCommandSnapshotBatch&& snapshots) {
+	if (markers.empty() && snapshots.commands.empty()) {
 		return;
 	}
 	std::lock_guard lock(m_mutex);
-	m_submitted.push_back({tick, std::move(markers)});
+	if (!markers.empty()) {
+		m_submitted.push_back({tick, std::move(markers)});
+	}
+	if (!snapshots.commands.empty()) {
+		if (m_snapshot_batches.size() == MaxSubmittedSnapshotBatches) {
+			m_snapshot_batches.pop_front();
+		}
+		m_snapshot_batches.push_back({tick, std::move(snapshots)});
+	}
 }
 
 void GpuFaultDiagnostics::RetireCompleted(uint64_t known_tick) {
 	std::lock_guard lock(m_mutex);
 	while (!m_submitted.empty() && m_submitted.front().tick <= known_tick) {
 		m_submitted.pop_front();
+	}
+	while (!m_snapshot_batches.empty() && m_snapshot_batches.front().tick <= known_tick) {
+		m_snapshot_batches.pop_front();
 	}
 }
 
@@ -182,6 +217,64 @@ void GpuFaultDiagnostics::DumpCheckpoints() {
 	}
 }
 
+void GpuFaultDiagnostics::DumpCommandSnapshots(uint64_t failing_tick) {
+	std::lock_guard lock(m_mutex);
+	LOGF("GPU_COMMAND_SNAPSHOT_WINDOW failing_tick=%" PRIu64
+	     " retained_batches=%zu max_batches=%zu\n",
+	     failing_tick, m_snapshot_batches.size(), MaxSubmittedSnapshotBatches);
+	for (const auto& batch: m_snapshot_batches) {
+		if (batch.tick > failing_tick) {
+			continue;
+		}
+		LOGF("GPU_COMMAND_SNAPSHOT_BATCH tick=%" PRIu64 " commands=%zu total=%u dropped=%u\n",
+		     batch.tick, batch.snapshots.commands.size(), batch.snapshots.total_commands,
+		     batch.snapshots.dropped_commands);
+		for (const auto& command: batch.snapshots.commands) {
+			LOGF("GPU_COMMAND_SNAPSHOT tick=%" PRIu64 " order=%u op=%s (%u) guest_submit=%" PRIu64
+			     " pipeline=0x%016" PRIx64 " shaders=0x%016" PRIx64 ",0x%016" PRIx64
+			     " args=0x%016" PRIx64 ",0x%016" PRIx64 ",0x%016" PRIx64 ",0x%016" PRIx64
+			     ",0x%016" PRIx64 ",0x%016" PRIx64 ",0x%016" PRIx64 ",0x%016" PRIx64
+			     " buffers=%zu images=%zu"
+			     " dropped_buffers=%u dropped_images=%u\n",
+			     batch.tick, command.operation_order, DebugOpName(command.debug_op),
+			     command.debug_op, command.guest_submit, command.pipeline, command.shader_hashes[0],
+			     command.shader_hashes[1], command.arguments[0], command.arguments[1],
+			     command.arguments[2], command.arguments[3], command.arguments[4],
+			     command.arguments[5], command.arguments[6], command.arguments[7],
+			     command.buffers.size(), command.images.size(), command.dropped_buffers,
+			     command.dropped_images);
+			for (const auto& resource: command.buffers) {
+				LOGF("GPU_COMMAND_BUFFER tick=%" PRIu64 " order=%u kind=%s stage=%u resource=%u"
+				     " slot=%u:%u vk=0x%016" PRIx64 " guest=0x%016" PRIx64 " host_bda=0x%016" PRIx64
+				     " offset=0x%016" PRIx64 " range=0x%016" PRIx64
+				     " allocation_guest=0x%016" PRIx64 " allocation_size=0x%016" PRIx64
+				     " access=0x%x live=%u deleted=%u\n",
+				     batch.tick, command.operation_order, BufferKindName(resource.kind),
+				     resource.shader_stage, resource.resource_index, resource.slot_index,
+				     resource.slot_generation, resource.vk_buffer, resource.guest_address,
+				     resource.host_bda, resource.descriptor_offset, resource.descriptor_range,
+				     resource.allocation_guest, resource.allocation_size, resource.access,
+				     resource.allocation_live, resource.deleted);
+			}
+			for (const auto& resource: command.images) {
+				LOGF("GPU_COMMAND_IMAGE tick=%" PRIu64 " order=%u kind=%s stage=%u resource=%u"
+				     " slot=%u:%u image=0x%016" PRIx64 " view=0x%016" PRIx64 " guest=0x%016" PRIx64
+				     " size=0x%016" PRIx64 " format=%u view_format=%u extent=%ux%ux%u layout=%u"
+				     " access_mask=0x%016" PRIx64 " pipeline_stage=0x%016" PRIx64
+				     " access=0x%x live=%u registered=%u retired=%u\n",
+				     batch.tick, command.operation_order, ImageKindName(resource.kind),
+				     resource.shader_stage, resource.resource_index, resource.slot_index,
+				     resource.slot_generation, resource.vk_image, resource.vk_image_view,
+				     resource.guest_address, resource.guest_size, resource.image_format,
+				     resource.view_format, resource.extent[0], resource.extent[1],
+				     resource.extent[2], resource.layout, resource.access_mask,
+				     resource.pipeline_stage, resource.access, resource.allocation_live,
+				     resource.registered, resource.retired);
+			}
+		}
+	}
+}
+
 void GpuFaultDiagnostics::ReportDeviceLost(const char* source, vk::Result result, uint64_t tick) {
 	if (result != vk::Result::eErrorDeviceLost) {
 		return;
@@ -196,6 +289,7 @@ void GpuFaultDiagnostics::ReportDeviceLost(const char* source, vk::Result result
 	}
 	DumpDeviceFault(source, tick);
 	DumpCheckpoints();
+	DumpCommandSnapshots(tick);
 }
 
 } // namespace Libs::Graphics
