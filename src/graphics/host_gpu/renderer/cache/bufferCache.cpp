@@ -42,6 +42,15 @@ void BufferCache::WriteDataBuffer(Buffer& buffer, uint64_t address, const void* 
 	}
 }
 
+void BufferCache::InitializeBdaPageTable() {
+	if (m_bda_pagetable_initialized) {
+		return;
+	}
+	EXIT_IF(!m_scheduler.Active());
+	m_bda_pagetable_buffer.Fill(0, BDA_PAGETABLE_SIZE, 0);
+	m_bda_pagetable_initialized = true;
+}
+
 struct BufferCache::DownloadCopy {
 	Buffer*  buffer        = nullptr;
 	uint64_t source_offset = 0;
@@ -59,7 +68,10 @@ void BufferCache::Unregister(BufferId id) {
 
 template <bool insert>
 void BufferCache::ChangeRegister(BufferId id) {
-	auto& buffer = m_slot_buffers[id];
+	if constexpr (insert) {
+		InitializeBdaPageTable();
+	}
+	auto&                buffer = m_slot_buffers[id];
 	PageTable::PageRange pages {};
 	EXIT_IF(!PageTable::TryGetPageRange(buffer.CpuAddress(), buffer.Size(), pages));
 	for (size_t page = pages.first; page < pages.last_exclusive; ++page) {
@@ -135,16 +147,17 @@ std::pair<uint64_t, uint64_t> BufferCache::DownloadEnvelope(const DownloadCopy& 
 void BufferCache::DownloadBufferMemory(std::span<const DownloadCopy> copies) {
 	std::vector<DownloadCopy> batch;
 	batch.reserve(copies.size());
-	uint64_t                  packed_size = 0;
-	auto&                     download    = m_download_buffer;
-	const auto flush = [&] {
+	uint64_t   packed_size = 0;
+	auto&      download    = m_download_buffer;
+	const auto flush       = [&] {
 		const auto [mapped, base_offset] = download.Map(packed_size, DOWNLOAD_ALIGNMENT);
 		EXIT_IF(mapped == nullptr);
 		uint64_t cursor = 0;
 		for (const auto& copy: batch) {
 			const auto [source_begin, envelope_size] = DownloadEnvelope(copy);
-			download.CopyFrom(m_scheduler.Current(), *copy.buffer, source_begin, base_offset + cursor,
-			                  envelope_size, vk::AccessFlagBits::eMemoryWrite, vk::AccessFlags {},
+			download.CopyFrom(m_scheduler.Current(), *copy.buffer, source_begin,
+			                  base_offset + cursor, envelope_size, vk::AccessFlagBits::eMemoryWrite,
+			                  vk::AccessFlags {},
 			                  vk::AccessFlagBits::eMemoryRead | vk::AccessFlagBits::eMemoryWrite,
 			                  vk::AccessFlagBits::eHostRead);
 			cursor += AlignDownload(envelope_size);
@@ -156,7 +169,7 @@ void BufferCache::DownloadBufferMemory(std::span<const DownloadCopy> copies) {
 		cursor = 0;
 		for (const auto& copy: batch) {
 			const auto [source_begin, envelope_size] = DownloadEnvelope(copy);
-			const auto offset = cursor + copy.source_offset - source_begin;
+			const auto offset                        = cursor + copy.source_offset - source_begin;
 			download.Invalidate(base_offset + offset, copy.size);
 			Libs::LibKernel::Memory::WriteBacking(copy.address, mapped + offset, copy.size);
 			cursor += AlignDownload(envelope_size);
@@ -166,9 +179,9 @@ void BufferCache::DownloadBufferMemory(std::span<const DownloadCopy> copies) {
 	};
 	for (auto copy: copies) {
 		while (copy.size != 0) {
-			const auto available = download.Size() - packed_size;
-			const auto prefix    = copy.source_offset & 3u;
-			const auto bytes     = std::min(copy.size, available - prefix);
+			const auto   available = download.Size() - packed_size;
+			const auto   prefix    = copy.source_offset & 3u;
+			const auto   bytes     = std::min(copy.size, available - prefix);
 			DownloadCopy part {copy.buffer, copy.source_offset, copy.address, bytes};
 			const auto [source_begin, envelope_size] = DownloadEnvelope(part);
 			(void)source_begin;
@@ -404,28 +417,28 @@ bool BufferCache::SynchronizeBuffer(Buffer& buffer, uint64_t vaddr, uint64_t siz
 	if (source) {
 		auto& command = m_scheduler.Current();
 		command.EndRendering();
-		const auto native = command.Handle();
+		const auto              native = command.Handle();
 		vk::BufferMemoryBarrier before {};
 		before.srcAccessMask = vk::AccessFlagBits::eMemoryRead | vk::AccessFlagBits::eMemoryWrite |
 		                       vk::AccessFlagBits::eTransferRead |
 		                       vk::AccessFlagBits::eTransferWrite;
-		before.dstAccessMask       = vk::AccessFlagBits::eTransferWrite;
+		before.dstAccessMask = vk::AccessFlagBits::eTransferWrite;
 		before.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 		before.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 		before.buffer              = buffer.Handle();
 		before.offset              = 0;
 		before.size                = buffer.Size();
-		native.pipelineBarrier(vk::PipelineStageFlagBits::eAllCommands,
-		                       vk::PipelineStageFlagBits::eTransfer,
-		                       vk::DependencyFlagBits::eByRegion, 0, nullptr, 1, &before, 0, nullptr);
+		native.pipelineBarrier(
+		    vk::PipelineStageFlagBits::eAllCommands, vk::PipelineStageFlagBits::eTransfer,
+		    vk::DependencyFlagBits::eByRegion, 0, nullptr, 1, &before, 0, nullptr);
 		native.copyBuffer(source, buffer.Handle(), static_cast<uint32_t>(copies.size()),
 		                  copies.data());
 		auto after          = before;
 		after.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
 		after.dstAccessMask = vk::AccessFlagBits::eMemoryRead | vk::AccessFlagBits::eMemoryWrite;
-		native.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
-		                       vk::PipelineStageFlagBits::eAllCommands,
-		                       vk::DependencyFlagBits::eByRegion, 0, nullptr, 1, &after, 0, nullptr);
+		native.pipelineBarrier(
+		    vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eAllCommands,
+		    vk::DependencyFlagBits::eByRegion, 0, nullptr, 1, &after, 0, nullptr);
 	}
 	if (is_texel_buffer && !is_written) {
 		return SynchronizeBufferFromImage(buffer, vaddr, size);
@@ -451,7 +464,7 @@ vk::Buffer BufferCache::UploadCopies(Buffer& buffer, std::span<vk::BufferCopy> c
 	}
 
 	auto temporary = std::make_unique<Buffer>(m_graphics, m_scheduler, MemoryUsage::Upload, 0,
-	                                         vk::BufferUsageFlagBits::eTransferSrc, total_size);
+	                                          vk::BufferUsageFlagBits::eTransferSrc, total_size);
 	for (const auto& copy: copies) {
 		const auto address = buffer.CpuAddress() + copy.dstOffset;
 		std::memcpy(temporary->Mapped().data() + copy.srcOffset,
@@ -565,7 +578,8 @@ void BufferCache::CopyBuffer(uint64_t dst_vaddr, uint64_t src_vaddr, uint64_t si
 		     src_vaddr, dst_vaddr, size, static_cast<int>(src_gds), static_cast<int>(dst_gds));
 	}
 	if (src_memory && dst_memory && !IsRegionGpuModified(dst_vaddr, size) &&
-	    !IsRegionGpuModified(src_vaddr, size) && !m_texture_cache.FindImageFromRange(src_vaddr, size)) {
+	    !IsRegionGpuModified(src_vaddr, size) &&
+	    !m_texture_cache.FindImageFromRange(src_vaddr, size)) {
 		std::memcpy(reinterpret_cast<void*>(dst_vaddr), reinterpret_cast<const void*>(src_vaddr),
 		            size);
 		return;
@@ -627,7 +641,7 @@ void BufferCache::RunGarbageCollector() {
 	const uint64_t age        = std::min<uint64_t>(aggressive ? 80 : 160, tick);
 	const size_t   limit      = aggressive ? 64 : 32;
 
-	std::vector<BufferId> dirty_buffers;
+	std::vector<BufferId>     dirty_buffers;
 	std::vector<DownloadCopy> copies;
 	size_t                    retire_count = 0;
 	m_lru_cache.ForEachItemBelow(tick - age, [&](BufferId id) {
@@ -649,10 +663,10 @@ void BufferCache::RunGarbageCollector() {
 			    [&](uint64_t dirty_address, uint64_t dirty_size) noexcept {
 				    m_gpu_modified_ranges.ForEachIntersection(
 				        dirty_address, dirty_size, [&](RangeSet::Range range) {
-					    copies.push_back({&buffer, range.address - buffer.CpuAddress(),
-					                      range.address, range.size});
+					        copies.push_back({&buffer, range.address - buffer.CpuAddress(),
+					                          range.address, range.size});
 				        });
-				});
+			    });
 			dirty_buffers.push_back(id);
 		} else {
 			m_memory_tracker.UntrackMemory(buffer.CpuAddress(), buffer.Size());

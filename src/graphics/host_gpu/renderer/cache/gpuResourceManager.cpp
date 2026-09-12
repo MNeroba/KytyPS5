@@ -76,6 +76,7 @@ void GpuResourceManager::UnmapMemory(uint64_t vaddr, uint64_t size) {
 }
 
 void GpuResourceManager::PrepareBda() {
+	m_buffer_cache.InitializeBdaPageTable();
 	std::shared_lock lock(m_mapped_ranges_mutex);
 	m_mapped_ranges.ForEach([this](uint64_t start, uint64_t end) {
 		m_buffer_cache.SynchronizeBuffersInRange(start, end - start);

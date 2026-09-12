@@ -178,6 +178,10 @@ struct BufferCacheTestAccess {
   static bool IsBufferAllocated(const BufferCache &cache, BufferId id) {
     return cache.m_slot_buffers.is_allocated(id);
   }
+
+  static bool BdaPageTableInitialized(const BufferCache &cache) {
+    return cache.m_bda_pagetable_initialized;
+  }
 };
 
 struct StreamBufferTestAccess {
@@ -4305,6 +4309,32 @@ public:
                 direct_offset, allocation_size) == 0,
             "dirty-GC direct-memory allocation release failed");
     std::printf("[host]    %-32s ok\n", name);
+  }
+
+  void CheckBdaPageTableInitialization() {
+    constexpr const char *name = "BdaPageTableInitialization";
+    EnsureRuntimeContext();
+    auto &context = Renderer();
+    auto &scheduler = context.GetCommandScheduler();
+    HW::Context registers{};
+    HW::UserConfig user_config{};
+    HW::Shader shaders{};
+    scheduler.Begin(registers, user_config, shaders);
+
+    auto &cache = context.GetGpuResources().GetBufferCache();
+    Require(name, "precondition",
+            !BufferCacheTestAccess::BdaPageTableInitialized(cache),
+            "BDA page table was initialized before the first BDA preparation");
+    cache.FindBuffer(0x100000, BufferCache::CACHING_PAGESIZE);
+    Require(name, "initialization",
+            BufferCacheTestAccess::BdaPageTableInitialized(cache),
+            "BDA page table was not initialized before the first buffer registration");
+    context.GetGpuResources().PrepareBda();
+    Require(name, "prepare",
+            BufferCacheTestAccess::BdaPageTableInitialized(cache),
+            "BDA page table was not initialized during BDA preparation");
+    scheduler.Finish();
+    std::printf("[gpu]     %-32s ok\n", name);
   }
 
   void CheckComputeMetaClearClassification() {
@@ -28843,6 +28873,11 @@ int main(int argc, char **argv) {
   if (argc == 2 && std::strcmp(argv[1], "--buffer-cache-gc-only") == 0) {
     VulkanHarness vulkan;
     vulkan.CheckBufferCacheDirtyGarbageCollection();
+    return 0;
+  }
+  if (argc == 2 && std::strcmp(argv[1], "--bda-page-table-only") == 0) {
+    VulkanHarness vulkan;
+    vulkan.CheckBdaPageTableInitialization();
     return 0;
   }
   if (argc == 2 && std::strcmp(argv[1], "--sampled-depth-resource-only") == 0) {
