@@ -1,6 +1,6 @@
 # Current KytyPS5 debugging state
 
-Last reconciled: 2026-09-12 01:05 Europe/Riga
+Last reconciled: 2026-09-12 02:05 Europe/Riga
 
 This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable mechanisms live in REFERENCE.md.
 
@@ -8,18 +8,18 @@ This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable
 
 Repository/worktree: G:/KytyPS5/repo
 Branch: astro/materialize-resources
-Repository HEAD at the previous docs checkpoint: `4a52de2` (this checkpoint adds only documentation; source/build revision remains `bd131e8`)
-Current source HEAD: bd131e82212f9d60c2b23ed1e05850d9eee4fcf7 (`debug: dump recent submits on wait failure`)
-Last ASTRO runtime source HEAD: bd131e82212f9d60c2b23ed1e05850d9eee4fcf7
-Runtime source HEAD at launch: bd131e82212f9d60c2b23ed1e05850d9eee4fcf7
-Working tree before this checkpoint: clean at `bd131e8`; local install tree was refreshed from this build
+Repository HEAD at this checkpoint: `624fb5d` (diagnostic source commit; docs checkpoint follows)
+Current source HEAD: 624fb5d657b23ac2bece3e5448b88b1f97fa580a (`diag: capture Vulkan device-loss provenance`)
+Last ASTRO runtime source HEAD: 624fb5d657b23ac2bece3e5448b88b1f97fa580a
+Runtime source HEAD at launch: 624fb5d657b23ac2bece3e5448b88b1f97fa580a
+Working tree before this checkpoint: clean at `624fb5d`; local install tree was refreshed from this build
 Build: Release, CMake/Ninja, clang-cl, clang-lld_link-64
 Executable: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.exe
-Executable SHA-256: D5522E70E52A437A7C267E9B2503E42F18716D0AD9E4B2EAC32D0ECCA48BA05D
-Executable size: 21,026,304 bytes; local install refreshed from `bd131e8` before the diagnostic runs
-Build label: Source build bd131e8 (from generated `kytyGitVersion.h`); wait-result and recent-submit diagnostics are enabled
-Matching PDB: G:/KytyPS5/repo/_Build/windows/kyty_emulator.pdb and local install copy; SHA-256 BC29B98CBE80A4C8B84E53BD2A1255EB41E1DCCD9FCA7E548F993490DF1467EF; size 24,059,904 bytes
-Binary provenance: the historical dump/run used 4374a9d above; this bounded capture used the exact 150a139 executable/PDB above
+Executable SHA-256: 978341D098E4302CB4DE4FC279FF13BEC62024C1C23046AFBD11480B4D56139E
+Executable size: 21,026,304 bytes; local install refreshed from `624fb5d` before the diagnostic run
+Build label: Source build 624fb5d (from generated `kytyGitVersion.h`); GPU fault/checkpoint diagnostics are enabled
+Matching PDB: G:/KytyPS5/repo/_Build/windows/kyty_emulator.pdb and local install copy; SHA-256 322B8212BA6E647C6529763069E4F149B161B6033406210892D67305FB962D84; size 24,059,904 bytes
+Binary provenance: the historical dump/run used 4374a9d above; this diagnostic run used the exact 624fb5d executable/PDB above
 
 The system-wide CMake install prefix was not used because it requires administrator access.
 
@@ -30,9 +30,9 @@ Title ID: PPSA21567
 Game input: G:/PS5 Games/PPSA21567/extracted
 Current milestone: M5 main menu — reached in the validated title-screen progression run
 Next milestone: M6 gameplay
-Current P0: classify the cause of the post-M5 `MasterSemaphore::Wait` `ErrorDeviceLost (-4)` failure (`masterSemaphore.cpp:69`)
+Current P0: classify the cause of the post-M5 `MasterSemaphore::Wait` `ErrorDeviceLost (-4)` failure (`masterSemaphore.cpp:69`); the 624fb5d diagnostic run terminated earlier at the existing `MaterializeResources` fatal
 P0 class: GPU synchronization/device-loss runtime result; the exact `vk::Result` is now proven, but its cause is not investigated here
-Last validated progress signal: title screen reached (M5); subsequent diagnostic branches reached 40 compute shaders before an asynchronous device-loss wait failure
+Last validated progress signal: title screen reached (M5); the 624fb5d diagnostic branch reached 40 compute shaders before the existing `MaterializeResources` fatal, so no new device-loss boundary was observed
 Known P1 likely blockers: incorrect color/output interpretation remains P1 and is not a current fix target
 Known P2: cold-start large dispatcher pipeline compilation latency; successful creates are not a hang. Cache persistence/load is proven, but a substantial warm-time reduction is not.
 
@@ -69,7 +69,7 @@ src/graphics/shader/recompiler/ShaderRecompiler.cpp — structured loop-exit val
 src/graphics/shader/recompiler/backend/spirv/spirvEmitterProgram.cpp — metadata/planning-only spill filtering and shader-side SRT alias resolution
 tests/shaderCfgTests.cpp — dispatcher shader-side SRT alias regression
 
-Semantic source checkpoint: `edc7d4f` keeps `.at()` and fixes the producer path: retained bounded `ReadConstBuffer` roots now register their descriptor source through `AddBuffer` and receive `AddMemoryPatch`; ordinary bounded reads remain deferred. No catch-all handler, unchecked access, clamp, substitution, or color change was made. Temporary diagnostics and runtime artifacts remain outside the repository under G:/KytyPS5/notes/ and G:/KytyPS5/logs/.
+Semantic source checkpoint: `edc7d4f` keeps `.at()` and fixes the producer path: retained bounded `ReadConstBuffer` roots now register their descriptor source through `AddBuffer` and receive `AddMemoryPatch`; ordinary bounded reads remain deferred. No catch-all handler, unchecked access, clamp, substitution, or color change was made. Diagnostic and runtime artifacts remain outside the repository under G:/KytyPS5/logs/.
 
 Producer regression: `TestBoundedRootScalarBufferResourceRemap` builds seven ordinary dense buffers, retains a dynamic scalar-buffer root through `PlanBoundedRootReads`/`ApplyBoundedRootReads`, and starts that root with frontend-style `memory.resource=7`. Before `edc7d4f`, `ExtractResourcePlan` failed with `invalid vector subscript`; after it, the root maps to dense buffer 7 and the plan contains eight buffers.
 
@@ -253,3 +253,28 @@ Next action: in the next session, use the existing logs/source to identify the l
 operation and its resource state; add further bounded diagnostics only if that evidence cannot be
 recovered statically. Then build a focused regression before any semantic change. Do not rerun
 ASTRO tonight; do not reopen resource-remap, replay, pipeline-cache, or color work.
+
+## GPU fault diagnostics checkpoint — 2026-09-12
+
+Diagnostic source commit: `624fb5d657b23ac2bece3e5448b88b1f97fa580a` (`diag: capture Vulkan
+device-loss provenance`). The Release executable and matching PDB were built from this exact
+HEAD and copied to the local install tree. EXE SHA-256 is
+`978341D098E4302CB4DE4FC279FF13BEC62024C1C23046AFBD11480B4D56139E`; PDB SHA-256 is
+`322B8212BA6E647C6529763069E4F149B161B6033406210892D67305FB962D84`.
+
+Focused validation passed: `shader_recompiler_compute_tests.exe --scheduler-only` and the full
+`shader_recompiler_compute_tests.exe` both exited 0. The targeted run is
+`G:/KytyPS5/logs/ASTRO_GPU_FAULT_DIAG_20260912_0115/`; the exact command and provenance are in
+`command.txt` and `prelaunch-provenance.json`. Both `VK_EXT_device_fault` and
+`VK_NV_device_diagnostic_checkpoints` logged as enabled.
+
+The run lasted 555.987 s and exited naturally with wrapper status `321` (`0x00000141`). It
+reached 40 compute shaders, then stopped at the existing
+`MaterializeResources(...)` fatal in `pipelineCache.cpp:573`. No `GPU_DEVICE_FAULT` or
+`GPU_CHECKPOINT` block was emitted, no new crash dump appeared, and the device-loss wait was
+not reached. This is evidence that the diagnostic extensions initialize correctly on the
+test machine; it does not classify the separate post-M5 `ErrorDeviceLost (-4)` cause.
+
+Next action: preserve this run and return to static evidence for the existing device-loss P0.
+Do not start a second ASTRO run in this checkpoint and do not change shader, resource, sync, or
+render semantics.

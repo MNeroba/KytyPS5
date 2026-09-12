@@ -263,7 +263,6 @@ src/graphics/shader/recompiler/ir/Value.cpp
 src/graphics/shader/recompiler/ShaderRecompiler.cpp
 src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 G:/KytyPS5/logs/
-G:/KytyPS5/notes/
 ```
 
 Useful existing mechanisms: `LowerScalarBufferReadToBda`, `CloneBdaExpression`, `ShaderSideSrtReadFlag`, `m_bda_srt_clones`, `RefreshShaderSideSrtEligibility`, `PlanBoundedReads`, `ReadBoundedSrtU32`, `RuntimePhiSelect`, `ExtractResourcePlan`, and `MaterializeResources`. Their stable roles are in `REFERENCE.md`.
@@ -334,3 +333,20 @@ definitions in `src/graphics/guest_gpu/command_processor/commandProcessor.h`; EO
 `src/graphics/guest_gpu/graphicsRun.cpp` and `src/graphics/host_gpu/renderer/sync.cpp`.
 
 RELATED CODE/COMMIT: diagnostic submit ring from `bd131e8`; no semantic change made.
+
+### Optional Vulkan fault diagnostics — PROVEN
+
+FACT: On the Windows RTX 3090 test host, `VK_EXT_device_fault` and
+`VK_NV_device_diagnostic_checkpoints` are available and enabled by the diagnostic build
+`624fb5d` without changing required device features or synchronization behavior.
+
+WHY IT MATTERS: Future device-loss runs can query driver fault data and bounded command markers
+at the existing fatal boundary; the extensions themselves are not the blocker.
+
+EVIDENCE: `G:/KytyPS5/logs/ASTRO_GPU_FAULT_DIAG_20260912_0115/runtime.log` logs both extensions
+as enabled. The same run reached the pre-existing `MaterializeResources` fatal before the wait
+boundary, so it produced no fault/checkpoint payload and does not classify the separate
+`ErrorDeviceLost (-4)` cause.
+
+RELATED CODE/COMMIT: `src/graphics/host_gpu/graphicContext.cpp`,
+`src/graphics/host_gpu/renderer/gpuFaultDiagnostics.{h,cpp}`, commit `624fb5d`.

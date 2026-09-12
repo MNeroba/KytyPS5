@@ -183,3 +183,13 @@ values 3 and 5 identify end-of-pipe write and write-back marker submissions. The
 metadata and perform the emulated write, but an `ErrorDeviceLost` returned by the wait does not
 by itself identify that marker as the offending GPU command. Recover the last non-EOP submission
 and its resource state before changing GPU semantics.
+
+## Vulkan device-loss diagnostics
+
+`VK_EXT_device_fault` and `VK_NV_device_diagnostic_checkpoints` are optional capabilities. Keep
+them disabled when unsupported; when enabled, query them only at the existing non-success fatal
+boundary. Fault data is driver evidence, while checkpoint pointers are only meaningful while the
+corresponding marker remains retained from command recording through submit and timeline
+retirement. Validate marker magic/version before decoding and treat an unknown pointer as
+untrusted. These diagnostics must not retry, suppress, or otherwise alter the failed Vulkan
+operation.
