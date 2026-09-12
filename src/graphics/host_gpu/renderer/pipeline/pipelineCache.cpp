@@ -561,11 +561,10 @@ struct PipelineCache::ProgramCache {
 		} else if constexpr (std::is_same_v<InputInfo, ShaderComputeInputInfo>) {
 			options.wave_size = input_info.wave_size;
 		}
-		auto translated = ShaderRecompiler::TranslateProgram(params.code, options);
-		// Persist raw bytes before resource-plan extraction/materialization. Those passes are part
-		// of the crash-prone interval and can fail before CompilePermutation has an exact
-		// specialization.
+		// Persist raw bytes before decoding or any later specialization/resource-plan work. A
+		// decoder failure must still leave the exact guest stream available for offline analysis.
 		DumpShaderRawBeforeCompile(ShaderStageName(stage), options.shader_hash, params.code);
+		auto translated = ShaderRecompiler::TranslateProgram(params.code, options);
 		LogShaderComputeInputBeforeCompile("pre_resource_plan", options);
 		if (entry == programs.end()) {
 			auto resource_plan = ShaderRecompiler::IR::ExtractResourcePlan(translated.program);
