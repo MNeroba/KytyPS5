@@ -1,6 +1,6 @@
 # Current KytyPS5 debugging state
 
-Last reconciled: 2026-09-12 10:28 Europe/Riga
+Last reconciled: 2026-09-12 12:12 Europe/Riga
 
 This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable mechanisms live in REFERENCE.md.
 
@@ -8,18 +8,18 @@ This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable
 
 Repository/worktree: G:/KytyPS5/repo
 Branch: astro/materialize-resources
-Repository HEAD at this checkpoint: `50bb5ad` (`diag: preserve GPU fault batches and partial vendor data`)
-Current source HEAD: 50bb5ad (`diag: preserve GPU fault batches and partial vendor data`)
-Last ASTRO runtime source HEAD: 624fb5d657b23ac2bece3e5448b88b1f97fa580a
-Runtime source HEAD at launch: 624fb5d657b23ac2bece3e5448b88b1f97fa580a
-Working tree before this checkpoint: clean at `624fb5d`; local install tree was refreshed from this build
+Repository HEAD at this checkpoint: `f6da96f` (`shader: retain scalar SRT image value operands`)
+Current source HEAD: f6da96f (`shader: retain scalar SRT image value operands`)
+Last ASTRO runtime source HEAD: f6da96f7d89536fc931033f049a97e32d5baa1cd
+Runtime source HEAD at launch: f6da96f7d89536fc931033f049a97e32d5baa1cd
+Working tree before this checkpoint: clean at `f6da96f`; local install tree was refreshed from this build
 Build: Release, CMake/Ninja, clang-cl, clang-lld_link-64
 Executable: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.exe
-Executable SHA-256: 978341D098E4302CB4DE4FC279FF13BEC62024C1C23046AFBD11480B4D56139E
-Executable size: 21,026,304 bytes; local install refreshed from `624fb5d` before the diagnostic run
-Build label: Source build 624fb5d (from generated `kytyGitVersion.h`); GPU fault/checkpoint diagnostics are enabled
-Matching PDB: G:/KytyPS5/repo/_Build/windows/kyty_emulator.pdb and local install copy; SHA-256 322B8212BA6E647C6529763069E4F149B161B6033406210892D67305FB962D84; size 24,059,904 bytes
-Binary provenance: the historical dump/run used 4374a9d above; this diagnostic run used the exact 624fb5d executable/PDB above
+Executable SHA-256: 11135EDE0163F58E7B84E9C7EEEB82E63A8345EAA7B24CFCEED33B3855A6ED43
+Executable size: 21,051,392 bytes; local install refreshed from `f6da96f` before the progression run
+Build label: Source build f6da96f (runtime reported `f6da96f-dirty`); GPU fault/checkpoint diagnostics are enabled
+Matching PDB: G:/KytyPS5/repo/_Build/windows/kyty_emulator.pdb and local install copy; SHA-256 7C8611B5565144BC2D4402EA5C130F14C69631FF5B66437FC860A4F4F29C3CCB; size 24,068,096 bytes
+Binary provenance: the historical dump/run used 4374a9d above; this progression run used the exact f6da96f executable/PDB above
 
 The system-wide CMake install prefix was not used because it requires administrator access.
 
@@ -30,13 +30,13 @@ Title ID: PPSA21567
 Game input: G:/PS5 Games/PPSA21567/extracted
 Current milestone: M5 main menu — reached in the validated title-screen progression run
 Next milestone: M6 gameplay
-Current P0: classify the cause of the post-M5 `MasterSemaphore::Wait` `ErrorDeviceLost (-4)` failure (`masterSemaphore.cpp:69`); the 624fb5d diagnostic run terminated earlier at the existing `MaterializeResources` fatal
-P0 class: GPU synchronization/device-loss runtime result; the exact `vk::Result` is now proven, but its cause is not investigated here
-Last validated progress signal: title screen reached (M5); the 624fb5d diagnostic branch reached 40 compute shaders before the existing `MaterializeResources` fatal, so no new device-loss boundary was observed
+Current P0: unsupported MS shader control-flow opcode in `ShaderCFG` for hash `0x2b3be82b8235ac05` at PC `0x00003ca0` (`SOPP 0x17`, raw `0xbf970024`)
+P0 class: frontend CFG decode support; the prior `MaterializeResources` PHI blocker is closed
+Last validated progress signal: one post-fix run reached 46 compute shaders, completed CS `0xc8aec8bce60cd4a1` pipeline snapshot, and then failed while decoding MS `0x2b3be82b8235ac05`
 Known P1 likely blockers: incorrect color/output interpretation remains P1 and is not a current fix target
 Known P2: cold-start large dispatcher pipeline compilation latency; successful creates are not a hang. Cache persistence/load is proven, but a substantial warm-time reduction is not.
 
-M1, M2, M3, M4, and M5 are closed/reached. M6 gameplay is not proven. Do not reopen the cleared startup SRT/BDA-lifetime, pipeline-create, submission, visible-frame, or bounded resource-remap conclusions without contradictory evidence.
+M1, M2, M3, M4, and M5 are closed/reached. M6 gameplay is not proven. Do not reopen the cleared startup SRT/BDA-lifetime, pipeline-create, submission, visible-frame, bounded resource-remap, or scalar-PHI materialization conclusions without contradictory evidence.
 
 ## Exact runtime evidence
 
@@ -89,17 +89,27 @@ passes the state into `CompileProgram`.
 The complete production values and paired trace are recorded in **Bounded production capture —
 complete** below. No values were inferred from LocalSize and no replay candidates were guessed.
 
-## Focused validation and tomorrow
+## Focused validation and runtime checkpoint
 
-The diagnostic source change passed `git diff --check` and was committed as `150a139`. A serialized
-Release build (`ninja -C _Build/windows -j1 kyty_emulator shader_recompiler_compute_tests
-shader_replay_tests`) completed; the generated CMake install target still fails at the
-administrator-only system prefix, so the local install executable/PDB were copied directly from
-the build tree. `shader_recompiler_compute_tests` passed (`EXIT_CODE=0`, wall `8.1447 s`, log
-`G:/KytyPS5/logs/shader_recompiler_compute_tests_150a139.log`), and the replay test executable
-help path also returned 0 (`G:/KytyPS5/logs/shader_replay_tests_help_150a139.log`).
+The scalar SRT image-operand fix was committed as `f6da96f` after an authentic
+loop-PHI fail-before regression. `resource_materialization_tests`,
+`scalar_provenance_tests`, and `shader_recompiler_compute_tests` passed; the new
+resource-tracking regression passed before that suite reached its known unrelated
+`dynamic storage mips` baseline failure. The Release build and local install were
+refreshed directly from the build tree because the system CMake install prefix needs
+administrator access.
 
-Next action: classify the proven `ErrorDeviceLost (-4)` boundary from the saved submit ring and system evidence before any semantic fix. Static review confirms the EOP wait is only the detection point; the last retained 16 records contain no direct draw/dispatch, so no causal command is proven yet. Keep color correctness P1 and cold pipeline latency P2. End-of-day checkpoint: no new ASTRO run, no semantic change, and no unproven hypothesis promoted to project memory.
+Run/artifact: `G:/KytyPS5/logs/ASTRO_MATERIALIZE_FIX_20260912_1200/`.
+The exact command, source/executable/PDB provenance, stdout/stderr, and process result
+are recorded there. The run reached 46 compute shaders and completed a snapshot for
+CS `0xc8aec8bce60cd4a1` (`elapsed_ms=39826`), proving the previous materialization
+failure no longer occurs. It then stopped at the first new blocker: MS
+`0x2b3be82b8235ac05`, PC `0x00003ca0`, unsupported SOPP opcode `0x17` raw
+`0xbf970024` in `ShaderCFG.cpp:40`; process result was `0x00000141`.
+
+Next action: classify this MS CFG opcode from source/ISA evidence before any new
+runtime run or semantic change. Keep color correctness P1 and cold pipeline latency
+P2; do not reopen the closed resource/remap/PHI findings.
 
 ## Bounded production-capture attempt
 

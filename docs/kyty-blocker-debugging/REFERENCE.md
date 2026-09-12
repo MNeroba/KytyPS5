@@ -130,6 +130,12 @@ ReadLane, LocalInvocationId/Index, BVH state, or another lane-dependent address 
 
 `EvaluateDescriptorSource` and `MaterializeResources` consume the extracted plan. “PHI is not invariant,” “cannot evaluate Void,” or “address is not host-readable” identifies the evaluator sink only.
 
+Shader-side scalar SRT eligibility follows the IR argument types for image
+operations: `ImageResource` and `SamplerResource` are descriptor identities and
+remain host-tracked, while image addresses, payloads, predicates, and atomic data
+are shader values. Non-void image results are traversed transitively so a later
+descriptor-identity use still invalidates shader-side retention.
+
 Interpretation examples:
 
 - `Void` can mean a plan retained an invalidated IR value.

@@ -214,6 +214,49 @@ EVIDENCE: `TestBoundedRootScalarBufferResourceRemap` builds seven ordinary dense
 
 RELATED CODE/COMMIT: `ResourceTracking.cpp::Collect`, `PlanBoundedRootReads`, `ApplyBoundedRootReads`; `tests/ResourceTrackingTests.cpp`; semantic commit `edc7d4f`.
 
+### Scalar SRT image value operands — PROVEN
+
+FACT: `ShaderSideUseGraph` must distinguish image descriptor identity from value
+operands. `ImageResource` and `SamplerResource` remain host-tracked identities;
+image addresses, coordinates, payloads, predicates, and atomic data are ordinary
+shader values. Non-void image results are walked transitively so a later descriptor
+identity use still rejects the root.
+
+WHY IT MATTERS: A loop-carried scalar-address SRT value used only through an image
+value operand must not be host-materialized. Treating every image use as a sink
+caused `MaterializeResources` to evaluate a non-invariant PHI and stopped ASTRO
+before SPIR-V emission.
+
+EVIDENCE: The authentic regression in `tests/ResourceTrackingTests.cpp` fails on
+the parent implementation and passes after `f6da96f`; `resource_materialization_tests`,
+`scalar_provenance_tests`, and `shader_recompiler_compute_tests` pass. The fix keeps
+the resource-identity rejection cases green and does not alter `.at()` or Vulkan
+error handling.
+
+RELATED CODE/COMMIT: `SrtWalker.cpp::IsShaderSideImageOperand` and
+`ShaderSideUseGraph`; semantic commit `f6da96f`.
+
+### Post-fix runtime boundary — PROVEN
+
+FACT: After `f6da96f`, ASTRO progressed past CS `0xc8aec8bce60cd4a1` and reached
+46 compute shaders. Its first new fatal boundary is MS shader
+`0x2b3be82b8235ac05`, PC `0x00003ca0`, decoded raw `0xbf970024`: unsupported SOPP
+opcode `0x17` in `ShaderCFG.cpp:40`. The run did not reach M6 and no fix was made
+for this next blocker.
+
+WHY IT MATTERS: The materialization invariant is closed for the observed path.
+Future work should classify this frontend CFG/ISA gap first; colors remain P1 and
+pipeline-cache latency remains P2.
+
+EVIDENCE: `G:/KytyPS5/logs/ASTRO_MATERIALIZE_FIX_20260912_1200/runtime.log`
+lines 778545–778565; stdout ends at `VS 21 | PS 34 | CS 46 | GS 1`; process result
+is `0x00000141`. Runtime provenance is source `f6da96f7d89536fc931033f049a97e32d5baa1cd`,
+installed executable SHA-256
+`11135EDE0163F58E7B84E9C7EEEB82E63A8345EAA7B24CFCEED33B3855A6ED43`.
+
+RELATED CODE/COMMIT: `src/graphics/shader/recompiler/frontend/cfg/ShaderCFG.cpp:40`;
+no semantic follow-up commit yet.
+
 ## Confirmed blocker history and commits
 
 The later semantic and documentation checkpoints are also durable:
