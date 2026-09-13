@@ -217,15 +217,17 @@ void GpuFaultDiagnostics::DumpCheckpoints() {
 	}
 }
 
-void GpuFaultDiagnostics::DumpCommandSnapshots(uint64_t failing_tick) {
+size_t GpuFaultDiagnostics::DumpCommandSnapshots(uint64_t failing_tick) {
 	std::lock_guard lock(m_mutex);
+	size_t          emitted_batches = 0;
 	LOGF("GPU_COMMAND_SNAPSHOT_WINDOW failing_tick=%" PRIu64
 	     " retained_batches=%zu max_batches=%zu\n",
 	     failing_tick, m_snapshot_batches.size(), MaxSubmittedSnapshotBatches);
+	// The ring is retired by the last known GPU tick.  A concurrent submit can
+	// assign a tick newer than the wait that reported the loss, so every batch
+	// still retained here belongs to the bounded non-retired fault window.
 	for (const auto& batch: m_snapshot_batches) {
-		if (batch.tick > failing_tick) {
-			continue;
-		}
+		++emitted_batches;
 		LOGF("GPU_COMMAND_SNAPSHOT_BATCH tick=%" PRIu64 " commands=%zu total=%u dropped=%u\n",
 		     batch.tick, batch.snapshots.commands.size(), batch.snapshots.total_commands,
 		     batch.snapshots.dropped_commands);
@@ -273,6 +275,7 @@ void GpuFaultDiagnostics::DumpCommandSnapshots(uint64_t failing_tick) {
 			}
 		}
 	}
+	return emitted_batches;
 }
 
 void GpuFaultDiagnostics::ReportDeviceLost(const char* source, vk::Result result, uint64_t tick) {
@@ -289,7 +292,7 @@ void GpuFaultDiagnostics::ReportDeviceLost(const char* source, vk::Result result
 	}
 	DumpDeviceFault(source, tick);
 	DumpCheckpoints();
-	DumpCommandSnapshots(tick);
+	static_cast<void>(DumpCommandSnapshots(tick));
 }
 
 } // namespace Libs::Graphics

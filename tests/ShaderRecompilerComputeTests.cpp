@@ -143,6 +143,11 @@ struct GpuFaultDiagnosticsTestAccess {
     return {diagnostics.m_snapshot_batches.front().tick,
             diagnostics.m_snapshot_batches.back().tick};
   }
+
+  static size_t DumpSnapshots(GpuFaultDiagnostics &diagnostics,
+                              uint64_t failing_tick) {
+    return diagnostics.DumpCommandSnapshots(failing_tick);
+  }
 };
 
 template <typename Cache>
@@ -2205,6 +2210,45 @@ public:
             reentrant == 2 && concurrent_completed.load(),
             "shutdown lost reentrant or concurrent deferred work");
     std::printf("[host]    %-32s ok\n", "SchedulerTimeline");
+  }
+
+  void CheckGpuFaultSnapshotReporting() {
+    constexpr const char *name = "GpuFaultSnapshotReporting";
+    GpuFaultDiagnostics diagnostics(RuntimeContext());
+    constexpr uint64_t failing_tick = 100;
+    for (uint64_t tick = 101; tick <= 103; ++tick) {
+      GpuCommandSnapshotBatch batch{};
+      batch.total_commands = 1;
+      GpuCommandSnapshot command{};
+      command.operation_order = static_cast<uint32_t>(tick - 101);
+      command.debug_op = static_cast<uint32_t>(CommandBufferDebugOp::DispatchDirect);
+      command.guest_submit = 0x6200 + tick;
+      command.pipeline = 0x90000000 + tick;
+      command.shader_hashes[0] = 0x0102030405060708ull;
+      command.arguments = {4096, 1, 1, 65, 0x000000050052a400ull, 0, 0, 0};
+      GpuBufferSnapshot buffer{};
+      buffer.kind = static_cast<uint32_t>(GpuSnapshotBufferKind::ShaderData);
+      buffer.shader_stage = 2;
+      buffer.resource_index = 3;
+      buffer.vk_buffer = 0x10000000 + tick;
+      buffer.guest_address = 0x50000000 + tick * 0x1000;
+      buffer.host_bda = 0x20000000 + tick * 0x1000;
+      buffer.descriptor_range = 0x1000;
+      buffer.allocation_guest = buffer.guest_address;
+      buffer.allocation_size = 0x4000;
+      buffer.allocation_live = true;
+      command.buffers.push_back(buffer);
+      batch.commands.push_back(std::move(command));
+      diagnostics.CommitSubmit(tick, {}, std::move(batch));
+    }
+
+    // Retained batches are the bounded non-retired fault window. They may have
+    // been assigned after the wait tick while another submit was in flight.
+    const auto emitted = GpuFaultDiagnosticsTestAccess::DumpSnapshots(
+        diagnostics, failing_tick);
+    Require(name, "retained batch records", emitted == 3,
+            "snapshot report did not emit every retained batch");
+    std::printf("[host]    %-32s ok\n", name);
   }
 
   void CheckGpuMappedRangeLifecycle() {
@@ -28853,6 +28897,16 @@ int main(int argc, char **argv) {
   if (argc == 2 && std::strcmp(argv[1], "--scheduler-only") == 0) {
     VulkanHarness vulkan;
     vulkan.CheckSchedulerTimeline();
+    return 0;
+  }
+  if (argc == 2 && std::strcmp(argv[1], "--gpu-fault-snapshot-only") == 0) {
+    Config::ConfigOptions options;
+    options.printf_direction = Config::OutputDirection::Console;
+    Config::Load(options);
+    Log::Initialize();
+    VulkanHarness vulkan;
+    vulkan.CheckGpuFaultSnapshotReporting();
+    Log::Shutdown();
     return 0;
   }
   if (argc == 2 && std::strcmp(argv[1], "--host-image-allocation-only") == 0) {

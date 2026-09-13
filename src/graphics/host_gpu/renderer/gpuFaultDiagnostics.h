@@ -163,7 +163,7 @@ private:
 	[[nodiscard]] const GpuCheckpointMarker* FindMarkerLocked(const void* marker) const;
 	void                                     DumpDeviceFault(const char* source, uint64_t tick);
 	void                                     DumpCheckpoints();
-	void                                     DumpCommandSnapshots(uint64_t failing_tick);
+	[[nodiscard]] size_t                     DumpCommandSnapshots(uint64_t failing_tick);
 
 	GraphicContext*                    m_graphics = nullptr;
 	std::mutex                         m_mutex;
