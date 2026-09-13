@@ -955,3 +955,23 @@ EVIDENCE: `G:/KytyPS5/logs/SWAPPC_DIAGNOSTIC_20260913_/capture-report.txt`,
 
 RELATED CODE: `src/graphics/shader/recompiler/ShaderSwapPcDiagnostic.{h,cpp}` and
 `src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp`.
+
+### CS scalar-source 0xe0 provenance audit — PROVEN for preserved artifact, current run unresolved
+
+FACT (**PROVEN**): The only preserved raw stream containing the reported offset `pc=0x370`
+is the older `fb948a435a4e295e` compute artifact (`1104` bytes). Its dword at `0x370` is
+`0x881000e0`, which local VOP2 field rules decode as opcode `0x04` (`V_SUB_F32 v8, src0=0xe0,
+v0`). Scalar source `0xe0` is reserved by the RDNA2 source-code ranges.
+
+FACT (**PROVEN**): That artifact's reachable stream ends at `S_ENDPGM` raw `0xbf810000` at
+`0x2dc`; all bytes through `0x370` are post-END padding/embedded metadata. No branch target
+enters this region, and current `DecodeProgram` returns at an END with no pending target.
+
+WHY IT MATTERS: This is the same broad trailing-data shape as the closed MS case, but without
+a backedge. It does not justify another traversal change. The current diagnostic run reports
+address `0x908e86a00`, hash `a572ee17a880e71c`, and `code_words=60`; its persisted 240-byte
+stream cannot contain `pc=0x370`. Therefore the current failure remains a provenance mismatch,
+and the older `fb948` bytes/hash/guest address must not be transferred to it.
+
+EVIDENCE: `G:/KytyPS5/logs/CS_E0_CLASSIFICATION_20260913_/analysis.txt` and
+`G:/KytyPS5/logs/SWAPPC_DIAGNOSTIC_20260913_/runtime/runtime.log`.

@@ -29,9 +29,9 @@ Title ID: PPSA21567
 Game input: G:/PS5 Games/PPSA21567/extracted
 Current milestone: M5 main menu — reached in the validated title-screen progression run
 Next milestone: M6 gameplay
-Current P0: classify the earlier decoder boundary reached by the only diagnostic ASTRO run: CS `0x0000000908e86a00` / hash `0xa572ee17a880e71c`, scalar source `0x000000e0` at `pc=0x00000370`. The requested MS `S_SWAPPC_B64` capture was not reached.
-P0 class: shader/recompiler control-flow support for an external dynamic call; no `S_LSHR_B64` semantic gap proven
-Last validated progress signal: focused `shader_cfg_tests` passed with the synthetic diagnostic resolver; one ASTRO run with the opt-in flag stopped at the earlier CS scalar-source decoder failure before MS `0x2b3be82b8235ac05` was encountered.
+Current P0: classify the earlier decoder boundary reached by the only diagnostic ASTRO run: reported CS address `0x0000000908e86a00`, hash `0xa572ee17a880e71c`, scalar source `0x000000e0` at `pc=0x00000370`. The requested MS `S_SWAPPC_B64` capture was not reached; the same-run raw stream is absent.
+P0 class: shader decoder stream provenance / traversal boundary; no source-`0xe0` support or S_SWAPPC semantic gap is proven
+Last validated progress signal: offline inspection of the only preserved raw stream containing `pc=0x370` finds `0x881000e0` (`VOP2 V_SUB_F32 v8, src0=0xe0, v0`) after `S_ENDPGM`; that stream is an older hash `0xfb948a435a4e295e` artifact, not the current run's `a572...` 60-dword stream. Current-run provenance remains incomplete.
 Known P1 likely blockers: incorrect color/output interpretation remains P1 and is not a current fix target
 Known P2: cold-start large dispatcher pipeline compilation latency; successful creates are not a hang. Cache persistence/load is proven, but a substantial warm-time reduction is not.
 
@@ -59,7 +59,7 @@ MaterializeResources error, clean-shutdown record, or crash dump was produced. M
 not proven. Do not attribute this boundary to any individual upstream port until an offline
 comparison establishes that connection.
 
-Next action: classify the new CS `0xe0` scalar-source boundary offline. Do not rerun ASTRO or implement S_SWAPPC semantics in this checkpoint; retain the diagnostic resolver for a future run only if the earlier blocker is cleared.
+Next action: obtain a same-invocation raw code window/hash for the `pc=0x370` failure before any decoder change. Do not rerun ASTRO, add scalar-source `0xe0`, or alter the dormant S_SWAPPC path in this checkpoint.
 
 ## S_SWAPPC dispatch-side diagnostic capture — 2026-09-13
 
@@ -76,6 +76,18 @@ cache and terminated with wrapper status `321` (`0x141`) at CS `0x0000000908e86a
 `ShaderDecoder.cpp:269`. No `ShaderSwapPcDiagnostic` record for MS
 `0x2b3be82b8235ac05` / raw `0xbe8e210e` was emitted because that shader was not reached.
 No second runtime run was performed. The requested production target remains unresolved.
+
+## CS scalar-source 0xe0 classification — 2026-09-13
+
+Artifact: `G:/KytyPS5/logs/CS_E0_CLASSIFICATION_20260913_/analysis.txt`. The runtime log reports
+address `0x0000000908e86a00` and a successful `a572ee17a880e71c` compile with `code_words=60`,
+so `pc=0x370` lies outside that 240-byte stream. The only preserved raw stream containing the
+reported offset is the older hash-keyed `fb948a435a4e295e` artifact (1104 bytes): raw
+`0x881000e0` at `0x370` decodes by local VOP2 rules as `V_SUB_F32 v8, scalar source 0xe0, v0`.
+Its reachable decode ends at `S_ENDPGM` at `0x2dc`; all words through `0x370` are post-END
+padding/metadata. This independently demonstrates the trailing-data shape (B) for that old
+artifact, but cannot classify the current run because guest-address/hash provenance does not
+match. No traversal or decoder change is justified.
 
 ## SOP1 S_SWAPPC call-contract audit — 2026-09-13
 
