@@ -219,6 +219,35 @@ WHY IT MATTERS: The snapshot was not exercised because this decoder boundary pre
 post-M5 device-loss window. The next session should classify this exact opcode before any new
 runtime run; do not infer a device-loss cause from this capture.
 
+### Non-retired tick coverage and device-loss correlation — PROVEN coverage, root unclassified
+
+FACT: In `G:/KytyPS5/logs/ASTRO_MS_FIX_20260913_0015/runtime_actual/`, the first
+`VK_ERROR_DEVICE_LOST (-4)` wait requested tick `329621` with `known=329597` and
+`current=329622`; therefore the non-retired interval at failure is `[329598,329621]`.
+Ticks `329608..329621` are present as EOP records in the 128-entry MasterSemaphore history.
+Their missing `last non-EOP` metadata means those command buffers had no retained Dispatch/Draw
+summary; it does not indicate ring truncation. The fixed failure print omits `329600..329604`,
+and the bounded snapshot ring retained three batches out of capacity 64.
+
+WHY IT MATTERS: Establish tick coverage before correlating commands or shaders. Do not call an
+EOP-only interval absent, and do not infer the root cause from the last marker alone.
+
+FACT: The recoverable same-run target dispatch is tick `329598`, guest submit `6263`, CS
+`0x657ad04626bf9d55`, groups `4096x1x1`, guest code `0x000000050052a400`. Its 10 buffers and
+13 images are live, descriptor ranges are valid (`violations=0`), and image 0 is R32_UINT,
+GENERAL, read/write/atomic, matching SPIR-V binding 41. No stale/freed resource, invalid range,
+synchronization/layout, or shader semantic violation is proven because predecessor barrier and
+dynamic BDA history are not retained.
+
+EVIDENCE: `device-loss-static-analysis.txt`, `snapshot-window-329621.txt`, and
+`snapshot-resource-validation.txt` in the artifact above; source paths are
+`gpuFaultDiagnostics.cpp`, `commandScheduler.cpp`, `masterSemaphore.cpp`, `renderCompute.cpp`,
+`shaderResourceBarrier.cpp`, and `descriptors.cpp`.
+
+RELATED CODE/COMMIT: bounded snapshot ownership is in `5ebf00a`; the current runtime/documentation
+provenance is commit `807a84d`. Do not rerun ASTRO, enable `VK_EXT_device_address_binding_report`,
+or change semantics until one exact missing runtime fact is identified.
+
 EVIDENCE: `G:/KytyPS5/logs/GPU_TICK_SNAPSHOT_ASTRO_20260912_213444/runtime.log`, `stdout.txt`,
 `stderr.txt`, and `process-result.txt`; source/build `5ebf00a`; wrapper exit `321` (`0x141`).
 

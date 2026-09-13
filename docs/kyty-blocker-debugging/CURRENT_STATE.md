@@ -1,6 +1,6 @@
 # Current KytyPS5 debugging state
 
-Last reconciled: 2026-09-12 23:23 Europe/Riga
+Last reconciled: 2026-09-13 Europe/Riga
 
 This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable mechanisms live in REFERENCE.md.
 
@@ -8,17 +8,17 @@ This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable
 
 Repository/worktree: G:/KytyPS5/repo
 Branch: astro/materialize-resources
-Repository HEAD for runtime/test provenance: `f55195e25f9379b8503e47aebc034243741cd409` (`docs: supersede MS raw preservation gap`)
+Repository HEAD for runtime/test provenance: `807a84daac695593906d2f0f1c7f286baa950614` (`docs: record exact MS decoder regression provenance`)
 Documentation checkpoint is the current tip; use `git rev-parse HEAD` for its generated commit id.
 Current semantic source HEAD: `5e2e21995c80a5b29bb84dde8e43d110c1cd6375`
-Last ASTRO runtime source HEAD: `f55195e25f9379b8503e47aebc034243741cd409`
+Last ASTRO runtime source HEAD: `807a84daac695593906d2f0f1c7f286baa950614`
 Working tree for this checkpoint: clean
 Build: Release, CMake/Ninja, clang-cl, clang-lld_link-64
 Executable: G:/KytyPS5/repo/_Build/windows/kyty_emulator.exe
-Executable SHA-256: `088AB05BEB634BA142158AB2F10A32A89277142CCE0ABD9E22CE1675F6CC1A12`
-Executable size: 21,075,456 bytes; built from `f55195e`
-Build label: `Source build f55195e`
-Matching PDB: G:/KytyPS5/repo/_Build/windows/kyty_emulator.pdb; SHA-256 `49ADAEA0AC24DC66B8E0E9EB6B81493BB561F1DC50DF84CEDF8EC232B0A2D8FF`
+Executable SHA-256: `08B12E6EAA4B597BFB4081DB94547AAC5760B9BC76742C3B44580500A028117E`
+Executable size: 21,075,456 bytes; built from `807a84d`
+Build label: `Source build 807a84d`
+Matching PDB: G:/KytyPS5/repo/_Build/windows/kyty_emulator.pdb; SHA-256 `C25BE72AF4024F15BB4B4CE04330A3E83507441A208DDF17EAC872B6A666E4C6`
 Binary provenance: build-tree executable/PDB used by the latest ASTRO run
 
 The system-wide CMake install prefix was not used because it requires administrator access.
@@ -30,13 +30,38 @@ Title ID: PPSA21567
 Game input: G:/PS5 Games/PPSA21567/extracted
 Current milestone: M5 main menu — reached in the validated title-screen progression run
 Next milestone: M6 gameplay
-Current P0: classify the first post-M4 `VK_ERROR_DEVICE_LOST (-4)` boundary after target CS dispatch tick `327678`/failing wait ticks `327701` and `327678`; the old MS tail invocation was not re-entered in the latest run
+Current P0: classify the first post-M5 `VK_ERROR_DEVICE_LOST (-4)` boundary at requested tick `329621` (`known=329597`, `current=329622`); exact non-retired coverage is proven, but no first concrete resource, range, synchronization, or shader contract violation is established
 P0 class: GPU execution/device loss (no stale resource or invalid range proven)
-Last validated progress signal: production-derived MS tail regression ran separately with exit 0 and the full `shader_cfg_tests` suite passed; the latest f55195 ASTRO run reached CS `0x657ad04626bf9d55` SPIR-V emission and then `vkDevice.waitSemaphores` returned `ErrorDeviceLost (-4)`.
+Last validated progress signal: the 807a84d ASTRO run passed the MS tail fix, emitted CS `0x657ad04626bf9d55` as 124012 SPIR-V words, reached M5/HostPresent, then `vkDevice.waitSemaphores` returned `ErrorDeviceLost (-4)`; the bounded fault snapshot reports no resource-range violations.
 Known P1 likely blockers: incorrect color/output interpretation remains P1 and is not a current fix target
 Known P2: cold-start large dispatcher pipeline compilation latency; successful creates are not a hang. Cache persistence/load is proven, but a substantial warm-time reduction is not.
 
 M1, M2, M3, M4, and M5 are closed/reached. M6 gameplay is not proven. Do not reopen the cleared startup SRT/BDA-lifetime, pipeline-create, submission, visible-frame, bounded resource-remap, scalar-PHI materialization, or TTMP scalar-source conclusions without contradictory evidence.
+
+## Latest tick coverage and static device-loss correlation — 2026-09-13
+
+Artifact: `G:/KytyPS5/logs/ASTRO_MS_FIX_20260913_0015/`; static report:
+`G:/KytyPS5/logs/ASTRO_MS_FIX_20260913_0015/device-loss-static-analysis.txt`.
+The first wait error requested tick `329621` with `known=329597` and `current=329622`, so the
+inclusive non-retired interval is `[329598,329621]`. Ticks `329608..329621` are present in the
+128-entry MasterSemaphore submit history as EOP writes; their missing `last non-EOP` metadata and
+absence of snapshots indicate EOP-only command buffers, not ring truncation. Ticks `329600..329604`
+are outside the fixed 16-entry failure print and must not be treated as absent. The snapshot ring
+retained three batches with capacity 64.
+
+The recoverable target dispatch is tick `329598`, guest submit `6263`, CS
+`0x657ad04626bf9d55`, groups `4096x1x1`, guest code `0x000000050052a400`. All captured owners are
+live and descriptor ranges are valid (`violations=0`); image 0 is `VK_FORMAT_R32_UINT`, GENERAL,
+read/write/atomic and matches SPIR-V binding 41. The source ordering is
+`FindBuffers -> PrepareBda -> Rebind/CommitBindings -> ShaderWriteHazardBarrier -> dispatch ->
+ShaderAccessBarrier`, but the artifact lacks a complete predecessor barrier/BDA history.
+No stale/freed resource, invalid range, synchronization/layout, or shader semantic violation is
+proven. Do not rerun ASTRO or enable address-binding diagnostics until one exact missing fact is
+selected.
+
+Next action: use existing source and artifacts to select one concrete missing fact at the earliest
+device-loss boundary; only then add a bounded diagnostic or focused regression. Keep color, replay,
+resource-remap, and pipeline-cache work closed.
 
 ## Exact MS regression verification — 2026-09-12
 
