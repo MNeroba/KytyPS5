@@ -1,6 +1,6 @@
 # Current KytyPS5 debugging state
 
-Last reconciled: 2026-09-13 16:55 Europe/Riga
+Last reconciled: 2026-09-13 17:25 Europe/Riga
 
 This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable mechanisms live in REFERENCE.md.
 
@@ -8,17 +8,17 @@ This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable
 
 Repository/worktree: G:/KytyPS5/repo
 Branch: astro/materialize-resources
-Repository HEAD for documentation checkpoint: `e483b45e624477187e289a764c2ae1e2488fe900`
-Current semantic source HEAD: `e483b45` (documentation checkpoint on top of the deterministic spill fix)
-Last ASTRO runtime source HEAD: `e483b45` (warm-cache progression run)
+Repository source HEAD for runtime checkpoint: `77d499e94115046661fe8c6d2ff13552399753b0`
+Current semantic source HEAD: `77d499e` (external S_SWAPPC resolution and integration guard)
+Last ASTRO runtime source HEAD: `77d499e` (post-S_SWAPPC progression run)
 Working tree for this checkpoint: docs-only changes pending
 Build: Release, CMake/Ninja, clang-cl, clang-lld_link-64
 Executable: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.exe
-Executable SHA-256: `143E4BA3660D47C6C48527D7F495DACBB982DB018C0F33CFDCE28B08D5173D5D`
-Executable built and copied to install from exact `e483b45`
+Executable SHA-256: `D695A9512E22100611D928B56CAEC4B242F2939F2D0553FEE3C549DF55E45DF9`
+Executable built and copied to install from exact `77d499e`
 Build label: Release rebuild for warm-cache ASTRO progression
-Matching PDB: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.pdb; SHA-256 `121E1DB668BD6CB33F2F3B97FF00759BDE9E7E0FB52CFCBB0926F3083BBDE7C3`
-Binary provenance: current Release executable/PDB rebuilt from `e483b45`; warm per-title cache loaded before progression run
+Matching PDB: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.pdb; SHA-256 `A30BBFB3949DCA12545A61AF1FDA1D654AF01A3DCCED7F5F573A42BB9EC97676`
+Binary provenance: current Release executable/PDB rebuilt from `77d499e`; warm per-title cache loaded before progression run
 
 The system-wide CMake install prefix was not used because it requires administrator access.
 
@@ -29,11 +29,28 @@ Title ID: PPSA21567
 Game input: G:/PS5 Games/PPSA21567/extracted
 Current milestone: M5 main menu — reached in the validated title-screen progression run
 Next milestone: M6 gameplay
-Current P0: implement the proven production `S_SWAPPC_B64 s[14:15], s[14:15]` path for MS `0x2b3be82b8235ac05` at `pc=0x3da8` (`raw=0xbe8e210e`).
-P0 class: deterministic production CFG blocker; the warmed cache removed the prior startup compilation stalls.
-Last validated progress signal: the exact warm-cache ASTRO run loaded the 8,725,962-byte cache payload, produced no expensive records for the four giant pipelines, and reached the MS target before CFG failed.
+Current P0: classify the first post-S_SWAPPC runtime `VK_ERROR_DEVICE_LOST (-4)` boundary in `G:/KytyPS5/logs/ASTRO_SWAPPC_M6_20260913_1725/`.
+P0 class: asynchronous Vulkan device loss after the former production CFG blocker; no command/resource cause is proven yet.
+Last validated progress signal: the exact warm-cache ASTRO run loaded the persisted cache, reached 40 CS shaders and continued beyond MS `0x2b3be82b8235ac05`; `vkDevice.waitSemaphores` then returned `ErrorDeviceLost (-4)`.
 Known P1 likely blockers: incorrect color/output interpretation remains P1 and is not a current fix target
 Known P2: cold-start large dispatcher pipeline compilation latency; successful creates are not a hang. A fresh cache removes this cost on subsequent starts.
+
+## External S_SWAPPC runtime validation — 2026-09-13
+
+The generic dispatch-side external-call implementation is committed in `4ab899d`, with
+branch-aware production traversal and destination-pair validation in `51af33f`, and the
+unconditional-resolver guard in `77d499e`. Focused `shader_cfg_tests`,
+`shader_recompiler_compute_tests`, `resource_materialization_tests`, and `scalar_provenance_tests`
+pass. `resource_tracking_tests` still reports its unrelated dynamic-storage-mips baseline failure.
+
+The final one-run artifact is
+`G:/KytyPS5/logs/ASTRO_SWAPPC_M6_20260913_1725/`; its exact command and binary/cache hashes are
+in `provenance.txt`. The run produced no prior S_SWAPPC CFG failure or scalar-tail diagnostic and
+reached 40 CS shaders. The first new terminal boundary was `vkDevice.waitSemaphores` returning
+`ErrorDeviceLost (-4)` for ticks `329976` and `329999` (`known=329975`, `current=330000`), with
+the existing retained snapshot report (3 batches, 3 commands, 18 buffer records, and 24 image
+records). M6 gameplay is not proven. Do not reopen S_SWAPPC, SPIR-V determinism, or pipeline-cache
+work; classify this same-run device-loss chain next.
 
 ## Warm-cache M6 progression run — 2026-09-13
 

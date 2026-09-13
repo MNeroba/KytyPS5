@@ -12,6 +12,15 @@ guest shader → decode → CFG/IR → SRT planning
 → Vulkan pipeline/dispatch → GPU execution
 ```
 
+## External S_SWAPPC calls
+
+`S_SWAPPC_B64` exchanges the old source SGPR pair with the return PC and jumps to a guest target;
+the source and destination pairs may overlap. When the target is an external mapped shader
+allocation, resolve it at dispatch time from live user data and scalar provenance, trim the callee
+at its matching `S_SETPC_B64`, splice the callee body into the caller, and remap caller-relative
+branches. Keep this path outside ordinary local CFG edges; unresolved external targets remain a
+compile blocker rather than silently falling through.
+
 A later sink can originate in an earlier decision. IR values stored in side plans are not ordinary use edges; any plan that crosses rewriting or DCE must explicitly preserve, refresh, or own its inputs until extraction.
 
 ## SOPP conditional debug control flow

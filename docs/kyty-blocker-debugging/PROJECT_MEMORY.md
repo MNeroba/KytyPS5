@@ -2,6 +2,45 @@
 
 Durable, non-chronological facts that are expensive to rediscover. Read `CURRENT_STATE.md` first. Put current milestones, P0, worktree, executable, and next action there; stable mechanisms live in `REFERENCE.md`.
 
+### External S_SWAPPC call lowering — PROVEN
+
+FACT: The local front end does not decode `S_SWAPPC_B64` as a normal CFG instruction. For a
+resolved external target, the correct generic boundary is dispatch-side: reuse the existing
+branch-aware scalar-provenance walker while live user data is available, map the target into a
+registered guest shader allocation, trim the callee at its matching `S_SETPC_B64`, splice the
+callee body at the call site, and remap caller PC-relative branches. Source and destination SGPR
+pairs are distinct; the production overlap `s[14:15], s[14:15]` preserves the old source pair
+before the return PC write.
+
+WHY IT MATTERS: Adding an opcode alias or fake fallthrough would miscompile external calls and
+would not represent a target outside the current shader allocation.
+
+EVIDENCE: Authentic raw `0xbe8e210e` fail-before fixture and splice pass-after in
+`tests/shaderCfgTests.cpp`; focused shader/recompiler/materialization/scalar suites pass. The
+implementation is in `shaderCallTrace.{h,cpp}`, `pipelineCache.cpp`, and the mapped-range lookup
+in `shader.{h,cpp}`. Commits `4ab899d`, `51af33f`, and `77d499e`.
+
+RELATED CODE/COMMIT: upstream KytyPS5 PR #427 semantic reference `a2cafb2f`; local dispatch
+integration is in `ProgramCache::Get` before `TranslateProgram`.
+
+### S_SWAPPC post-fix runtime boundary — PROVEN
+
+FACT: The exact Release `77d499e` warm-cache run reached the former MS
+`0x2b3be82b8235ac05` call path and continued to 40 compute shaders; the next terminal event was
+`vkDevice.waitSemaphores` `ErrorDeviceLost (-4)` at waits for ticks `329976` and `329999`, with
+`known=329975` and `current=330000`.
+
+WHY IT MATTERS: The S_SWAPPC CFG blocker is cleared, while the new device-loss cause remains
+unattributed. Do not transfer old tick/resource identities or reopen the closed call lowering.
+
+EVIDENCE: Same-run artifact `G:/KytyPS5/logs/ASTRO_SWAPPC_M6_20260913_1725/`; retained records
+include the existing tick-keyed snapshot window and `GPU_DEVICE_FAULT` output. No giant cold
+pipeline compile returned. The first two integration attempts had no game run (`usage`), and the
+intermediate `e5` failure was caused by decoding shaders without S_SWAPPC; the generic raw precheck
+in `77d499e` prevents that regression.
+
+RELATED CODE/COMMIT: `masterSemaphore.cpp`, `gpuFaultDiagnostics.cpp`, `77d499e`.
+
 ## Environment and baselines
 
 - **PROVEN:** Main repository is `G:/KytyPS5/repo`; the fork is `MNeroba/KytyPS5`. The normal installed executable is `G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.exe`.
