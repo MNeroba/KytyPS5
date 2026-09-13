@@ -490,6 +490,11 @@ target_include_directories(image_page_table_tests PRIVATE ${inc_headers})
 
 add_kyty_full_emulator_test(shader_recompiler_compute_tests "${KYTY_TESTS_DIR}/ShaderRecompilerComputeTests.cpp")
 
+add_executable(pipeline_cache_fingerprint_tests EXCLUDE_FROM_ALL
+	"${KYTY_TESTS_DIR}/PipelineCacheFingerprintTests.cpp")
+target_link_libraries(pipeline_cache_fingerprint_tests xxhash)
+target_include_directories(pipeline_cache_fingerprint_tests PRIVATE ${inc_headers})
+
 set(gpu_test_generated_dir "${PROJECT_BINARY_DIR}/gpu_test_shaders")
 set(gpu_test_ms_depth_source
 	"${gpu_tiler_shader_dir}/gpu_test_ms_depth.comp")
@@ -550,6 +555,7 @@ if(BUILD_TESTING)
 	add_test(NAME sync_on_address COMMAND $<TARGET_FILE:sync_on_address_tests>)
 	add_test(NAME audio_out2_port COMMAND $<TARGET_FILE:audio_out2_port_tests>)
 	add_test(NAME shader_recompiler_compute COMMAND $<TARGET_FILE:shader_recompiler_compute_tests>)
+	add_test(NAME pipeline_cache_fingerprint COMMAND $<TARGET_FILE:pipeline_cache_fingerprint_tests>)
 	add_test(NAME shader_recompiler_alignbyte
 		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --alignbyte-only)
 	add_test(NAME virtual_memory_allocation
@@ -608,6 +614,7 @@ if(BUILD_TESTING)
 		kernel_file_system_tests
 		sync_on_address_tests
 		shader_recompiler_compute_tests
+		pipeline_cache_fingerprint_tests
 		virtual_memory_allocation_tests
 		audio_out2_port_tests
 	)

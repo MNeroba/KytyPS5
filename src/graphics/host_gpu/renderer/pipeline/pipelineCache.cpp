@@ -10,6 +10,7 @@
 #include "graphics/host_gpu/renderer/debug.h"
 #include "graphics/host_gpu/renderer/depthRenderTarget.h"
 #include "graphics/host_gpu/renderer/image/imageView.h"
+#include "graphics/host_gpu/renderer/pipeline/pipelineCacheFingerprint.h"
 #include "graphics/host_gpu/renderer/render.h"
 #include "graphics/host_gpu/renderer/renderContext.h"
 #include "graphics/shader/recompiler/ShaderRecompiler.h"
@@ -130,23 +131,6 @@ uint64_t HashBindingLayout(const ShaderRecompiler::IR::BindingLayout& value) {
 			MixPipelineFingerprint(hash, resource);
 		}
 	}
-	return hash;
-}
-
-uint64_t MakePipelineSemanticFingerprint(ShaderType stage, uint32_t wave_size, uint64_t spirv_hash,
-                                         uint64_t spirv_words, uint64_t specialization_hash,
-                                         uint64_t layout_hash, uint64_t pipeline_flags) {
-	uint64_t hash = 0;
-	MixPipelineFingerprint(hash, static_cast<uint32_t>(stage));
-	MixPipelineFingerprint(hash, wave_size);
-	MixPipelineFingerprint(hash, spirv_hash);
-	MixPipelineFingerprint(hash, spirv_words);
-	MixPipelineFingerprint(hash, specialization_hash);
-	MixPipelineFingerprint(hash, layout_hash);
-	MixPipelineFingerprint(hash, pipeline_flags);
-	// The compute path always uses the same push-constant range and entry point. Keep these
-	// explicit so the key documents the remaining pipeline state instead of relying on defaults.
-	MixPipelineFingerprint(hash, ShaderRecompiler::IR::NativePushConstantSize);
 	return hash;
 }
 
@@ -693,7 +677,8 @@ struct PipelineCache::ProgramCache {
 		    descriptor_layout_hash,
 		    Config::ShaderDebugDisableOptimization()
 		        ? static_cast<uint64_t>(vk::PipelineCreateFlagBits::eDisableOptimization)
-		        : 0);
+		        : 0,
+		    ShaderRecompiler::IR::NativePushConstantSize);
 		LogShaderCompileProfile(stage_name, options.shader_hash, params.code.size(),
 		                        result.profile);
 		if (options.dump_ir) {
