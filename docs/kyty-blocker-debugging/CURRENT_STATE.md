@@ -8,18 +8,18 @@ This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable
 
 Repository/worktree: G:/KytyPS5/repo
 Branch: astro/materialize-resources
-Repository HEAD for documentation checkpoint: `fa17c7f` (`docs: record indirect command ownership rules`)
+Repository HEAD for documentation checkpoint: `b1ef4bf` (`docs: refresh upstream audit provenance`)
 Documentation checkpoint is the current tip; use `git rev-parse HEAD` for its generated commit id.
-Current semantic source HEAD: `2298df0`
-Last ASTRO runtime source HEAD: `807a84daac695593906d2f0f1c7f286baa950614`
+Current semantic source HEAD: `b1ef4bf2a058664655b6b5fe6193fb50ffc64e49`
+Last ASTRO runtime source HEAD: `b1ef4bf2a058664655b6b5fe6193fb50ffc64e49`
 Working tree for this checkpoint: clean
 Build: Release, CMake/Ninja, clang-cl, clang-lld_link-64
-Executable: G:/KytyPS5/repo/_Build/windows/kyty_emulator.exe
-Executable SHA-256: `08B12E6EAA4B597BFB4081DB94547AAC5760B9BC76742C3B44580500A028117E`
-Executable size: 21,075,456 bytes; built from `807a84d`
-Build label: `Source build 807a84d`
-Matching PDB: G:/KytyPS5/repo/_Build/windows/kyty_emulator.pdb; SHA-256 `C25BE72AF4024F15BB4B4CE04330A3E83507441A208DDF17EAC872B6A666E4C6`
-Binary provenance: build-tree executable/PDB used by the latest ASTRO run
+Executable: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.exe
+Executable SHA-256: `A2E986E3EBE2914747CC3B9CA311FDE95185ECF772992D2E04A79F9A2F998EA5`
+Executable size: 21,076,992 bytes; built from `b1ef4bf`
+Build label: `Source build b1ef4bf`
+Matching PDB: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.pdb; SHA-256 `6F6697122C0242F969C1E76362AE6CF20F468C7BFEDEB8D365C72064AA320A01`
+Binary provenance: installed Release executable/PDB used by the latest ASTRO run
 
 The system-wide CMake install prefix was not used because it requires administrator access.
 
@@ -30,13 +30,38 @@ Title ID: PPSA21567
 Game input: G:/PS5 Games/PPSA21567/extracted
 Current milestone: M5 main menu — reached in the validated title-screen progression run
 Next milestone: M6 gameplay
-Current P0: classify the first post-M5 `VK_ERROR_DEVICE_LOST (-4)` boundary at requested tick `329621` (`known=329597`, `current=329622`); exact non-retired coverage is proven, but no first concrete resource, range, synchronization, or shader contract violation is established
-P0 class: GPU execution/device loss (no stale resource or invalid range proven)
-Last validated progress signal: the 807a84d ASTRO run passed the MS tail fix, emitted CS `0x657ad04626bf9d55` as 124012 SPIR-V words, reached M5/HostPresent, then `vkDevice.waitSemaphores` returned `ErrorDeviceLost (-4)`; the bounded fault snapshot reports no resource-range violations.
+Current P0: classify the first deterministic mesh-shader decoder failure at `pc=0x3da8` for MS `0x2b3be82b8235ac05`: raw `0xbe8e210e`, `Family::SOP1`, opcode `0x21`, unsupported in `ShaderCFG.cpp:40`
+P0 class: shader/recompiler mesh-stage decoder coverage
+Last validated progress signal: the exact `b1ef4bf` Release run reached frame 848 at 18 FPS, with `VS 21 / PS 34 / CS 46 / GS 2`; it then completed MS decode (2881 instructions) and failed in CFG BuildGraph on SOP1 opcode 0x21. No device loss or MaterializeResources failure occurred in this run.
 Known P1 likely blockers: incorrect color/output interpretation remains P1 and is not a current fix target
 Known P2: cold-start large dispatcher pipeline compilation latency; successful creates are not a hang. Cache persistence/load is proven, but a substantial warm-time reduction is not.
 
 M1, M2, M3, M4, and M5 are closed/reached. M6 gameplay is not proven. Do not reopen the cleared startup SRT/BDA-lifetime, pipeline-create, submission, visible-frame, bounded resource-remap, scalar-PHI materialization, or TTMP scalar-source conclusions without contradictory evidence.
+
+## Latest Release runtime validation — 2026-09-13
+
+Artifact: `G:/KytyPS5/logs/ASTRO_RELEASE_20260913_102700/`; source and installed Release
+binary are exact `b1ef4bf2a058664655b6b5fe6193fb50ffc64e49`. Build and install output, hashes,
+command, process result, stdout/stderr, and runtime log are preserved under that directory.
+Installed EXE SHA-256 is `A2E986E3EBE2914747CC3B9CA311FDE95185ECF772992D2E04A79F9A2F998EA5`;
+matching PDB SHA-256 is `6F6697122C0242F969C1E76362AE6CF20F468C7BFEDEB8D365C72064AA320A01`.
+The exact command is in `runtime/command.txt` and uses the established `--stub-bvh` baseline
+with shader and graphics debug disabled.
+
+This was the one permitted progression run. It ran from 10:29:28 to 10:38:44 local time,
+reached window `frame: 848, fps: 18`, and produced shader counts `VS 21 / PS 34 / CS 46 / GS 2`.
+Large compute pipelines completed successfully, including CS `0x530dcd964f29983c` in 154355 ms;
+the pipeline cache snapshot reached 19763603 bytes. The process exited with wrapper code `321`
+(`0x141`) at the first deterministic new blocker: MS `0x2b3be82b8235ac05`, code size 4164
+dwords, Decode completed with 2881 instructions, then CFG BuildGraph reported unsupported
+`Family::SOP1 opcode=0x21` raw `0xbe8e210e` at `pc=0x00003da8` from
+`src/graphics/shader/recompiler/frontend/cfg/ShaderCFG.cpp:40`. No `VK_ERROR_DEVICE_LOST`,
+MaterializeResources error, clean-shutdown record, or crash dump was produced. M6 gameplay is
+not proven. Do not attribute this boundary to any individual upstream port until an offline
+comparison establishes that connection.
+
+Next action: offline classify the authentic SOP1 `0x21` instruction and its generic decode/CFG
+contract; do not start another ASTRO run or change shader semantics in this checkpoint.
 
 ## Latest tick coverage and static device-loss correlation — 2026-09-13
 

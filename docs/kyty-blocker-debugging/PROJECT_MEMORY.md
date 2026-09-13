@@ -840,3 +840,25 @@ B4 `c913951` subvector-loop semantics failed its upstream regression on the loca
 
 WHY IT MATTERS: Do not retry these ports without a new source contradiction, a regression that
 proves the local contract has changed, or target runtime evidence tying the behavior to a blocker.
+
+### Exact Release validation and first post-audit blocker — PROVEN
+
+FACT: A clean Release build/install from source `b1ef4bf2a058664655b6b5fe6193fb50ffc64e49`
+was run once with the established ASTRO `--stub-bvh` baseline. The installed executable and
+matching PDB were SHA-256 `A2E986E3EBE2914747CC3B9CA311FDE95185ECF772992D2E04A79F9A2F998EA5`
+and `6F6697122C0242F969C1E76362AE6CF20F468C7BFEDEB8D365C72064AA320A01`.
+
+WHY IT MATTERS: The accepted upstream ports have now been exercised together in a production
+run. The run progressed to frame 848 at 18 FPS and shader counts `VS 21 / PS 34 / CS 46 / GS 2`,
+well beyond the old executable's device-loss point. No attribution to an individual port is
+proven; runtime validation must treat the next decoder boundary as the active P0.
+
+EVIDENCE: `G:/KytyPS5/logs/ASTRO_RELEASE_20260913_102700/runtime/result-summary.txt`,
+`runtime/stdout.log`, `runtime/stderr.log`, and `runtime/runtime.log`. The process exited with
+`321 (0x141)` after MS `0x2b3be82b8235ac05` completed Decode (`2881` instructions) and failed
+in CFG BuildGraph at `pc=0x3da8` on raw `0xbe8e210e`, `Family::SOP1`, opcode `0x21`, with
+`SOP1 opcode is not implemented` at `src/graphics/shader/recompiler/frontend/cfg/ShaderCFG.cpp:40`.
+No device loss, MaterializeResources failure, or crash dump occurred in this run.
+
+RELATED CODE/COMMIT: `ShaderDecoder.cpp`, `ShaderCFG.cpp`,
+`G:/KytyPS5/logs/ASTRO_RELEASE_20260913_102700/runtime/runtime.log`.
