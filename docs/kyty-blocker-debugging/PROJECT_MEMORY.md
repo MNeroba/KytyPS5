@@ -862,3 +862,36 @@ No device loss, MaterializeResources failure, or crash dump occurred in this run
 
 RELATED CODE/COMMIT: `ShaderDecoder.cpp`, `ShaderCFG.cpp`,
 `G:/KytyPS5/logs/ASTRO_RELEASE_20260913_102700/runtime/runtime.log`.
+
+### SOP1/SOP2 opcode-family reconciliation — PROVEN
+
+FACT: Production MS `0x2b3be82b8235ac05` reaches raw `0xbe8e210e` at
+`pc=0x3da8`. Its family discriminator is `0x7d` (`Family::SOP1`), its SOP1
+opcode field is `0x21`, and both encoded register fields are `s14`. Local and
+fetched `origin/main` source map `S_LSHR_B64` only in the SOP2 table at opcode
+`0x21`; the enum, scalar translator, IR `ShiftRightLogical64` opcode, and
+SPIR-V lowering already exist. SOP1 decoding has one source and one
+destination, while `ShiftRightLogical64` requires a `U64` source pair plus a
+`U32` shift count, so an SOP1 alias is not semantically valid.
+
+WHY IT MATTERS: No generic `S_LSHR_B64` implementation change is justified by
+this failure. Do not add a SOP1 alias, infer a second operand, or alter the
+family discriminator. The active P0 is a distinct unsupported SOP1 encoding
+that needs an independent ISA/source contract before semantic work.
+
+EVIDENCE: Exact runtime failure in
+`G:/KytyPS5/logs/ASTRO_RELEASE_20260913_102700/runtime/runtime.log`; preserved
+production binary
+`G:/KytyPS5/logs/MS_RAW_CAPTURE_20260912_2240/shaders/original/precompile_ms_2b3be82b8235ac05.bin`
+(4164 dwords, SHA-256
+`A3D856918B88B05D05CFFC079E625D109261920FABBF4C7E5D32E03D7584DF49`);
+local/upstream table comparison and field decoding in
+`G:/KytyPS5/logs/SOP1_LSHR_AUDIT_20260913_/analysis.txt`; focused
+`shader_cfg_tests` and `shader_recompiler_compute_tests` both exit `0`.
+
+RELATED CODE/COMMIT: `frontend/decode/ScalarAluOps.cpp` (SOP1/SOP2 tables and
+operand widths), `frontend/decode/ShaderDecoder.cpp` (family selection),
+`frontend/translate/Scalar.cpp`, `frontend/translate/Translate.cpp`
+(`ReadU32Pair`), `ir/opcodes/ValueOpcodes.inc`, and
+`backend/spirv/spirvEmitterAlu*.cpp`; this documentation checkpoint is the
+current repository tip.

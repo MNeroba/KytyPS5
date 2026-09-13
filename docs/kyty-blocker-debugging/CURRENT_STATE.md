@@ -8,8 +8,7 @@ This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable
 
 Repository/worktree: G:/KytyPS5/repo
 Branch: astro/materialize-resources
-Repository HEAD for documentation checkpoint: `e18c741` (`docs: record current Release runtime blocker`)
-Documentation checkpoint is the current tip; use `git rev-parse HEAD` for its generated commit id.
+Repository HEAD for documentation checkpoint: current tip; use `git rev-parse HEAD` for the exact commit id.
 Current semantic source HEAD: `b1ef4bf2a058664655b6b5fe6193fb50ffc64e49`
 Last ASTRO runtime source HEAD: `b1ef4bf2a058664655b6b5fe6193fb50ffc64e49`
 Working tree for this checkpoint: clean
@@ -30,9 +29,9 @@ Title ID: PPSA21567
 Game input: G:/PS5 Games/PPSA21567/extracted
 Current milestone: M5 main menu — reached in the validated title-screen progression run
 Next milestone: M6 gameplay
-Current P0: classify the first deterministic mesh-shader decoder failure at `pc=0x3da8` for MS `0x2b3be82b8235ac05`: raw `0xbe8e210e`, `Family::SOP1`, opcode `0x21`, unsupported in `ShaderCFG.cpp:40`
-P0 class: shader/recompiler mesh-stage decoder coverage
-Last validated progress signal: the exact `b1ef4bf` Release run reached frame 848 at 18 FPS, with `VS 21 / PS 34 / CS 46 / GS 2`; it then completed MS decode (2881 instructions) and failed in CFG BuildGraph on SOP1 opcode 0x21. No device loss or MaterializeResources failure occurred in this run.
+Current P0: classify the authentic mesh-stage `Family::SOP1` opcode `0x21` at `pc=0x3da8` for MS `0x2b3be82b8235ac05`; the requested `S_LSHR_B64` path is already implemented as `SOP2` opcode `0x21`, while this raw `0xbe8e210e` is a distinct one-source SOP1 encoding.
+P0 class: shader/recompiler mesh-stage decoder coverage; no `S_LSHR_B64` semantic gap proven
+Last validated progress signal: the exact `b1ef4bf` Release run reached frame 848 at 18 FPS, with `VS 21 / PS 34 / CS 46 / GS 2`; it then completed MS decode (2881 instructions) and failed in CFG BuildGraph on raw `0xbe8e210e`. Offline comparison of local and fetched `origin/main` found the enum, SOP2 decode table, scalar translator, and SPIR-V `ShiftRightLogical64` lowering already present. No device loss or MaterializeResources failure occurred in this run.
 Known P1 likely blockers: incorrect color/output interpretation remains P1 and is not a current fix target
 Known P2: cold-start large dispatcher pipeline compilation latency; successful creates are not a hang. Cache persistence/load is proven, but a substantial warm-time reduction is not.
 
@@ -60,8 +59,7 @@ MaterializeResources error, clean-shutdown record, or crash dump was produced. M
 not proven. Do not attribute this boundary to any individual upstream port until an offline
 comparison establishes that connection.
 
-Next action: offline classify the authentic SOP1 `0x21` instruction and its generic decode/CFG
-contract; do not start another ASTRO run or change shader semantics in this checkpoint.
+Next action: do not alias SOP1 `0x21` to two-source `S_LSHR_B64` without a source-level encoding contract. The exact raw needs classification as its own SOP1 instruction before any semantic change; no ASTRO run is authorized by this checkpoint.
 
 ## Latest tick coverage and static device-loss correlation — 2026-09-13
 
