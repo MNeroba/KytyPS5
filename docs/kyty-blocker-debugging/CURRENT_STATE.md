@@ -9,8 +9,8 @@ This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable
 Repository/worktree: G:/KytyPS5/repo
 Branch: astro/materialize-resources
 Repository HEAD for documentation checkpoint: current tip; use `git rev-parse HEAD` for the exact commit id.
-Current semantic source HEAD: `5804443` (`docs: classify branch-walk device-loss window`)
-Last ASTRO runtime source HEAD: `5804443` (exact clean Release build)
+Current semantic source HEAD: `d0ce0cb` (`diagnostics: emit all retained GPU snapshot batches`)
+Last ASTRO runtime source HEAD: `5804443` (exact clean Release build; pre-snapshot fix)
 Working tree for this checkpoint: clean
 Build: Release, CMake/Ninja, clang-cl, clang-lld_link-64
 Executable: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.exe
@@ -29,13 +29,31 @@ Title ID: PPSA21567
 Game input: G:/PS5 Games/PPSA21567/extracted
 Current milestone: M5 main menu — reached in the validated title-screen progression run
 Next milestone: M6 gameplay
-Current P0: obtain S_SWAPPC target provenance after the recurring post-M5 VK_ERROR_DEVICE_LOST boundary; this exact retry again stopped before the target MS invocation.
-P0 class: same-run evidence is insufficient to attribute device loss to a specific command/resource; do not change S_SWAPPC semantics or add diagnostics without one exact missing fact.
-Last validated progress signal: exact `5804443` run reached 40 CS / 22 PS / 14 VS / 1 GS, passed the former `e0/e5` diagnostic boundaries, then observed `ErrorDeviceLost (-4)` at ticks 329598/329575 before MS `0x2b3be82b8235ac05` was invoked.
+Current P0: validate the generic tick-keyed GPU snapshot reporting fix in one exact Release ASTRO run, then classify the first post-M5 boundary.
+P0 class: source/reporting defect was proven and fixed; no S_SWAPPC or GPU semantic change is justified until the corrected same-run window is observed.
+Last validated progress signal: focused fail-before/pass-after snapshot fixture emits all three retained batches after `d0ce0cb`; prior exact `5804443` run reached 40 CS / 22 PS / 14 VS / 1 GS, then observed `ErrorDeviceLost (-4)` at ticks 329598/329575 before MS `0x2b3be82b8235ac05` was invoked.
 Known P1 likely blockers: incorrect color/output interpretation remains P1 and is not a current fix target
 Known P2: cold-start large dispatcher pipeline compilation latency; successful creates are not a hang. Cache persistence/load is proven, but a substantial warm-time reduction is not.
 
 M1, M2, M3, M4, and M5 are closed/reached. M6 gameplay is not proven. Do not reopen the cleared startup SRT/BDA-lifetime, pipeline-create, submission, visible-frame, bounded resource-remap, scalar-PHI materialization, or TTMP scalar-source conclusions without contradictory evidence.
+
+## Tick-keyed GPU snapshot reporting fix — 2026-09-13
+
+Source audit: `G:/KytyPS5/logs/DEVICE_LOSS_SNAPSHOT_FIX_20260913_/source-audit.txt`.
+The bounded `GpuFaultDiagnostics::m_snapshot_batches` deque is populated before `vkQueueSubmit`
+and retired only through the last known GPU tick. The previous dump counted the entire deque in its
+header but skipped every batch whose tick exceeded the failing wait tick; a concurrent submit could
+therefore produce `retained_batches=3` with no `GPU_COMMAND_SNAPSHOT_BATCH` records. `Log::WriteFatal`
+and `Log::Shutdown` flush the logger, so this was not a buffering loss.
+
+Authentic fixture artifacts are `snapshot-fail-before.log` and `snapshot-pass-after-final.log` in
+`G:/KytyPS5/logs/DEVICE_LOSS_SNAPSHOT_FIX_20260913_/`. Fail-before prints only the header for
+three retained ticks; pass-after prints all three batches, DispatchDirect metadata, and buffer
+records. Focused `--gpu-fault-snapshot-only` and `--scheduler-only` runs pass. The generic
+diagnostic-only fix is committed as `d0ce0cb`; no scheduler/resource/Vulkan control flow changed.
+
+Next action: build/install exact Release from `d0ce0cb` and perform one `--stub-bvh` ASTRO run.
+If device loss recurs, classify the corrected same-run tick window before any further diagnostics.
 
 ## Branch-aware S_SWAPPC diagnostic validation — 2026-09-13
 

@@ -212,6 +212,28 @@ RELATED CODE: `src/graphics/guest_gpu/graphicsRun.cpp` (`GuestGpu::Process`),
 `src/graphics/host_gpu/renderer/commandScheduler.cpp` (`Submit`),
 `src/graphics/host_gpu/renderer/context.cpp` (`SetDebugInfo`).
 
+### Tick-keyed GPU snapshot reporting window — PROVEN
+
+FACT: `GpuFaultDiagnostics::m_snapshot_batches` is a bounded deque of submitted, non-retired
+command snapshots. `CommandScheduler::Submit` commits a batch after assigning its master tick and
+before `vkQueueSubmit`; `RetireCompleted` removes only batches at or below the last known GPU tick.
+The fault dump must therefore emit every batch still retained, including one assigned after the
+wait tick that reported the loss.
+
+WHY IT MATTERS: Filtering retained batches by `batch.tick > failing_tick` could print
+`retained_batches=3` while emitting no batch, command, or resource records during an asynchronous
+device-loss report. That prevented same-run attribution even though the ring and metadata were
+present.
+
+EVIDENCE: `G:/KytyPS5/logs/DEVICE_LOSS_SNAPSHOT_FIX_20260913_/source-audit.txt` and its
+`snapshot-fail-before.log` / `snapshot-pass-after-final.log` fixture. Three ticks newer than the
+reported failure reproduce header-only output before the fix; after commit `d0ce0cb`, all three
+DispatchDirect records and representative buffer metadata are emitted. Focused snapshot and
+scheduler tests pass. Logger flush is explicit in `Log::WriteFatal` and `Log::Shutdown`.
+
+RELATED CODE/COMMIT: `src/graphics/host_gpu/renderer/gpuFaultDiagnostics.{h,cpp}`,
+`tests/ShaderRecompilerComputeTests.cpp`, `d0ce0cb`.
+
 ### BDA page-table initialization contract — PROVEN
 
 FACT: Vulkan device-local allocations do not provide a zero-content contract. Kyty's 512 MiB
