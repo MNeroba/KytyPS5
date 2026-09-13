@@ -1,6 +1,6 @@
 # Current KytyPS5 debugging state
 
-Last reconciled: 2026-09-13 19:45 Europe/Riga
+Last reconciled: 2026-09-13 20:00 Europe/Riga
 
 This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable mechanisms live in REFERENCE.md.
 
@@ -47,9 +47,9 @@ Title ID: PPSA21567
 Game input: G:/PS5 Games/PPSA21567/extracted
 Current milestone: M5 main menu — reached in the validated title-screen progression run
 Next milestone: M6 gameplay
-Current P0: capture same-invocation S_SWAPPC resolver provenance for MS `0x2b3be82b8235ac05` at `pc=0x3da8`; the diagnostic run terminated earlier at device loss before this invocation.
-P0 class: runtime provenance capture is blocked by an earlier same-run GPU failure; no target reconstruction, handler, return, or splice result is available.
-Last validated progress signal: the exact `c24f4ba` Release run loaded the warmed cache, reached CS `0x657ad04626bf9d55` at `DispatchDirect 4096x1x1`, then observed `ErrorDeviceLost (-4)` at ticks `328388`/`328411` (`known=328387`, `current=328412`) before the target MS invocation.
+Current P0: identify GPU-side fault attribution for CS `0x657ad04626bf9d55` at tick `328388`; its captured BDA/page-table translations are valid and do not explain the device loss.
+P0 class: host translation and allocation state are proven valid; the missing fact is the first shader memory operation/address or synchronization edge that failed on this dispatch.
+Last validated progress signal: the exact `c24f4ba` Release run reached CS `0x657ad04626bf9d55` at `DispatchDirect 4096x1x1`; tick `328388` emitted two published/live, in-range BDA translations before `ErrorDeviceLost (-4)` at ticks `328388`/`328411` (`known=328387`).
 Known P1 likely blockers: incorrect color/output interpretation remains P1 and is not a current fix target
 Known P2: cold-start large dispatcher pipeline compilation latency; successful creates are not a hang. A fresh cache removes this cost on subsequent starts.
 
@@ -98,6 +98,23 @@ ticks `328388` and `328411` (`known=328387`, `current=328412`), process result `
 The retained report identifies tick `328388` as CS `0x657ad04626bf9d55`, `DispatchDirect 4096x1x1`,
 with complete push/BDA/resource and device-fault records. The target resolver path was not reached;
 categories A–E are therefore not applicable, and no source or diagnostic expansion is justified.
+
+## Tick-328388 BDA/page-table audit — 2026-09-13
+
+Offline report: `G:/KytyPS5/logs/SWAPPC_PROVENANCE_20260913_1940/astro-run/bda-tick-328388-audit.txt`.
+The complete same-run snapshot for CS `0x657ad04626bf9d55`, `DispatchDirect 4096x1x1`, contains
+exactly two BDA translations and no dropped records. Push pairs 0 and 14 both use page index
+`0x140b7f`, entry `0x42bbf4000`, and owner allocation slot `35:1` (guest base
+`0x502dfc000`, size `0x4000`). They resolve to `0x42bbf74b0`/offset `0x34b0` and
+`0x42bbf72e0`/offset `0x32e0`, each with 4-byte range, `within_allocation=1`, `published=1`,
+`live=1`, and descriptor owner `deleted=0`.
+
+The previously missing `bda_pagetable[0x140d3f]` / guest `0x5034ff4d0` and `0x5034ff4d4` does not
+occur in this run's tick-328388 push data or BDA records; those addresses belong to the separate
+c0d46a2 allocation and are not reused. Classification: **C — translation fully valid**. A stale
+or unpublished entry and an invalid resolved range are disproven for the captured pairs; no
+shader-side invalid access or synchronization defect is proven. The next single missing datum is
+GPU-side fault attribution to the first shader memory operation/address or synchronization edge.
 
 ## S_SWAPPC c0/6e runtime divergence audit — 2026-09-13
 

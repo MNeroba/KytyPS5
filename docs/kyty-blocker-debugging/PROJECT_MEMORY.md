@@ -20,6 +20,27 @@ EVIDENCE: `G:/KytyPS5/logs/SWAPPC_PROVENANCE_20260913_1940/astro-run/capture-rep
 
 RELATED CODE/COMMIT: existing opt-in `ShaderSwapPcDiagnostic` path; no source change was made.
 
+### Tick-328388 BDA translation audit — PROVEN VALID, CLASSIFICATION C (2026-09-13)
+
+FACT: The complete same-run snapshot for CS `0x657ad04626bf9d55`, `DispatchDirect 4096x1x1`,
+contains exactly two BDA translations (push pairs 0 and 14; no dropped records). Both use page
+index `0x140b7f` and entry `0x000000042bbf4000`, resolving to `0x000000042bbf74b0` and
+`0x000000042bbf72e0` in live allocation slot `35:1` (guest base `0x0000000502dfc000`, size
+`0x4000`, offsets `0x34b0`/`0x32e0`, 4-byte ranges).
+
+WHY IT MATTERS: Both entries are nonzero, published, live, and within allocation; matching
+descriptor ownership reports `deleted=0`. The previously missing page `0x140d3f` / guest
+`0x5034ff4d0`/`0x5034ff4d4` is absent from this tick's actual push/BDA records and belongs only to
+the separate c0d46a2 allocation. Stale/unpublished mapping and invalid resolved range are therefore
+disproven for this run; no shader-side access or synchronization defect is proven.
+
+EVIDENCE: `G:/KytyPS5/logs/SWAPPC_PROVENANCE_20260913_1940/astro-run/bda-tick-328388-audit.txt` and
+same-run `runtime.log`. The next single missing datum is GPU-side attribution of the first shader
+memory operation/address or synchronization edge that failed on this dispatch.
+
+RELATED CODE/COMMIT: `renderCompute.cpp`, `bufferCache.cpp`, `gpuFaultDiagnostics.cpp`, commit
+`6e379ab` (diagnostic-only; no semantic change).
+
 ### S_SWAPPC c0/6e divergence — PROVEN PROVENANCE GAP (2026-09-13)
 
 FACT: `c0d46a2` is an ancestor of `6e379ab`. Resolver, splice, decoder, and production pipeline
