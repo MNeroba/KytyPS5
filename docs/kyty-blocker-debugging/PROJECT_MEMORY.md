@@ -2,6 +2,27 @@
 
 Durable, non-chronological facts that are expensive to rediscover. Read `CURRENT_STATE.md` first. Put current milestones, P0, worktree, executable, and next action there; stable mechanisms live in `REFERENCE.md`.
 
+### Address-binding IP correlation — PROVEN LIMITATION, CLASSIFICATION C (2026-09-13)
+
+FACT: A Release run from `17859c4` enabled `VK_EXT_device_address_binding_report` and captured
+the existing bounded device-fault report. At `VK_ERROR_DEVICE_LOST (-4)` (`tick=329990`,
+`known=329966`, `current=329991`), `VK_EXT_device_fault` returned 41 type-4 instruction-pointer
+hints spanning `0x00000002034e2000..0x00000002034e2520` with precision `0x10`.
+
+WHY IT MATTERS: The binding callback exposed `live=339` ranges and a bounded history of 2048
+records (`dropped_history=17043`, `dropped_live=0`), but all 41 fault IPs had `matches=0` and no
+`GPU_DEVICE_FAULT_IP_PIPELINE` correlation. The extension did not expose a GPU executable-address
+to pipeline/shader-module mapping for this cluster. Type-4 records remain IP hints and must not be
+treated as invalid buffer/image addresses; no semantic GPU/resource defect is proven.
+
+EVIDENCE: `G:/KytyPS5/logs/DEVICE_ADDRESS_BINDING_DIAGNOSTIC_20260913_2100/astro-run/device-fault-address-binding-report.txt`,
+same-run `runtime.log`, and `vulkaninfo_full_20260912.log` (extension support). The run reached the
+known candidate CS `0x657ad04626bf9d55` dispatch in guest submit 6256 before the wait failure, but
+the absence of executable-range overlap prevents causal attribution.
+
+RELATED CODE/COMMIT: `gpuAddressBindingTracker.{h,cpp}`, `gpuFaultDiagnostics.cpp`,
+`vulkanWindow.cpp`, commit `17859c47bdf1fc0ddda81099f440a90abfe47bba` (diagnostic-only).
+
 ### S_SWAPPC provenance capture — PROVEN PREEMPTED BY DEVICE LOSS (2026-09-13)
 
 FACT: The exact `c24f4ba` Release run with `--stub-bvh --shader-swappc-diagnostic true` did not

@@ -1,6 +1,6 @@
 # Current KytyPS5 debugging state
 
-Last reconciled: 2026-09-13 20:00 Europe/Riga
+Last reconciled: 2026-09-13 20:30 Europe/Riga
 
 This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable mechanisms live in REFERENCE.md.
 
@@ -8,17 +8,17 @@ This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable
 
 Repository/worktree: G:/KytyPS5/repo
 Branch: astro/materialize-resources
-Repository source HEAD for runtime checkpoint: `c24f4ba2dd62295b3227391c3f07df4c681cb4f4`
-Current source HEAD: `c24f4ba` (S_SWAPPC runtime provenance documentation checkpoint)
-Last ASTRO runtime source HEAD: `c24f4ba` (S_SWAPPC provenance capture attempt)
-Working tree for this checkpoint: clean after the diagnostic run (docs update pending)
+Repository source HEAD for runtime checkpoint: `17859c47bdf1fc0ddda81099f440a90abfe47bba`
+Current source HEAD: `17859c4` (address-binding diagnostic)
+Last ASTRO runtime source HEAD: `17859c4` (address-binding correlation capture)
+Working tree for this checkpoint: clean after the runtime capture (docs update pending)
 Build: Release, CMake/Ninja, clang-cl, clang-lld_link-64
 Executable: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.exe
-Executable SHA-256: `69A006D1CCA1B5064A5A03482FCF305EA92D6900464B053C27A320FB40B0871D`
-Executable built and copied to install from exact `c24f4ba`
-Build label: Release rebuild for opt-in S_SWAPPC resolver provenance capture
-Matching PDB: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.pdb; SHA-256 `7C9F8BCEDF1DAA66FD4963F20B1A03DF426FDEF70E7B655ABD09698F2E5EEA6D`
-Binary provenance: current Release executable/PDB rebuilt from `c24f4ba`; warmed per-title cache loaded before capture attempt
+Executable SHA-256: `6B66C84AAF50FB5A84D1CCC319FB7849642B6F8749C183FEBAD40D99E722624B`
+Executable built and copied to install from exact `17859c4`
+Build label: Release build for opt-in VK_EXT_device_address_binding_report correlation
+Matching PDB: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.pdb; SHA-256 `6E36AA2A5AA5F9B325E000042CE12DDBC54AFE5DA101050D79B825839198CEFC`
+Binary provenance: current Release executable/PDB rebuilt from `17859c4`; warmed per-title cache loaded before the capture
 
 The system-wide CMake install prefix was not used because it requires administrator access.
 
@@ -47,11 +47,25 @@ Title ID: PPSA21567
 Game input: G:/PS5 Games/PPSA21567/extracted
 Current milestone: M5 main menu — reached in the validated title-screen progression run
 Next milestone: M6 gameplay
-Current P0: attribute the recurring device loss beyond the cleared BDA hypothesis; the 33 same-run type-4 fault addresses have no executable-range mapping.
-P0 class: host translation/allocation state is valid and the fault IP hints remain un-attributable; the exact missing datum is GPU executable-address to pipeline/shader-module mapping for the failing submit.
-Last validated progress signal: the exact `c24f4ba` Release run reached CS `0x657ad04626bf9d55` at `DispatchDirect 4096x1x1`; tick `328388` emitted two published/live, in-range BDA translations and a 33-address type-4 cluster before `ErrorDeviceLost (-4)` at ticks `328388`/`328411` (`known=328387`).
+Current P0: attribute the recurring device loss beyond the cleared BDA hypothesis; the 41 same-run type-4 fault addresses have no executable-range mapping.
+P0 class: `VK_EXT_device_address_binding_report` exposed no live binding covering the executable/IP cluster and no pipeline-object correlation; the exact limitation is missing GPU executable-address to pipeline/shader-module mapping.
+Last validated progress signal: the exact `17859c4` Release run enabled `VK_EXT_device_address_binding_report`, reached CS `0x657ad04626bf9d55` at `DispatchDirect 4096x1x1`, and then reported `ErrorDeviceLost (-4)` at tick `329990` (`known=329966`, `current=329991`). The fault query returned 41 type-4 IP hints; all 41 had zero binding matches.
 Known P1 likely blockers: incorrect color/output interpretation remains P1 and is not a current fix target
 Known P2: cold-start large dispatcher pipeline compilation latency; successful creates are not a hang. A fresh cache removes this cost on subsequent starts.
+
+## Address-binding IP correlation — 2026-09-13
+
+The exact one-run opt-in capture is in
+`G:/KytyPS5/logs/DEVICE_ADDRESS_BINDING_DIAGNOSTIC_20260913_2100/astro-run/`;
+the bounded report is `device-fault-address-binding-report.txt`. Runtime support for
+`VK_EXT_device_address_binding_report` was confirmed by `vulkaninfo` and the run log.
+At device loss (`tick=329990`, `known=329966`, `current=329991`) `VK_EXT_device_fault`
+returned 41 type-4 instruction-pointer hints spanning
+`0x00000002034e2000..0x00000002034e2520` (precision `0x10`). The tracker retained
+`live=339`, `history=2048`, `dropped_history=17043`, `dropped_live=0`; every fault IP had
+`matches=0`, and no `GPU_DEVICE_FAULT_IP_PIPELINE` record was emitted. The extension therefore
+did not expose the executable/IP cluster or a same-run pipeline/module mapping. Classification
+remains **C**; do not infer an invalid resource access or add another diagnostic automatically.
 
 The c0d46a2 bounded audit is recorded in
 `G:/KytyPS5/logs/SWAPPC_EXTERNAL_SPLICE_FIX_20260913_/astro-run/device-loss-c0d46a2-report.txt`.
