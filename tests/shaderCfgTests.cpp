@@ -1970,6 +1970,25 @@ void TestSwapPcExternalCallSplice() {
               return inst.raw[0] == 0xbe8e210eu;
             }),
         "spliced S_SWAPPC fixture still contains an unsupported call");
+
+  // The production MS call sits after an S_ENDPGM while a pending conditional target keeps
+  // that post-terminal path executable.  The caller boundary must come from the production
+  // branch-aware decode, rather than trimming at the last S_ENDPGM before the call.
+  const std::array<uint32_t, 5> pending_caller = {
+      EncodeSopp(0x17, 3), // target pc=0x10 remains pending across END at pc=0x04
+      EncodeSopp(0x01),     // S_ENDPGM
+      EncodeSopp(0x00),     // retained fallthrough before the pending target
+      0xbe8e210eu,          // production S_SWAPPC_B64 at pc=0x0c
+      0xbf82fffdu,          // S_BRANCH back to pc=0x08; completed back-edge terminates the walk
+  };
+  const std::array<IndirectCallSite, 1> pending_sites = {{
+      {.pc = 0x0c, .target_sgpr = 14, .return_sgpr = 14, .handler = 0x3000},
+  }};
+  const auto pending_joined = SpliceIndirectCalls(pending_caller, pending_sites, handlers);
+  Check(pending_joined.size() == pending_caller.size() &&
+            pending_joined[3] == callee[0] && pending_joined[4] == pending_caller[4] &&
+            pending_joined[3] != pending_caller[3],
+        "external S_SWAPPC call after S_ENDPGM was not spliced through the production boundary");
 }
 
 void TestNewShaderRecompilerTtmpOperands() {

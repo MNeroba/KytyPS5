@@ -135,12 +135,22 @@ std::vector<uint32_t> SpliceIndirectCalls(std::span<const uint32_t>             
 		return {};
 	}
 
-	const auto base = TrimToCode(code);
 	Decoder::Program program {};
-	Decoder::DecodeProgram(base, program);
+	// Decode the caller through the production branch-aware walker first.  A valid executable
+	// path may continue past an earlier S_ENDPGM while a pending forward branch target remains;
+	// TrimToCode() intentionally handles ordinary/fused spans but would truncate that path before
+	// a post-terminal S_SWAPPC site (as in the production MS call).  Derive the splice span from
+	// the last instruction the production decoder actually visited.
+	Decoder::DecodeProgram(code, program);
 	if (program.instructions.empty()) {
 		return {};
 	}
+	const auto& last = program.instructions.back();
+	const auto  end  = static_cast<size_t>(last.pc / sizeof(uint32_t)) + last.word_count;
+	if (end == 0 || end > code.size()) {
+		return {};
+	}
+	const auto base = code.first(end);
 
 	struct Insertion {
 		uint32_t                  word = 0;
