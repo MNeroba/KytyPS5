@@ -41,6 +41,25 @@ memory operation/address or synchronization edge that failed on this dispatch.
 RELATED CODE/COMMIT: `renderCompute.cpp`, `bufferCache.cpp`, `gpuFaultDiagnostics.cpp`, commit
 `6e379ab` (diagnostic-only; no semantic change).
 
+### Device-fault type-4 IP audit — PROVEN UNATTRIBUTABLE, CLASSIFICATION C (2026-09-13)
+
+FACT: The same-run `VK_EXT_device_fault` record for tick `328388` contains 33 sparse
+`addressType=4` instruction-pointer hints with precision `0x10`, spanning
+`0x00000002034e2000..0x00000002034e2520`. No vendor records, executable GPU-VA ranges,
+`VK_EXT_device_address_binding_report` events, or known checkpoint-to-command mappings exist in
+the artifact.
+
+WHY IT MATTERS: The fault cluster cannot be associated with CS `0x657ad04626bf9d55`, another
+submitted shader, or a pipeline. It does not describe an invalid buffer/image address; captured
+guest code is `0x05xxxxxxxx`, BDA addresses are `0x04xxxxxxxx`, and the pipeline value is an
+object handle. No shader/resource defect is proven.
+
+EVIDENCE: `G:/KytyPS5/logs/SWAPPC_PROVENANCE_20260913_1940/astro-run/device-fault-ip-audit.txt`.
+The exact next missing datum is GPU executable-address to pipeline/shader-module mapping for the
+failing submit (plus a same-run checkpoint tying that range to tick `328388`, if available).
+
+RELATED CODE/COMMIT: `gpuFaultDiagnostics.cpp`; diagnostic-only, no semantic change.
+
 ### S_SWAPPC c0/6e divergence — PROVEN PROVENANCE GAP (2026-09-13)
 
 FACT: `c0d46a2` is an ancestor of `6e379ab`. Resolver, splice, decoder, and production pipeline

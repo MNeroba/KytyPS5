@@ -47,9 +47,9 @@ Title ID: PPSA21567
 Game input: G:/PS5 Games/PPSA21567/extracted
 Current milestone: M5 main menu — reached in the validated title-screen progression run
 Next milestone: M6 gameplay
-Current P0: identify GPU-side fault attribution for CS `0x657ad04626bf9d55` at tick `328388`; its captured BDA/page-table translations are valid and do not explain the device loss.
-P0 class: host translation and allocation state are proven valid; the missing fact is the first shader memory operation/address or synchronization edge that failed on this dispatch.
-Last validated progress signal: the exact `c24f4ba` Release run reached CS `0x657ad04626bf9d55` at `DispatchDirect 4096x1x1`; tick `328388` emitted two published/live, in-range BDA translations before `ErrorDeviceLost (-4)` at ticks `328388`/`328411` (`known=328387`).
+Current P0: attribute the recurring device loss beyond the cleared BDA hypothesis; the 33 same-run type-4 fault addresses have no executable-range mapping.
+P0 class: host translation/allocation state is valid and the fault IP hints remain un-attributable; the exact missing datum is GPU executable-address to pipeline/shader-module mapping for the failing submit.
+Last validated progress signal: the exact `c24f4ba` Release run reached CS `0x657ad04626bf9d55` at `DispatchDirect 4096x1x1`; tick `328388` emitted two published/live, in-range BDA translations and a 33-address type-4 cluster before `ErrorDeviceLost (-4)` at ticks `328388`/`328411` (`known=328387`).
 Known P1 likely blockers: incorrect color/output interpretation remains P1 and is not a current fix target
 Known P2: cold-start large dispatcher pipeline compilation latency; successful creates are not a hang. A fresh cache removes this cost on subsequent starts.
 
@@ -115,6 +115,21 @@ c0d46a2 allocation and are not reused. Classification: **C — translation fully
 or unpublished entry and an invalid resolved range are disproven for the captured pairs; no
 shader-side invalid access or synchronization defect is proven. The next single missing datum is
 GPU-side fault attribution to the first shader memory operation/address or synchronization edge.
+
+## Device-fault type-4 IP audit — 2026-09-13
+
+Offline report: `G:/KytyPS5/logs/SWAPPC_PROVENANCE_20260913_1940/astro-run/device-fault-ip-audit.txt`.
+The same-run `VK_EXT_device_fault` record contains 33 `addressType=4` values, all with precision
+`0x10`, sparsely spanning `0x00000002034e2000..0x00000002034e2520`. They are instruction-pointer
+hints, not invalid-memory ranges. No `VK_EXT_device_address_binding_report` data, shader-module or
+pipeline executable GPU-VA allocation, or command checkpoint attribution is present. The known
+dispatch guest code (`0x000000050052a400`), captured BDA addresses (`0x04xxxxxxxx`), and pipeline
+object handle do not overlap the `0x02xxxxxxxx` hint cluster.
+
+The addresses therefore remain un-attributable to CS `0x657ad04626bf9d55` or another submitted
+shader. Classification: **C — insufficient attribution evidence**. The next single missing datum
+is the GPU executable-address to pipeline/shader-module mapping for the failing submit; no ASTRO
+rerun or shader instrumentation is justified by the existing evidence.
 
 ## S_SWAPPC c0/6e runtime divergence audit — 2026-09-13
 
