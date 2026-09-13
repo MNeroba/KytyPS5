@@ -8,8 +8,8 @@ This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable
 
 Repository/worktree: G:/KytyPS5/repo
 Branch: astro/materialize-resources
-Repository HEAD for documentation checkpoint: current tip; use `git rev-parse HEAD` for the exact commit id.
-Current source HEAD: `567180f` (`test: cover Vulkan pipeline semantic fingerprint`)
+Repository HEAD for documentation checkpoint: `f873f320a4ca6f8846d2352f00c6a055c9d83332`
+Current semantic source HEAD: `567180f` (`test: cover Vulkan pipeline semantic fingerprint`)
 Last ASTRO runtime source HEAD: `60273f3` (profiling/probe runs are diagnostic and stopped before giant normal compilation)
 Working tree for this checkpoint: docs-only changes pending
 Build: Release, CMake/Ninja, clang-cl, clang-lld_link-64
