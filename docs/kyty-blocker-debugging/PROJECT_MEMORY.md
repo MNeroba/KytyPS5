@@ -14,6 +14,43 @@ Durable, non-chronological facts that are expensive to rediscover. Read `CURRENT
 - **PROVEN:** Relevant focused suites are `resource_materialization_tests`, `resource_tracking_tests`, `shader_cfg_tests`, `shader_recompiler_compute_tests`, and `scalar_provenance_tests`. `resource_tracking_tests / dynamic storage mips` is a known unrelated failure. An older aggregate `kyty_tests` failure involved obsolete `Log` symbol linkage.
   Evidence: repeated focused runs through `dfc7203`.
 
+## Branch-aware diagnostic traversal — PROVEN
+
+FACT: `Decoder::WalkProgram` now exposes the production branch-aware executable traversal, including
+pending forward targets after `S_ENDPGM` and completed-backedge termination. The opt-in S_SWAPPC
+scanner consumes this contract for normal shaders; fused-front scans continue to use the same
+production-derived front boundary.
+
+WHY IT MATTERS: Diagnostics no longer invent a weaker linear termination rule and therefore do not
+walk into post-terminal data such as reserved scalar-source words. Reachable unsupported instructions
+remain fail-fast.
+
+EVIDENCE: Authentic pending-target-after-`S_ENDPGM` regression fails before and passes after commit
+`623865e`; positive in-front S_SWAPPC and existing fused-front/e0/e5 tests remain green in
+`shader_cfg_tests` and `shader_recompiler_compute_tests`. The exact ASTRO validation artifact is
+`G:/KytyPS5/logs/SWAPPC_BRANCH_WALK_FIX_20260913_/astro-run/`.
+
+RELATED CODE/COMMIT: `ShaderDecoder.{h,cpp}`, `ShaderSwapPcDiagnostic.cpp`, `tests/shaderCfgTests.cpp`,
+commit `623865e`.
+
+## Same-run device-loss window — PROVEN RESULT, CAUSE UNCLASSIFIED
+
+FACT: In the exact `623865e` Release run, `vkDevice.waitSemaphores` returned
+`VK_ERROR_DEVICE_LOST (-4)` with `known=329177` and `current=329202`. The first definitely
+non-retired tick is `329178`; the artifact does not prove completion for ticks `329179..329201`.
+
+WHY IT MATTERS: The requested MS S_SWAPPC target was not invoked in this run, so no target provenance
+or S_SWAPPC semantic conclusion may be drawn from it. The first non-retired dispatch is a candidate,
+not a proven cause.
+
+EVIDENCE: Same-run report `G:/KytyPS5/logs/SWAPPC_BRANCH_WALK_FIX_20260913_/astro-run/device-loss-window-report.txt`
+contains a tick-329178 `DispatchDirect` for CS `0x657ad04626bf9d55` (`4096x1x1`), 10 buffers,
+13 images, all retained resources live/non-deleted, and no explicit range/layout violation. GPU fault
+info completed with 39 addresses and no vendor records; checkpoint markers were unknown. Ticks
+329185..329201 have only EOP history and one `DrawIndexAuto` predecessor at 329187 without shader/resource
+identity. Classification is **C: insufficient same-run evidence to attribute the device loss**.
+
+RELATED CODE/COMMIT: `MasterSemaphore::Wait`, `GpuFaultDiagnostics`; no semantic change is justified.
 ## Durable semantic findings
 
 ### Resource identity and operand roles — PROVEN
