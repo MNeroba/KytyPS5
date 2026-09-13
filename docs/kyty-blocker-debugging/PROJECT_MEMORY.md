@@ -2,6 +2,35 @@
 
 Durable, non-chronological facts that are expensive to rediscover. Read `CURRENT_STATE.md` first. Put current milestones, P0, worktree, executable, and next action there; stable mechanisms live in `REFERENCE.md`.
 
+### BDA translation diagnostic capture — PROVEN INCOMPLETE (2026-09-13)
+
+FACT: The bounded generic BDA translation snapshot diagnostic is committed as `6e379ab`.
+It records page-table translation metadata for bounded compute push-data address pairs at the
+existing device-fault snapshot point and does not alter GPU execution.
+
+WHY IT MATTERS: The one authorized Release run from this commit stopped before the target
+`CS 0x657ad04626bf9d55` dispatch, so the missing `bda_pagetable[0x140d3f]` entry and publication /
+lifetime state remain unknown. No device-loss or resource conclusion may be drawn from this
+capture.
+
+EVIDENCE: Focused `shader_cfg_tests`, `shader_recompiler_compute_tests --scheduler-only`, and
+`shader_recompiler_compute_tests` passed. The run artifact is
+`G:/KytyPS5/logs/BDA_TRANSLATION_DIAGNOSTIC_20260913_1900/astro-run/`; its classification is
+`run-classification.txt`. The Release executable SHA-256 is
+`0C9ACEDF92BD16B3435263A2A397622CE6DD0A9C3CEA2058EBF166C00EADBFE7` and the matching PDB SHA-256
+is `457EEB374A4BEEE43D7D533444989E61D3B3CFC709F2B0E20290B2F756039BAA`.
+
+FACT: In that exact run, the first deterministic boundary was the recurring MS
+`S_SWAPPC_B64` CFG failure (`hash=0x2b3be82b8235ac05`, `pc=0x3da8`, `raw=0xbe8e210e`), with
+process exit `321 (0x141)`. No `GPU_COMMAND_BDA`, `GPU_DEVICE_FAULT`, or `ErrorDeviceLost` record
+was emitted.
+
+WHY IT MATTERS: The next action is offline reconciliation of this production CFG boundary before
+any further ASTRO run or diagnostic expansion. The capture objective is still open.
+
+RELATED CODE/COMMIT: `gpuFaultDiagnostics.{h,cpp}`, `bufferCache.{h,cpp}`, `renderCompute.cpp`,
+commit `6e379ab`.
+
 ### c0d46a2 post-SWAPPC device-loss audit — PROVEN, CLASSIFICATION C
 
 FACT: The exact c0d46a2 Release run reached 40 compute shaders after the S_SWAPPC fix, then

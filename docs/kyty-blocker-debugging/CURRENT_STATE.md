@@ -1,6 +1,6 @@
 # Current KytyPS5 debugging state
 
-Last reconciled: 2026-09-13 18:45 Europe/Riga
+Last reconciled: 2026-09-13 18:55 Europe/Riga
 
 This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable mechanisms live in REFERENCE.md.
 
@@ -8,19 +8,37 @@ This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable
 
 Repository/worktree: G:/KytyPS5/repo
 Branch: astro/materialize-resources
-Repository source HEAD for runtime checkpoint: `c0d46a29e9e5c17d9607fa7db70b064019c83fa6`
-Current semantic source HEAD: `c0d46a2` (preserve pending branch path during S_SWAPPC splice)
-Last ASTRO runtime source HEAD: `c0d46a2` (post-S_SWAPPC progression run)
+Repository source HEAD for runtime checkpoint: `6e379ab68d4f75f2d7668b20d2914edb724deb88`
+Current source HEAD: `6e379ab` (bounded BDA translation fault snapshot diagnostic)
+Last ASTRO runtime source HEAD: `6e379ab` (BDA diagnostic capture attempt)
 Working tree for this checkpoint: clean after offline device-loss classification update
 Build: Release, CMake/Ninja, clang-cl, clang-lld_link-64
 Executable: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.exe
-Executable SHA-256: `95BA32C8011831FAC23AE1FC080B9C43EB86119B6049B4B6A12E81E583C70218`
-Executable built and copied to install from exact `c0d46a2`
-Build label: Release rebuild for S_SWAPPC external-call validation
-Matching PDB: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.pdb; SHA-256 `21FBBBBC5077F51C2840C9E2FBB40ACB410030B7D81C82C2449085F440D084A3`
-Binary provenance: current Release executable/PDB rebuilt from `c0d46a2`; warm per-title cache loaded before progression run
+Executable SHA-256: `0C9ACEDF92BD16B3435263A2A397622CE6DD0A9C3CEA2058EBF166C00EADBFE7`
+Executable built and copied to install from exact `6e379ab`
+Build label: Release rebuild for bounded BDA translation diagnostic capture
+Matching PDB: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.pdb; SHA-256 `457EEB374A4BEEE43D7D533444989E61D3B3CFC709F2B0E20290B2F756039BAA`
+Binary provenance: current Release executable/PDB rebuilt from `6e379ab`; warm per-title cache loaded before capture attempt
 
 The system-wide CMake install prefix was not used because it requires administrator access.
+
+## BDA translation diagnostic capture attempt — 2026-09-13
+
+The diagnostic-only source change is committed as `6e379ab`; focused `shader_cfg_tests`,
+`shader_recompiler_compute_tests --scheduler-only`, and `shader_recompiler_compute_tests` all
+pass. It adds a bounded, opt-in fault-snapshot record for guest BDA page-table translations
+referenced by compute push-data pairs without changing execution semantics.
+
+The one authorized Release run used the warmed `PPSA21567` cache and `--stub-bvh`; exact
+provenance and command are in
+`G:/KytyPS5/logs/BDA_TRANSLATION_DIAGNOSTIC_20260913_1900/astro-run/provenance.txt`.
+The run exited 321 (`0x141`) at the deterministic MS `S_SWAPPC_B64` CFG failure
+(`0x2b3be82b8235ac05`, `pc=0x3da8`, `raw=0xbe8e210e`) before the target CS dispatch.
+Consequently no BDA translation, device-loss, or GPU snapshot record exists for this run;
+the capture status is **incomplete**. The bounded report is in
+`G:/KytyPS5/logs/BDA_TRANSLATION_DIAGNOSTIC_20260913_1900/astro-run/run-classification.txt`.
+Do not run ASTRO again or broaden diagnostics until this recurring production CFG boundary is
+reconciled offline.
 
 ## Target and milestones
 
@@ -29,9 +47,9 @@ Title ID: PPSA21567
 Game input: G:/PS5 Games/PPSA21567/extracted
 Current milestone: M5 main menu — reached in the validated title-screen progression run
 Next milestone: M6 gameplay
-Current P0: keep the c0d46a2 post-S_SWAPPC `VK_ERROR_DEVICE_LOST (-4)` boundary classified as C; the one missing causal datum is the tick-329960 BDA page-table entry for guest page `0x140d3f`.
-P0 class: real GPU/system hang observed after the former production CFG blocker; same-run classification remains C (no concrete command/resource cause proven).
-Last validated progress signal: the exact c0d46a2 warm-cache ASTRO run loaded the persisted cache, reached 40 CS shaders and continued beyond MS `0x2b3be82b8235ac05`; `vkDevice.waitSemaphores` then returned `ErrorDeviceLost (-4)` for known=329959, first non-retired=329960, current=329984.
+Current P0: reconcile the recurring MS `S_SWAPPC_B64` CFG failure at hash `0x2b3be82b8235ac05`, pc `0x3da8`, raw `0xbe8e210e`; the BDA translation capture did not reach its target dispatch.
+P0 class: deterministic production CFG blocker in the exact `6e379ab` run; no new device-loss or BDA conclusion is drawn.
+Last validated progress signal: the exact `6e379ab` Release run loaded the warmed cache and reached the known MS call site, but exited 321 (`0x141`) during CFG BuildGraph before CS `0x657ad04626bf9d55` and before any fault snapshot.
 Known P1 likely blockers: incorrect color/output interpretation remains P1 and is not a current fix target
 Known P2: cold-start large dispatcher pipeline compilation latency; successful creates are not a hang. A fresh cache removes this cost on subsequent starts.
 
