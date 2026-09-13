@@ -1,6 +1,6 @@
 # Current KytyPS5 debugging state
 
-Last reconciled: 2026-09-13 11:46 Europe/Riga
+Last reconciled: 2026-09-13 12:20 Europe/Riga
 
 This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable mechanisms live in REFERENCE.md.
 
@@ -9,8 +9,8 @@ This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable
 Repository/worktree: G:/KytyPS5/repo
 Branch: astro/materialize-resources
 Repository HEAD for documentation checkpoint: current tip; use `git rev-parse HEAD` for the exact commit id.
-Current semantic source HEAD: `3f7a30cf48fc58515222c68292f64e7daaa6c4a5` (diagnostic-only S_SWAPPC provenance commit)
-Last ASTRO runtime source HEAD: `ed310ed42975cac2ffd1e824b3d4654265bdb280` plus the diagnostic working tree later committed as `3f7a30c`
+Current semantic source HEAD: `191cc73` (`diagnostics: honor shader terminal boundary`)
+Last ASTRO runtime source HEAD: `ed310ed42975cac2ffd1e824b3d4654265bdb280` plus diagnostic working tree; post-fix runtime validation is pending
 Working tree for this checkpoint: clean
 Build: Release, CMake/Ninja, clang-cl, clang-lld_link-64
 Executable: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.exe
@@ -29,8 +29,8 @@ Title ID: PPSA21567
 Game input: G:/PS5 Games/PPSA21567/extracted
 Current milestone: M5 main menu — reached in the validated title-screen progression run
 Next milestone: M6 gameplay
-Current P0: classify the earlier decoder boundary reached by the only diagnostic ASTRO run: reported CS address `0x0000000908e86a00`, hash `0xa572ee17a880e71c`, scalar source `0x000000e0` at `pc=0x00000370`. The requested MS `S_SWAPPC_B64` capture was not reached; the same-run raw stream is absent.
-P0 class: shader decoder stream provenance / traversal boundary; no source-`0xe0` support or S_SWAPPC semantic gap is proven
+Current P0: validate the generic diagnostic terminal-boundary fix in one clean Release ASTRO run, then stop at the first trustworthy post-fix runtime blocker.
+P0 class: diagnostic traversal provenance (fixed offline); no source-`0xe0` support or S_SWAPPC semantic gap is proven
 Last validated progress signal: offline inspection of the only preserved raw stream containing `pc=0x370` finds `0x881000e0` (`VOP2 V_SUB_F32 v8, src0=0xe0, v0`) after `S_ENDPGM`; that stream is an older hash `0xfb948a435a4e295e` artifact, not the current run's `a572...` 60-dword stream. Current-run provenance remains incomplete.
 Known P1 likely blockers: incorrect color/output interpretation remains P1 and is not a current fix target
 Known P2: cold-start large dispatcher pipeline compilation latency; successful creates are not a hang. Cache persistence/load is proven, but a substantial warm-time reduction is not.
@@ -709,3 +709,11 @@ counter class is ruled out as a proven explanation for this artifact. The unseen
 remain unknown. If another capture is later justified, the single missing fact is the actual
 indirect x/y/z immediately before dispatch plus last-writer provenance keyed by host tick and
 command ordinal.
+
+## Diagnostic provenance fix — 2026-09-13
+
+Commit `191cc73` (`diagnostics: honor shader terminal boundary`) fixes the source-level provenance defect in the opt-in S_SWAPPC resolver. `ResolveSwapPcDiagnostics` now stops after `S_ENDPGM`, matching the executable boundary of `Decoder::DecodeProgram`; it does not alter shader semantics, CFG, or scalar-source decoding.
+
+Artifact: `G:/KytyPS5/logs/PROVENANCE_AUDIT_20260913_/`. The production-derived fixture contains `S_ENDPGM` (`0xbf810000`) and the exact preserved post-END dword `0x881000e0` at `pc=0x370`. Pre-fix `shader_cfg_tests` exited `321` with the same reserved scalar-source error; post-fix exited `0`. `shader_recompiler_compute_tests` exited `0`. Source proof and ownership analysis are in `source-audit.txt`.
+
+Next action: build/install Release from exact `191cc73`, verify executable/PDB provenance, then perform one ASTRO run with `--stub-bvh --shader-swappc-diagnostic true`; stop at the first trustworthy blocker. Do not add scalar source `0xe0`, reopen S_SWAPPC semantics, or run further diagnostics before that validation.
