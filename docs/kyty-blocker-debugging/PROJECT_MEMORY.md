@@ -935,8 +935,8 @@ RELATED CODE/COMMIT: `frontend/decode/ScalarAluOps.cpp`,
 
 ### S_SWAPPC provenance diagnostic boundary — PROVEN
 
-FACT (**PROVEN**): The generic, opt-in dispatch-side resolver and bounded synthetic
-descriptor-chain regression build successfully; `shader_cfg_tests` exits 0. It runs before
+FACT (**PROVEN**): Commit `3f7a30c` contains the generic, opt-in dispatch-side resolver and
+bounded synthetic descriptor-chain regression; `shader_cfg_tests` exits 0. It runs before
 translation/CFG failure, reads only live user-data/guest memory through the existing bounded
 read cache, and does not alter `S_SWAPPC_B64` semantics or suppress CFG errors.
 

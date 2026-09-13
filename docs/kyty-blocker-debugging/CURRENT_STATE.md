@@ -9,9 +9,9 @@ This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable
 Repository/worktree: G:/KytyPS5/repo
 Branch: astro/materialize-resources
 Repository HEAD for documentation checkpoint: current tip; use `git rev-parse HEAD` for the exact commit id.
-Current semantic source HEAD: `ed310ed42975cac2ffd1e824b3d4654265bdb280` plus uncommitted diagnostic-only S_SWAPPC provenance changes
-Last ASTRO runtime source HEAD: `ed310ed42975cac2ffd1e824b3d4654265bdb280` (diagnostic working tree)
-Working tree for this checkpoint: dirty only with the diagnostic implementation/test; no generated files
+Current semantic source HEAD: `3f7a30cf48fc58515222c68292f64e7daaa6c4a5` (diagnostic-only S_SWAPPC provenance commit)
+Last ASTRO runtime source HEAD: `ed310ed42975cac2ffd1e824b3d4654265bdb280` plus the diagnostic working tree later committed as `3f7a30c`
+Working tree for this checkpoint: clean
 Build: Release, CMake/Ninja, clang-cl, clang-lld_link-64
 Executable: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.exe
 Executable SHA-256: `F97F5DCEA4A3461F8D192A304D615665604055E650B8BACE8CA4F7B191C8951D`
@@ -63,8 +63,8 @@ Next action: obtain a same-invocation raw code window/hash for the `pc=0x370` fa
 
 ## S_SWAPPC dispatch-side diagnostic capture — 2026-09-13
 
-The diagnostic-only resolver and synthetic descriptor-chain regression are present in the
-working tree. `shader_cfg_tests` rebuilt and passed (exit 0). The single permitted ASTRO run
+The diagnostic-only resolver and synthetic descriptor-chain regression are committed in
+`3f7a30c`. `shader_cfg_tests` rebuilt and passed (exit 0). The single permitted ASTRO run
 used the established `--stub-bvh` command plus `--shader-swappc-diagnostic true`, source
 `ed310ed42975cac2ffd1e824b3d4654265bdb280` with the diagnostic working tree, EXE SHA-256
 `F97F5DCEA4A3461F8D192A304D615665604055E650B8BACE8CA4F7B191C8951D`, and PDB SHA-256
