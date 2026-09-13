@@ -51,6 +51,22 @@ info completed with 39 addresses and no vendor records; checkpoint markers were 
 identity. Classification is **C: insufficient same-run evidence to attribute the device loss**.
 
 RELATED CODE/COMMIT: `MasterSemaphore::Wait`, `GpuFaultDiagnostics`; no semantic change is justified.
+## S_SWAPPC target-capture retry device loss — PROVEN RESULT, CAUSE UNCLASSIFIED
+
+FACT: A single exact Release run from `5804443` again hit `VK_ERROR_DEVICE_LOST (-4)` in
+`MasterSemaphore::Wait` before invoking MS `0x2b3be82b8235ac05` / `S_SWAPPC_B64`.
+
+WHY IT MATTERS: The target provenance remains uncaptured. The repeated device-loss boundary is not
+permission to change S_SWAPPC semantics, scheduler/resource ownership, or broaden diagnostics.
+
+EVIDENCE: `G:/KytyPS5/logs/SWAPPC_TARGET_CAPTURE_20260913_135557/astro-run/` reached 40 CS / 22 PS /
+14 VS / 1 GS with no prior `e0`/`e5` or branch-walk failure. Wait errors were ticks `329598` and
+`329575` (`known=329574`, `current=329599`); GPU fault info completed with 44 addresses,
+`vendor_count=0`, `partial=false`, and checkpoint markers were unknown. The log ended at
+`GPU_COMMAND_SNAPSHOT_WINDOW` without command/resource records, so it is no better for same-run
+attribution than the prior C-class audit. Numeric process exit code was unavailable.
+
+RELATED CODE/COMMIT: no source change; keep the earlier C classification and target-capture objective.
 ## Durable semantic findings
 
 ### Resource identity and operand roles — PROVEN

@@ -1,6 +1,6 @@
 # Current KytyPS5 debugging state
 
-Last reconciled: 2026-09-13 13:48 Europe/Riga
+Last reconciled: 2026-09-13 14:10 Europe/Riga
 
 This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable mechanisms live in REFERENCE.md.
 
@@ -9,16 +9,16 @@ This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable
 Repository/worktree: G:/KytyPS5/repo
 Branch: astro/materialize-resources
 Repository HEAD for documentation checkpoint: current tip; use `git rev-parse HEAD` for the exact commit id.
-Current semantic source HEAD: `623865e` (`diagnostics: reuse branch-aware shader traversal`)
-Last ASTRO runtime source HEAD: `623865e` (exact clean Release build)
+Current semantic source HEAD: `5804443` (`docs: classify branch-walk device-loss window`)
+Last ASTRO runtime source HEAD: `5804443` (exact clean Release build)
 Working tree for this checkpoint: clean
 Build: Release, CMake/Ninja, clang-cl, clang-lld_link-64
 Executable: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.exe
-Executable SHA-256: `4D8A2A868E8C98DF42198B671FF950777E1C3F123B46B5ED1622A1E1CAD3DEC4`
-Executable built and copied to install from exact `623865e`
-Build label: `Source build 623865e`
-Matching PDB: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.pdb; SHA-256 `85E4008BE8511ADFA341E5935B78A12849F2D26B404BF211BD21E98EAFD50BC4`
-Binary provenance: installed Release executable/PDB used by the single branch-aware diagnostic validation run
+Executable SHA-256: `2FF864678DC7160AB097D0E7E32675531C843177F0B53E197F3AE86057B87B55`
+Executable built and copied to install from exact `5804443`
+Build label: `Source build 5804443`
+Matching PDB: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.pdb; SHA-256 `FFC530A963797118C54FE1C8F1CA083E77DEF1EB12495AD30D81052A2A87BBC1`
+Binary provenance: installed Release executable/PDB used by the single S_SWAPPC target-capture retry
 
 The system-wide CMake install prefix was not used because it requires administrator access.
 
@@ -29,9 +29,9 @@ Title ID: PPSA21567
 Game input: G:/PS5 Games/PPSA21567/extracted
 Current milestone: M5 main menu — reached in the validated title-screen progression run
 Next milestone: M6 gameplay
-Current P0: classify the post-M5 VK_ERROR_DEVICE_LOST window; the branch-aware diagnostic traversal is corrected, but this exact run hit device loss before the target MS invocation.
+Current P0: obtain S_SWAPPC target provenance after the recurring post-M5 VK_ERROR_DEVICE_LOST boundary; this exact retry again stopped before the target MS invocation.
 P0 class: same-run evidence is insufficient to attribute device loss to a specific command/resource; do not change S_SWAPPC semantics or add diagnostics without one exact missing fact.
-Last validated progress signal: exact `623865e` run reached 40 CS / 22 PS / 14 VS / 1 GS, passed the former `e0/e5` diagnostic boundaries, then observed `ErrorDeviceLost (-4)` at wait ticks 329178/329201 before MS `0x2b3be82b8235ac05` was invoked.
+Last validated progress signal: exact `5804443` run reached 40 CS / 22 PS / 14 VS / 1 GS, passed the former `e0/e5` diagnostic boundaries, then observed `ErrorDeviceLost (-4)` at ticks 329598/329575 before MS `0x2b3be82b8235ac05` was invoked.
 Known P1 likely blockers: incorrect color/output interpretation remains P1 and is not a current fix target
 Known P2: cold-start large dispatcher pipeline compilation latency; successful creates are not a hang. Cache persistence/load is proven, but a substantial warm-time reduction is not.
 
@@ -78,6 +78,24 @@ terminated before its invocation; historical tick/VA/shader identities must not 
 
 Next action: obtain one separately authorized, narrowly scoped command-to-fault-address provenance fact
 before any new runtime capture or semantic change.
+## S_SWAPPC target-capture retry — 2026-09-13
+
+The exact Release build from HEAD `5804443` was installed with EXE SHA-256
+`2FF864678DC7160AB097D0E7E32675531C843177F0B53E197F3AE86057B87B55` and PDB SHA-256
+`FFC530A963797118C54FE1C8F1CA083E77DEF1EB12495AD30D81052A2A87BBC1`.
+
+One permitted ASTRO retry is preserved at `G:/KytyPS5/logs/SWAPPC_TARGET_CAPTURE_20260913_135557/astro-run/`.
+It reached 40 CS / 22 PS / 14 VS / 1 GS; the prior `0xe0`/`0xe5` and branch-walk failures did not recur.
+The run stopped at `vkDevice.waitSemaphores` `ErrorDeviceLost (-4)` for ticks `329598` and `329575`,
+with `known=329574` and `current=329599`. `GPU_DEVICE_FAULT` returned `Success` with
+`address_count=44`, `vendor_count=0`, `partial=false`; checkpoint markers were unknown. The log ends
+at `GPU_COMMAND_SNAPSHOT_WINDOW` without command/resource records, so this capture provides no materially
+better same-run attribution than the prior C-class audit. The MS target
+`0x2b3be82b8235ac05` / raw `0xbe8e210e` / `pc=0x3da8` was not invoked; numeric process exit code is
+unavailable. No source or scheduling/resource change was made.
+
+Classification remains **C — insufficient evidence to attribute device loss to a specific command/resource**.
+Do not expand diagnostics or rerun ASTRO until one exact missing fact is selected.
 ## Latest Release runtime validation — 2026-09-13
 
 Artifact: `G:/KytyPS5/logs/ASTRO_RELEASE_20260913_102700/`; source and installed Release
