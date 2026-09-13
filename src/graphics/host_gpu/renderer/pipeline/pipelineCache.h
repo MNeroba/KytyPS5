@@ -7,6 +7,7 @@
 #include "common/threads.h"
 #include "graphics/host_gpu/renderer/renderTarget.h"
 #include "graphics/host_gpu/vulkanCommon.h"
+#include "graphics/shader/recompiler/ShaderRecompiler.h"
 #include "graphics/shader/shader.h"
 
 #include <cstddef>
@@ -101,11 +102,12 @@ struct PipelineVertexInputState {
 };
 
 struct ShaderProgram {
-	uint64_t         id          = 0;
-	vk::ShaderModule module      = nullptr;
-	ShaderType       stage       = ShaderType::Unknown;
-	uint64_t         shader_hash = 0;
-	uint64_t         spirv_words = 0;
+	uint64_t                         id          = 0;
+	vk::ShaderModule                 module      = nullptr;
+	ShaderType                       stage       = ShaderType::Unknown;
+	uint64_t                         shader_hash = 0;
+	uint64_t                         spirv_words = 0;
+	ShaderRecompiler::CompileProfile profile;
 
 	explicit operator bool() const { return id != 0 && module != nullptr; }
 };

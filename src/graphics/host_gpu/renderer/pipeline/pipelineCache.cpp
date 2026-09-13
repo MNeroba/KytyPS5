@@ -492,6 +492,26 @@ bool ValidateShaderSpirv(const char* label, uint64_t shader_hash,
 	return false;
 }
 
+void LogShaderCompileProfile(const char* stage, uint64_t shader_hash, size_t code_words,
+                             const ShaderRecompiler::CompileProfile& profile,
+                             uint64_t                                pipeline_ms = 0) {
+	if (!profile.enabled) {
+		return;
+	}
+	LOGF("ShaderCompileProfile stage=%s hash=0x%016" PRIx64
+	     " code_words=%zu decoded_instructions=%" PRIu64 " cfg_blocks=%" PRIu64
+	     " ir_before=%" PRIu64 " ir_after=%" PRIu64 " decode_ms=%" PRIu64 " cfg_ms=%" PRIu64
+	     " structurize_ms=%" PRIu64 " translate_ms=%" PRIu64 " resource_ms=%" PRIu64
+	     " optimize_ms=%" PRIu64 " spirv_ms=%" PRIu64 " validation_ms=%" PRIu64
+	     " shader_module_ms=%" PRIu64 " pipeline_ms=%" PRIu64 " total_ms=%" PRIu64
+	     " spirv_words=%" PRIu64 "\n",
+	     stage, shader_hash, code_words, profile.decoded_instruction_count, profile.cfg_block_count,
+	     profile.ir_instruction_count_before, profile.ir_instruction_count_after, profile.decode_ms,
+	     profile.cfg_ms, profile.structurize_ms, profile.translate_ms, profile.resource_ms,
+	     profile.optimize_ms, profile.spirv_ms, profile.validation_ms, profile.shader_module_ms,
+	     pipeline_ms, profile.total_ms, profile.spirv_words);
+}
+
 } // namespace
 
 struct PipelineCache::ProgramCache {
@@ -552,20 +572,47 @@ struct PipelineCache::ProgramCache {
 		auto result = ShaderRecompiler::CompileProgram(std::move(translated), options,
 		                                               specialization, push_data_start_dword);
 		DumpShaderOriginal(stage_name, options.shader_hash, params.code, result.decoded_dump);
+		const auto validation_begin = std::chrono::steady_clock::now();
 		if (!ValidateShaderSpirv(options.dump_label, options.shader_hash, result.spirv)) {
+			if (result.profile.enabled) {
+				result.profile.validation_ms =
+				    static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+				                              std::chrono::steady_clock::now() - validation_begin)
+				                              .count());
+			}
 			DumpShaderSpirv(stage_name, options.shader_hash, result.spirv);
 			EXIT("%s failed hash=0x%016" PRIx64 ": SPIR-V validation failed\n", options.dump_label,
 			     options.shader_hash);
 		}
+		if (result.profile.enabled) {
+			result.profile.validation_ms =
+			    static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+			                              std::chrono::steady_clock::now() - validation_begin)
+			                              .count());
+		}
 		DumpShaderSpirv(stage_name, options.shader_hash, result.spirv);
 
 		vk::ShaderModuleCreateInfo create_info {};
-		create_info.codeSize    = result.spirv.size() * sizeof(uint32_t);
-		create_info.pCode       = result.spirv.data();
-		vk::ShaderModule module = nullptr;
-		RequireVulkanSuccess(device.createShaderModule(&create_info, nullptr, &module),
-		                     "create recompiled shader module");
+		create_info.codeSize           = result.spirv.size() * sizeof(uint32_t);
+		create_info.pCode              = result.spirv.data();
+		vk::ShaderModule module        = nullptr;
+		const auto       module_begin  = std::chrono::steady_clock::now();
+		const auto       module_result = device.createShaderModule(&create_info, nullptr, &module);
+		if (result.profile.enabled) {
+			result.profile.shader_module_ms =
+			    static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+			                              std::chrono::steady_clock::now() - module_begin)
+			                              .count());
+			result.profile.total_ms = result.profile.decode_ms + result.profile.cfg_ms +
+			                          result.profile.structurize_ms + result.profile.translate_ms +
+			                          result.profile.resource_ms + result.profile.optimize_ms +
+			                          result.profile.spirv_ms + result.profile.validation_ms +
+			                          result.profile.shader_module_ms;
+		}
+		RequireVulkanSuccess(module_result, "create recompiled shader module");
 		EXIT_IF(module == nullptr);
+		LogShaderCompileProfile(stage_name, options.shader_hash, params.code.size(),
+		                        result.profile);
 		if (options.dump_ir) {
 			if (!options.early_dump) {
 				LOGF("%s decoded RDNA2:\n%s", options.dump_label, result.decoded_dump.c_str());
@@ -581,7 +628,8 @@ struct PipelineCache::ProgramCache {
 		                       .module      = module,
 		                       .stage       = options.stage,
 		                       .shader_hash = options.shader_hash,
-		                       .spirv_words = result.spirv.size()},
+		                       .spirv_words = result.spirv.size(),
+		                       .profile     = std::move(result.profile)},
 		};
 	}
 
@@ -654,14 +702,15 @@ struct PipelineCache::ProgramCache {
 			default: EXIT("invalid pipeline shader stage\n");
 		}
 		ShaderRecompiler::CompileOptions options;
-		options.stage       = stage;
-		options.shader_hash = params.hash;
-		options.user_data   = params.user_data;
-		options.back_code   = params.back_code;
-		options.dump_ir     = Config::GetShaderLogDirection() != Config::ShaderLogDirection::Silent;
-		options.early_dump  = options.dump_ir;
-		options.dump_label  = label;
-		options.input_info  = stage_input;
+		options.stage           = stage;
+		options.shader_hash     = params.hash;
+		options.user_data       = params.user_data;
+		options.back_code       = params.back_code;
+		options.compile_profile = Config::ShaderCompileProfileEnabled();
+		options.dump_ir    = Config::GetShaderLogDirection() != Config::ShaderLogDirection::Silent;
+		options.early_dump = options.dump_ir;
+		options.dump_label = label;
+		options.input_info = stage_input;
 		options.scratch_dwords = input_info.scratch_size_dwords;
 		if (Config::ShaderDebugEnabled() || Config::GraphicsDebugDumpEnabled()) {
 			options.replay_invocation_id = NextShaderReplayInvocationId();
@@ -690,10 +739,17 @@ struct PipelineCache::ProgramCache {
 		LogSwapPcDiagnostics(stage, params, options.user_data_base, read_cache, caller_name);
 		auto translated = ShaderRecompiler::TranslateProgram(params.code, options);
 		LogShaderComputeInputBeforeCompile("pre_resource_plan", options);
+		const auto resource_begin = std::chrono::steady_clock::now();
 		if (entry == programs.end()) {
 			auto resource_plan = ShaderRecompiler::IR::ExtractResourcePlan(translated.program);
 			EXIT_IF(!ShaderRecompiler::IR::MaterializeResources(resource_plan, runtime, resources,
 			                                                    specialization));
+			if (translated.profile.enabled) {
+				translated.profile.resource_ms +=
+				    static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+				                              std::chrono::steady_clock::now() - resource_begin)
+				                              .count());
+			}
 			entry = programs.try_emplace(lookup_key, std::move(resource_plan)).first;
 		}
 		entry->second.permutations.push_back(CompilePermutation(

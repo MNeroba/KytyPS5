@@ -30,6 +30,26 @@ static bool shader_pipeline_trace_enabled() {
 	return Config::ShaderDebugEnabled() || graphics_debug_dump_enabled();
 }
 
+static void LogShaderCompilePipelineProfile(const char* stage, uint64_t shader_hash,
+                                            const ShaderRecompiler::CompileProfile& profile,
+                                            uint64_t                                pipeline_ms) {
+	if (!profile.enabled || !Config::ShaderCompileProfileEnabled()) {
+		return;
+	}
+	LOGF("ShaderCompileProfile stage=%s hash=0x%016" PRIx64 " code_words=%" PRIu64
+	     " decoded_instructions=%" PRIu64 " cfg_blocks=%" PRIu64 " ir_before=%" PRIu64
+	     " ir_after=%" PRIu64 " decode_ms=%" PRIu64 " cfg_ms=%" PRIu64 " structurize_ms=%" PRIu64
+	     " translate_ms=%" PRIu64 " resource_ms=%" PRIu64 " optimize_ms=%" PRIu64
+	     " spirv_ms=%" PRIu64 " validation_ms=%" PRIu64 " shader_module_ms=%" PRIu64
+	     " pipeline_ms=%" PRIu64 " total_ms=%" PRIu64 " spirv_words=%" PRIu64 "\n",
+	     stage, shader_hash, profile.code_words, profile.decoded_instruction_count,
+	     profile.cfg_block_count, profile.ir_instruction_count_before,
+	     profile.ir_instruction_count_after, profile.decode_ms, profile.cfg_ms,
+	     profile.structurize_ms, profile.translate_ms, profile.resource_ms, profile.optimize_ms,
+	     profile.spirv_ms, profile.validation_ms, profile.shader_module_ms, pipeline_ms,
+	     profile.total_ms + pipeline_ms, profile.spirv_words);
+}
+
 // IDK: maybe we can remove it?
 constexpr uint8_t kTemporaryVertexAttribFormat113 =
     static_cast<uint8_t>(Prospero::VertexAttribFormat::k16_16SInt);
@@ -786,6 +806,18 @@ void CreatePipelineInternal(
 	}
 	result = graphics.device.createGraphicsPipelines(driver_cache, 1, &pipeline_info, nullptr,
 	                                                 &pipeline.pipeline);
+	const auto pipeline_elapsed_ms =
+	    static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+	                              std::chrono::steady_clock::now() - pipeline_begin)
+	                              .count());
+	if (Config::ShaderCompileProfileEnabled()) {
+		LogShaderCompilePipelineProfile("VS", vertex_program.shader_hash, vertex_program.profile,
+		                                pipeline_elapsed_ms);
+		if (ps_active) {
+			LogShaderCompilePipelineProfile("PS", pixel_program.shader_hash, pixel_program.profile,
+			                                pipeline_elapsed_ms);
+		}
+	}
 	if (shader_pipeline_trace_enabled()) {
 		LOGF("PipelineTrace: vkCreateGraphicsPipelines done result=%s pipeline=%p\n",
 		     vk::to_string(result).c_str(), static_cast<void*>(pipeline.pipeline));
@@ -884,6 +916,12 @@ void CreatePipelineInternal(GraphicContext& graphics, PipelineCache::Pipeline& p
 	}
 	result =
 	    graphics.device.createComputePipelines(driver_cache, 1, &info, nullptr, &pipeline.pipeline);
+	const auto pipeline_elapsed_ms =
+	    static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+	                              std::chrono::steady_clock::now() - pipeline_begin)
+	                              .count());
+	LogShaderCompilePipelineProfile("CS", compute_program.shader_hash, compute_program.profile,
+	                                pipeline_elapsed_ms);
 	if (shader_pipeline_trace_enabled()) {
 		LOGF("PipelineTrace: vkCreateComputePipelines done result=%s pipeline=%p\n",
 		     vk::to_string(result).c_str(), static_cast<void*>(pipeline.pipeline));

@@ -58,6 +58,7 @@ struct ConfigOptions {
 	// packet/submit tracing disabled. This is intentionally opt-in for development runs.
 	bool                   shader_debug_enabled              = false;
 	bool                   shader_swappc_diagnostic_enabled  = false;
+	bool                   shader_compile_profile_enabled    = false;
 	bool                   shader_debug_disable_optimization = false;
 	ShaderOptimizationType shader_optimization_type          = ShaderOptimizationType::None;
 	ShaderLogDirection     shader_log_direction              = ShaderLogDirection::Silent;
@@ -96,6 +97,7 @@ bool               VulkanValidationEnabled();
 bool                   ShaderValidationEnabled();
 bool                   ShaderDebugEnabled();
 bool                   ShaderSwapPcDiagnosticEnabled();
+bool                   ShaderCompileProfileEnabled();
 bool                   ShaderDebugDisableOptimization();
 ShaderOptimizationType GetShaderOptimizationType();
 ShaderLogDirection     GetShaderLogDirection();

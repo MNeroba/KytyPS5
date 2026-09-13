@@ -53,6 +53,28 @@ const char* StageName(ShaderType stage) {
 	}
 }
 
+using ProfileClock = std::chrono::steady_clock;
+
+uint64_t ProfileElapsedMs(ProfileClock::time_point begin) {
+	return static_cast<uint64_t>(
+	    std::chrono::duration_cast<std::chrono::milliseconds>(ProfileClock::now() - begin).count());
+}
+
+uint64_t CountIrInstructions(const IR::Program& program) {
+	uint64_t count = 0;
+	for (const auto* block: program.blocks) {
+		if (block != nullptr) {
+			count += static_cast<uint64_t>(block->Instructions().size());
+		}
+	}
+	return count;
+}
+
+uint64_t SumRecompilerProfileMs(const CompileProfile& profile) {
+	return profile.decode_ms + profile.cfg_ms + profile.structurize_ms + profile.translate_ms +
+	       profile.resource_ms + profile.optimize_ms + profile.spirv_ms;
+}
+
 void LogDispatcherFallback(const CompileOptions& options, const CFG::Graph& cfg, const char* phase,
                            const std::string& reason) {
 	const auto* block        = cfg.FindBlock(cfg.failure_block);
@@ -572,8 +594,11 @@ TranslateResult TranslateProgram(std::span<const uint32_t> code, const CompileOp
 		     static_cast<unsigned>(options.stage));
 	}
 
-	const auto compile_begin = std::chrono::steady_clock::now();
-	const auto phase_ms      = [&compile_begin]() {
+	const auto     compile_begin = ProfileClock::now();
+	CompileProfile profile;
+	profile.enabled     = options.compile_profile;
+	profile.code_words  = code.size();
+	const auto phase_ms = [&compile_begin]() {
 		return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
 		                                 std::chrono::steady_clock::now() - compile_begin)
 		                                 .count());
@@ -584,11 +609,16 @@ TranslateResult TranslateProgram(std::span<const uint32_t> code, const CompileOp
 	     static_cast<uint64_t>(code.size()));
 
 	Decoder::Program      decoded;
+	const auto            decode_begin = ProfileClock::now();
 	std::vector<uint32_t> joined_code;
 	if (!options.back_code.empty()) {
 		decoded = DecodeFusedProgram(code, options.back_code, joined_code);
 	} else {
 		Decoder::DecodeProgram(code, decoded);
+	}
+	if (profile.enabled) {
+		profile.decode_ms                 = ProfileElapsedMs(decode_begin);
+		profile.decoded_instruction_count = decoded.instructions.size();
 	}
 	LOGF("%s phase end: stage=%s hash=0x%016" PRIx64 " decode instructions=%" PRIu64
 	     " elapsed_ms=%" PRIu64 "\n",
@@ -605,7 +635,14 @@ TranslateResult TranslateProgram(std::span<const uint32_t> code, const CompileOp
 
 	LOGF("%s phase begin: stage=%s hash=0x%016" PRIx64 " CFG BuildGraph\n", GetDumpLabel(options),
 	     StageName(options.stage), options.shader_hash);
-	auto cfg = CFG::BuildGraph(decoded);
+	const auto cfg_begin = ProfileClock::now();
+	auto       cfg       = CFG::BuildGraph(decoded);
+	if (profile.enabled) {
+		profile.cfg_ms              = ProfileElapsedMs(cfg_begin);
+		profile.cfg_block_count     = cfg.blocks.size();
+		profile.cfg_loop_count      = cfg.natural_loops.size();
+		profile.cfg_back_edge_count = cfg.back_edges.size();
+	}
 	LOGF("%s phase end: stage=%s hash=0x%016" PRIx64 " CFG BuildGraph blocks=%" PRIu64
 	     " loops=%" PRIu64 " back_edges=%" PRIu64 " elapsed_ms=%" PRIu64 "\n",
 	     GetDumpLabel(options), StageName(options.stage), options.shader_hash,
@@ -613,6 +650,7 @@ TranslateResult TranslateProgram(std::span<const uint32_t> code, const CompileOp
 	     static_cast<uint64_t>(cfg.back_edges.size()), phase_ms());
 	bool        dispatcher_fallback = false;
 	std::string dispatcher_reason;
+	const auto  structurize_begin = ProfileClock::now();
 	if (cfg.irreducible) {
 		dispatcher_fallback = true;
 		dispatcher_reason   = cfg.unsupported_reason;
@@ -679,6 +717,9 @@ TranslateResult TranslateProgram(std::span<const uint32_t> code, const CompileOp
 			     static_cast<uint64_t>(embedded_fetch.loads.size()));
 		}
 	}
+	if (profile.enabled) {
+		profile.structurize_ms = ProfileElapsedMs(structurize_begin);
+	}
 	Frontend::TranslateOptions translate_options {
 	    .stage               = options.stage,
 	    .wave_size           = options.wave_size,
@@ -696,12 +737,18 @@ TranslateResult TranslateProgram(std::span<const uint32_t> code, const CompileOp
 	};
 	LOGF("%s phase begin: stage=%s hash=0x%016" PRIx64 " IR TranslateProgram\n",
 	     GetDumpLabel(options), StageName(options.stage), options.shader_hash);
-	auto ir = Frontend::TranslateProgram(decoded, cfg, translate_options);
+	const auto translate_begin = ProfileClock::now();
+	auto       ir              = Frontend::TranslateProgram(decoded, cfg, translate_options);
+	if (profile.enabled) {
+		profile.translate_ms                = ProfileElapsedMs(translate_begin);
+		profile.ir_instruction_count_before = CountIrInstructions(ir);
+	}
 	LOGF("%s phase end: stage=%s hash=0x%016" PRIx64 " IR TranslateProgram blocks=%" PRIu64
 	     " elapsed_ms=%" PRIu64 "\n",
 	     GetDumpLabel(options), StageName(options.stage), options.shader_hash,
 	     static_cast<uint64_t>(ir.blocks.size()), phase_ms());
 	const bool trace_problem_shader = options.shader_hash == 0x78af8e269b528b5cULL;
+	const auto optimize_begin       = ProfileClock::now();
 	if (trace_problem_shader)
 		LOGF("ShaderRecompiler trace hash=0x%016" PRIx64 " RewriteToSsa begin\n",
 		     options.shader_hash);
@@ -740,6 +787,7 @@ TranslateResult TranslateProgram(std::span<const uint32_t> code, const CompileOp
 	if (trace_problem_shader)
 		LOGF("ShaderRecompiler trace hash=0x%016" PRIx64 " BuildSrtPlan begin\n",
 		     options.shader_hash);
+	const auto resource_begin = ProfileClock::now();
 	IR::BuildSrtPlan(ir);
 	if (trace_problem_shader)
 		LOGF("ShaderRecompiler trace hash=0x%016" PRIx64 " BuildSrtPlan end\n",
@@ -763,8 +811,16 @@ TranslateResult TranslateProgram(std::span<const uint32_t> code, const CompileOp
 	if (trace_problem_shader)
 		LOGF("ShaderRecompiler trace hash=0x%016" PRIx64 " post TrackResources DCE end\n",
 		     options.shader_hash);
+	if (profile.enabled) {
+		const auto resource_ms = ProfileElapsedMs(resource_begin);
+		profile.resource_ms    = resource_ms;
+		const auto optimize_ms = ProfileElapsedMs(optimize_begin);
+		profile.optimize_ms    = optimize_ms >= resource_ms ? optimize_ms - resource_ms : 0;
+		profile.ir_instruction_count_after = CountIrInstructions(ir);
+	}
 	TranslateResult result;
 	result.program = std::move(ir);
+	result.profile = profile;
 	if (options.dump_ir) {
 		result.decoded_dump = std::move(decoded_dump);
 		result.cfg_dump     = CFG::GraphToString(cfg);
@@ -775,8 +831,9 @@ TranslateResult TranslateProgram(std::span<const uint32_t> code, const CompileOp
 CompileResult CompileProgram(TranslateResult translated, const CompileOptions& options,
                              const IR::ResourceSpecialization& specialization,
                              uint32_t                          push_data_start_dword) {
-	const auto emit_begin = std::chrono::steady_clock::now();
-	auto&      ir         = translated.program;
+	auto       profile           = std::move(translated.profile);
+	auto&      ir                = translated.program;
+	const auto compile_opt_begin = ProfileClock::now();
 	IR::ApplyResourceSpecialization(ir, specialization);
 	IR::RemoveIdentities(ir.blocks);
 	IR::EliminateDeadCode(ir.blocks);
@@ -806,20 +863,30 @@ CompileResult CompileProgram(TranslateResult translated, const CompileOptions& o
 			LOGF("%s native IR and bindings (early):\n%s", GetDumpLabel(options), ir_dump.c_str());
 		}
 	}
+	if (profile.enabled) {
+		profile.optimize_ms += ProfileElapsedMs(compile_opt_begin);
+	}
 
 	LOGF("%s phase begin: stage=%s hash=0x%016" PRIx64 " SPIR-V EmitProgram\n",
 	     GetDumpLabel(options), StageName(options.stage), options.shader_hash);
-	auto spirv = Spirv::EmitProgram(ir, options.input_info);
+	const auto spirv_begin = ProfileClock::now();
+	auto       spirv       = Spirv::EmitProgram(ir, options.input_info);
+	if (profile.enabled) {
+		profile.spirv_ms    = ProfileElapsedMs(spirv_begin);
+		profile.spirv_words = spirv.size();
+		profile.total_ms    = SumRecompilerProfileMs(profile);
+	}
 	LOGF("%s phase end: stage=%s hash=0x%016" PRIx64 " SPIR-V EmitProgram words=%" PRIu64
 	     " elapsed_ms=%" PRIu64 "\n",
 	     GetDumpLabel(options), StageName(options.stage), options.shader_hash,
 	     static_cast<uint64_t>(spirv.size()),
 	     static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
-	                               std::chrono::steady_clock::now() - emit_begin)
+	                               ProfileClock::now() - spirv_begin)
 	                               .count()));
 	CompileResult result;
 	result.spirv   = std::move(spirv);
 	result.program = std::move(ir);
+	result.profile = std::move(profile);
 	if (options.dump_ir) {
 		result.decoded_dump = std::move(translated.decoded_dump);
 		result.ir_dump      = std::move(ir_dump);

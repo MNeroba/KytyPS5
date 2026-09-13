@@ -39,6 +39,9 @@ struct ReplayOptions {
 	uint32_t              user_data_count = 0;
 	uint32_t              workgroup_register = 0;
 	std::array<uint32_t, 3> threads_num {1, 1, 1};
+	bool                  profile           = false;
+	bool                  stub_bvh          = false;
+	bool                  compare_profile   = false;
 };
 
 [[noreturn]] void Fail(std::string_view message) {
@@ -111,6 +114,13 @@ ReplayOptions ParseOptions(int argc, char** argv) {
 			for (auto& thread_count: options.threads_num) {
 				thread_count = ParseU32(next(), "--threads");
 			}
+		} else if (argument == "--profile") {
+			options.profile = true;
+		} else if (argument == "--stub-bvh") {
+			options.stub_bvh = true;
+		} else if (argument == "--compare-profile") {
+			options.profile = true;
+			options.compare_profile = true;
 		} else if (argument == "--help" || argument == "-h") {
 			std::printf(
 			    "usage: shader_replay_tests (--input shader.bin | --capsule shader.json) [options]\n"
@@ -118,7 +128,7 @@ ReplayOptions ParseOptions(int argc, char** argv) {
 			    "  --capture-capsule shader.json (input mode)\n"
 			    "  --hash value --wave-size value --user-data-base value\n"
 			    "  --user-data-count value --workgroup-register value\n"
-			    "  --threads x y z\n");
+			    "  --threads x y z --profile --compare-profile --stub-bvh\n");
 			std::exit(EXIT_SUCCESS);
 		} else {
 			Fail(std::string("unknown argument: ") + std::string(argument));
@@ -222,12 +232,13 @@ void WriteSpirv(const std::filesystem::path& path, const std::vector<uint32_t>& 
 	}
 }
 
-void EnsureInitialized() {
+void EnsureInitialized(bool profile, bool stub_bvh) {
 	static Common::Subsystems subsystems;
 	Common::InitializeThreads();
 	subsystems.Initialize<Config::Lifecycle>();
 	Config::ConfigOptions config;
-	config.printf_direction = Config::OutputDirection::Silent;
+	config.printf_direction = profile ? Config::OutputDirection::Console : Config::OutputDirection::Silent;
+	config.bvh_stub_enabled = stub_bvh;
 	Config::Load(config);
 	subsystems.Initialize<Log::Lifecycle>();
 	ShaderInit();
@@ -239,7 +250,7 @@ void EnsureInitialized() {
 int main(int argc, char** argv) {
 	using namespace Libs::Graphics;
 	const auto options = ParseOptions(argc, argv);
-	EnsureInitialized();
+	EnsureInitialized(options.profile, options.stub_bvh);
 	ShaderRecompiler::ReplayCapsule capsule;
 	std::string capsule_error;
 	const bool exact = !options.capsule.empty();
@@ -260,6 +271,7 @@ int main(int argc, char** argv) {
 	                                        ? options.hash
 	                                        : XXH3_64bits(code.data(), code.size() * sizeof(uint32_t)));
 	compile_options.dump_ir = false;
+	compile_options.compile_profile = options.profile;
 	ShaderComputeInputInfo compute = exact ? capsule.compute : ShaderComputeInputInfo {};
 	if (!exact) {
 		compute.wave_size          = options.wave_size;
@@ -301,6 +313,38 @@ int main(int argc, char** argv) {
 	                                                 specialization,
 	                                                 exact ? capsule.push_data_start_dword : 0u);
 	Validate(compiled.spirv);
+	if (compiled.profile.enabled) {
+		std::printf("ShaderCompileProfile stage=%s hash=0x%016" PRIx64
+		           " code_words=%" PRIu64 " decoded_instructions=%" PRIu64 " cfg_blocks=%" PRIu64
+		           " ir_before=%" PRIu64 " ir_after=%" PRIu64 " decode_ms=%" PRIu64
+		           " cfg_ms=%" PRIu64 " structurize_ms=%" PRIu64 " translate_ms=%" PRIu64
+		           " resource_ms=%" PRIu64 " optimize_ms=%" PRIu64 " spirv_ms=%" PRIu64
+		           " validation_ms=0 shader_module_ms=0 pipeline_ms=0 total_ms=%" PRIu64
+		           " spirv_words=%zu\n",
+		           compile_options.stage == ShaderType::Compute ? "CS" : "unknown",
+		           compile_options.shader_hash, static_cast<uint64_t>(code.size()),
+		           compiled.profile.decoded_instruction_count,
+		           compiled.profile.cfg_block_count, compiled.profile.ir_instruction_count_before,
+		           compiled.profile.ir_instruction_count_after, compiled.profile.decode_ms,
+		           compiled.profile.cfg_ms, compiled.profile.structurize_ms,
+		           compiled.profile.translate_ms, compiled.profile.resource_ms,
+		           compiled.profile.optimize_ms, compiled.profile.spirv_ms, compiled.profile.total_ms,
+		           compiled.spirv.size());
+	}
+	if (options.compare_profile) {
+		auto off_options = compile_options;
+		off_options.compile_profile = false;
+		auto translated_off = ShaderRecompiler::TranslateProgram(code, off_options);
+		auto compiled_off = ShaderRecompiler::CompileProgram(std::move(translated_off), off_options,
+		                                                    specialization,
+		                                                    exact ? capsule.push_data_start_dword : 0u);
+		Validate(compiled_off.spirv);
+		std::printf("ShaderCompileProfileSpirvIdentity=%s\n",
+		            compiled_off.spirv == compiled.spirv ? "PASS" : "FAIL");
+		if (compiled_off.spirv != compiled.spirv) {
+			std::exit(EXIT_FAILURE);
+		}
+	}
 	WriteSpirv(options.output, compiled.spirv);
 	const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
 	    std::chrono::steady_clock::now() - start);

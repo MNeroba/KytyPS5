@@ -63,6 +63,7 @@ static void PrintUsage() {
 	::printf("  --shader-validation <true|false>     Enable shader validation.\n");
 	::printf("  --shader-debug <true|false>          Focused shader traces/dumps without graphics "
 	         "packet tracing.\n");
+	::printf("  --shader-compile-profile <true|false> Compact per-shader phase timings.\n");
 	::printf("  --shader-debug-disable-optimization <true|false>\n"
 	         "                                       Disable Vulkan pipeline optimization for A/B "
 	         "debug runs.\n");
@@ -276,6 +277,11 @@ static bool ParseArgs(int argc, char* argv[], RunOptions& options, bool& show_he
 			}
 		} else if (arg == "--shader-debug") {
 			if (!ParseBool(value, options.config.shader_debug_enabled)) {
+				::printf("invalid boolean for %s: %s\n", arg.c_str(), value.c_str());
+				return false;
+			}
+		} else if (arg == "--shader-compile-profile") {
+			if (!ParseBool(value, options.config.shader_compile_profile_enabled)) {
 				::printf("invalid boolean for %s: %s\n", arg.c_str(), value.c_str());
 				return false;
 			}
