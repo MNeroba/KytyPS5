@@ -22,6 +22,13 @@ constexpr uint32_t Sop1SetpcB64 = 0x20u;
 constexpr uint32_t SCodeEnd = 0xbf9f0000u;
 constexpr uint32_t SEndpgm = 0xbf810000u;
 
+bool ContainsSwapPcEncoding(std::span<const uint32_t> code) {
+	return std::any_of(code.begin(), code.end(), [](uint32_t word) {
+		return (word & 0xc0000000u) == 0x80000000u && ((word >> 23u) & 0x7fu) == 0x7du &&
+		       ((word >> 8u) & 0xffu) == 0x21u;
+	});
+}
+
 bool ReadGuestWord(void*, uint64_t address, uint32_t* value) {
 	return value != nullptr &&
 	       (Libs::LibKernel::Memory::TryReadGpuCleanBacking(address, value, sizeof(*value)) ||
@@ -40,6 +47,9 @@ std::vector<IndirectCallSite> ResolveIndirectCalls(std::span<const uint32_t> cod
                                                    uint64_t                  shader_addr) {
 	std::vector<IndirectCallSite> resolved;
 	if (code.empty()) {
+		return resolved;
+	}
+	if (!ContainsSwapPcEncoding(code)) {
 		return resolved;
 	}
 
