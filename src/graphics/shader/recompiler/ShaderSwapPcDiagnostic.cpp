@@ -405,7 +405,7 @@ void CaptureCallee(SwapPcDiagnosticRecord& record, const SwapPcDiagnosticOptions
 			record.return_pc           = record.target_guest_va + static_cast<uint64_t>(i) * 4u;
 			record.return_raw          = word;
 			record.return_source_sgpr  = word & 0xffu;
-			record.return_pair_matches = record.return_source_sgpr == record.source_sgpr;
+			record.return_pair_matches = record.return_source_sgpr == record.destination_sgpr;
 		}
 	}
 	if (!record.target_mapped && !record.callee_words.empty()) {

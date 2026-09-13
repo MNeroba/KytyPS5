@@ -812,7 +812,8 @@ struct PipelineCache::ProgramCache {
 		LogSwapPcDiagnostics(stage, params, options.user_data_base, read_cache, caller_name);
 		std::vector<uint32_t> spliced_code;
 		std::span<const uint32_t> compile_code = params.code;
-		const auto call_sites = ResolveIndirectCalls(params.code, params.user_data, params.Base());
+		const auto call_sites =
+		    ResolveIndirectCalls(params.code, params.user_data, options.user_data_base, params.Base());
 		if (!call_sites.empty()) {
 			std::vector<std::span<const uint32_t>> handlers;
 			handlers.reserve(call_sites.size());

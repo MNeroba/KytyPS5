@@ -1,16 +1,14 @@
 #include "graphics/shader/shaderCallTrace.h"
 
-#include "common/logging/log.h"
-#include "common/magicEnum.h"
+#include "graphics/shader/recompiler/ShaderSwapPcDiagnostic.h"
 #include "graphics/shader/recompiler/frontend/decode/ShaderDecoder.h"
+#include "graphics/shader/shader.h"
 #include "kernel/memory.h"
 
 #include <algorithm>
 #include <cstdint>
-#include <cstdlib>
-#include <fmt/format.h>
-#include <optional>
-#include <string>
+#include <limits>
+#include <span>
 #include <vector>
 
 namespace Libs::Graphics {
@@ -18,246 +16,55 @@ namespace Libs::Graphics {
 namespace {
 
 namespace Decoder = ShaderRecompiler::Decoder;
-using Decoder::Opcode;
-using Decoder::OperandKind;
 
-constexpr uint32_t MaxDepth = 12;
+constexpr uint32_t Sop1Prefix = 0x17du;
+constexpr uint32_t Sop1SetpcB64 = 0x20u;
+constexpr uint32_t SCodeEnd = 0xbf9f0000u;
+constexpr uint32_t SEndpgm = 0xbf810000u;
 
-constexpr uint32_t Sop1Prefix     = 0x17Du;
-constexpr uint32_t Sop1SwappcB64  = 0x21u;
-constexpr uint32_t Sop1SetpcB64  = 0x20u;
-constexpr uint32_t SCodeEnd      = 0xbf9f0000u;
-constexpr uint32_t SEndpgm       = 0xbf810000u;
-
-struct SwappcSite {
-	uint32_t pc   = 0;
-	uint32_t sdst = 0;
-	uint32_t ssrc = 0;
-};
-
-std::vector<SwappcSite> FindSwappcSites(const Decoder::Program& program) {
-	std::vector<SwappcSite> sites;
-	for (const auto& inst: program.instructions) {
-		if (inst.family != Decoder::Family::SOP1 || inst.opcode_id != Sop1SwappcB64) {
-			continue;
-		}
-		const auto word = inst.raw[0];
-		sites.push_back({inst.pc, (word >> 16u) & 0x7fu, word & 0xffu});
-	}
-	return sites;
+bool ReadGuestWord(void*, uint64_t address, uint32_t* value) {
+	return value != nullptr &&
+	       (Libs::LibKernel::Memory::TryReadGpuCleanBacking(address, value, sizeof(*value)) ||
+	        Libs::LibKernel::Memory::TryReadBacking(address, value, sizeof(*value)));
 }
 
-bool ScalarCode(const Decoder::Operand& operand, uint32_t& code) {
-	if (operand.kind != OperandKind::Sgpr) {
-		return false;
-	}
-	code = operand.reg;
-	return true;
+bool FindMappedShaderRange(void*, uint64_t address, uint64_t* range_base, uint64_t* range_size) {
+	return ShaderFindMappedRange(address, range_base, range_size);
 }
-
-bool WritesScalar(const Decoder::Instruction& inst, uint32_t reg, uint32_t& base,
-                  uint32_t& dwords) {
-	uint32_t dst = 0;
-	if (!ScalarCode(inst.dst, dst)) {
-		return false;
-	}
-	uint32_t width = 1;
-	switch (inst.opcode) {
-		case Opcode::S_LOAD_DWORD:
-		case Opcode::S_BUFFER_LOAD_DWORD: width = 1; break;
-		case Opcode::S_LOAD_DWORDX2:
-		case Opcode::S_BUFFER_LOAD_DWORDX2: width = 2; break;
-		case Opcode::S_LOAD_DWORDX4:
-		case Opcode::S_BUFFER_LOAD_DWORDX4: width = 4; break;
-		case Opcode::S_LOAD_DWORDX8:
-		case Opcode::S_BUFFER_LOAD_DWORDX8: width = 8; break;
-		case Opcode::S_LOAD_DWORDX16:
-		case Opcode::S_BUFFER_LOAD_DWORDX16: width = 16; break;
-		case Opcode::S_MOV_B32: width = 1; break;
-		case Opcode::S_MOV_B64: width = 2; break;
-		default: width = 1; break;
-	}
-	if (reg < dst || reg >= dst + width) {
-		return false;
-	}
-	base   = dst;
-	dwords = width;
-	return true;
-}
-
-bool IsLoad(Opcode opcode) {
-	switch (opcode) {
-		case Opcode::S_LOAD_DWORD:
-		case Opcode::S_LOAD_DWORDX2:
-		case Opcode::S_LOAD_DWORDX4:
-		case Opcode::S_LOAD_DWORDX8:
-		case Opcode::S_LOAD_DWORDX16:
-		case Opcode::S_BUFFER_LOAD_DWORD:
-		case Opcode::S_BUFFER_LOAD_DWORDX2:
-		case Opcode::S_BUFFER_LOAD_DWORDX4:
-		case Opcode::S_BUFFER_LOAD_DWORDX8:
-		case Opcode::S_BUFFER_LOAD_DWORDX16: return true;
-		default: return false;
-	}
-}
-
-bool IsBufferLoad(Opcode opcode) {
-	switch (opcode) {
-		case Opcode::S_BUFFER_LOAD_DWORD:
-		case Opcode::S_BUFFER_LOAD_DWORDX2:
-		case Opcode::S_BUFFER_LOAD_DWORDX4:
-		case Opcode::S_BUFFER_LOAD_DWORDX8:
-		case Opcode::S_BUFFER_LOAD_DWORDX16: return true;
-		default: return false;
-	}
-}
-
-class ChainWalker {
-public:
-	ChainWalker(const Decoder::Program& program, std::span<const uint32_t> user_data)
-	    : m_program(program), m_user_data(user_data) {}
-
-	std::optional<uint32_t> Scalar(uint32_t reg, uint32_t before_pc, uint32_t depth) {
-		if (depth > MaxDepth) {
-			Note(depth, fmt::format("s{} - giving up, chain deeper than {}", reg, MaxDepth));
-			return std::nullopt;
-		}
-		const auto* writer = FindWriter(reg, before_pc);
-		if (writer == nullptr) {
-			if (reg < m_user_data.size()) {
-				return m_user_data[reg];
-			}
-			Note(depth, fmt::format("s{} - no writer and outside the {} user-data words", reg,
-			                        m_user_data.size()));
-			return std::nullopt;
-		}
-		uint32_t base   = 0;
-		uint32_t dwords = 0;
-		WritesScalar(*writer, reg, base, dwords);
-
-		if (writer->opcode == Opcode::S_MOV_B32 || writer->opcode == Opcode::S_MOV_B64) {
-			uint32_t src = 0;
-			if (ScalarCode(writer->src0, src)) {
-				return Scalar(src + (reg - base), writer->pc, depth + 1);
-			}
-			if (writer->src0.kind == OperandKind::LiteralConstant ||
-			    writer->src0.kind == OperandKind::IntegerInlineConstant) {
-				return writer->src0.value;
-			}
-			Note(depth, fmt::format("s{} <- s_mov from an operand kind this walker does not read",
-			                        reg));
-			return std::nullopt;
-		}
-
-		if (!IsLoad(writer->opcode)) {
-			Note(depth, fmt::format("s{} <- {} at pc 0x{:08x}, not a load or move", reg,
-			                        magic_enum::enum_name(writer->opcode), writer->pc));
-			return std::nullopt;
-		}
-
-		uint32_t sbase = 0;
-		if (!ScalarCode(writer->src0, sbase)) {
-			Note(depth, fmt::format("s{} <- load whose base is not an SGPR", reg));
-			return std::nullopt;
-		}
-
-		uint64_t address = 0;
-		if (IsBufferLoad(writer->opcode)) {
-			const auto d0 = Scalar(sbase, writer->pc, depth + 1);
-			const auto d1 = Scalar(sbase + 1u, writer->pc, depth + 1);
-			if (!d0 || !d1) {
-				return std::nullopt;
-			}
-			address = static_cast<uint64_t>(*d0) |
-			          (static_cast<uint64_t>(*d1 & 0xffffu) << 32u);
-			Note(depth, fmt::format("s{} <- s_buffer_load [V# s{} base=0x{:012x}] + 0x{:x}", reg,
-			                        sbase, address, writer->offset));
-			if (std::find(m_bases.begin(), m_bases.end(), address) == m_bases.end()) {
-				m_bases.push_back(address);
-			}
-		} else {
-			const auto lo = Scalar(sbase, writer->pc, depth + 1);
-			const auto hi = Scalar(sbase + 1u, writer->pc, depth + 1);
-			if (!lo || !hi) {
-				return std::nullopt;
-			}
-			address = static_cast<uint64_t>(*lo) | (static_cast<uint64_t>(*hi) << 32u);
-			Note(depth, fmt::format("s{} <- s_load [s[{}:{}] = 0x{:012x}] + 0x{:x}", reg, sbase,
-			                        sbase + 1u, address, writer->offset));
-		}
-
-		address += writer->offset;
-		address += static_cast<uint64_t>(reg - base) * 4u;
-
-		uint32_t value = 0;
-		if (!Libs::LibKernel::Memory::TryReadBacking(address, &value, sizeof(value))) {
-			Note(depth, fmt::format("s{} - guest read at 0x{:012x} failed (unmapped)", reg,
-			                        address));
-			return std::nullopt;
-		}
-		return value;
-	}
-
-	[[nodiscard]] const std::vector<std::string>& Notes() const { return m_notes; }
-	[[nodiscard]] const std::vector<uint64_t>&    Bases() const { return m_bases; }
-
-private:
-	const Decoder::Instruction* FindWriter(uint32_t reg, uint32_t before_pc) const {
-		const Decoder::Instruction* found = nullptr;
-		for (const auto& inst: m_program.instructions) {
-			if (inst.pc >= before_pc) {
-				break;
-			}
-			uint32_t base   = 0;
-			uint32_t dwords = 0;
-			if (WritesScalar(inst, reg, base, dwords)) {
-				found = &inst;
-			}
-		}
-		return found;
-	}
-
-	void Note(uint32_t depth, std::string text) {
-		m_notes.push_back(std::string(depth * 2u, ' ') + std::move(text));
-	}
-
-	std::vector<uint64_t>     m_bases;
-	const Decoder::Program&   m_program;
-	std::span<const uint32_t> m_user_data;
-	std::vector<std::string>  m_notes;
-};
 
 } // namespace
 
 std::vector<IndirectCallSite> ResolveIndirectCalls(std::span<const uint32_t> code,
                                                    std::span<const uint32_t> user_data,
+                                                   uint32_t                  user_data_base,
                                                    uint64_t                  shader_addr) {
-	(void)shader_addr;
 	std::vector<IndirectCallSite> resolved;
-	Decoder::Program program {};
-	Decoder::DecodeProgram(code, program);
-	if (program.instructions.empty()) {
-		return resolved;
-	}
-	const auto sites = FindSwappcSites(program);
-	if (sites.empty()) {
+	if (code.empty()) {
 		return resolved;
 	}
 
-	for (const auto& site: sites) {
-		IndirectCallSite out;
-		out.pc          = site.pc;
-		out.target_sgpr = site.ssrc;
-		out.return_sgpr = site.sdst;
-
-		ChainWalker walker(program, user_data);
-		const auto  lo = walker.Scalar(site.ssrc, site.pc, 0);
-		const auto  hi = walker.Scalar(site.ssrc + 1u, site.pc, 0);
-		if (lo && hi) {
-			out.handler = static_cast<uint64_t>(*lo) | (static_cast<uint64_t>(*hi) << 32u);
+	// Reuse the production branch-aware diagnostic walker for call-site discovery and scalar
+	// provenance. In particular, do not decode arbitrary post-terminal padding merely because it
+	// happens to contain an S_SWAPPC encoding.
+	const ShaderRecompiler::SwapPcDiagnosticOptions options {
+	    .shader_base      = shader_addr,
+	    .user_data_base   = user_data_base,
+	    .user_data        = user_data,
+	    .read_u32         = ReadGuestWord,
+	    .find_range       = FindMappedShaderRange,
+	    .max_call_sites   = 64,
+	    .max_callee_words = 0,
+	};
+	const auto records = ShaderRecompiler::ResolveSwapPcDiagnostics(code, options);
+	resolved.reserve(records.size());
+	for (const auto& record: records) {
+		if (!record.target_known || !record.target_mapped || record.target_guest_va == 0) {
+			continue;
 		}
-
-		resolved.push_back(out);
+		resolved.push_back({.pc          = record.call_pc,
+		                   .target_sgpr = record.source_sgpr,
+		                   .return_sgpr = record.destination_sgpr,
+		                   .handler     = record.target_guest_va});
 	}
 	return resolved;
 }
@@ -285,27 +92,31 @@ std::span<const uint32_t> TrimToCode(std::span<const uint32_t> code, uint32_t re
 	return code;
 }
 
-bool EndsWithReturn(std::span<const uint32_t> code, uint32_t target_sgpr) {
+bool EndsWithReturn(std::span<const uint32_t> code, uint32_t return_sgpr) {
 	if (code.empty()) {
 		return false;
 	}
 	const auto last = code.back();
 	return (last >> 23u) == Sop1Prefix && ((last >> 8u) & 0xffu) == Sop1SetpcB64 &&
-	       (last & 0xffu) == target_sgpr;
+	       (last & 0xffu) == return_sgpr;
 }
 
-bool IsBranchOpcode(Opcode opcode) {
+namespace {
+
+bool IsBranchOpcode(Decoder::Opcode opcode) {
 	switch (opcode) {
-		case Opcode::S_BRANCH:
-		case Opcode::S_CBRANCH_SCC0:
-		case Opcode::S_CBRANCH_SCC1:
-		case Opcode::S_CBRANCH_VCCZ:
-		case Opcode::S_CBRANCH_VCCNZ:
-		case Opcode::S_CBRANCH_EXECZ:
-		case Opcode::S_CBRANCH_EXECNZ: return true;
+		case Decoder::Opcode::S_BRANCH:
+		case Decoder::Opcode::S_CBRANCH_SCC0:
+		case Decoder::Opcode::S_CBRANCH_SCC1:
+		case Decoder::Opcode::S_CBRANCH_VCCZ:
+		case Decoder::Opcode::S_CBRANCH_VCCNZ:
+		case Decoder::Opcode::S_CBRANCH_EXECZ:
+		case Decoder::Opcode::S_CBRANCH_EXECNZ: return true;
 		default: return false;
 	}
 }
+
+} // namespace
 
 std::vector<uint32_t> SpliceIndirectCalls(std::span<const uint32_t>                  code,
                                           std::span<const IndirectCallSite>          sites,
@@ -315,7 +126,6 @@ std::vector<uint32_t> SpliceIndirectCalls(std::span<const uint32_t>             
 	}
 
 	const auto base = TrimToCode(code);
-
 	Decoder::Program program {};
 	Decoder::DecodeProgram(base, program);
 	if (program.instructions.empty()) {
@@ -323,10 +133,11 @@ std::vector<uint32_t> SpliceIndirectCalls(std::span<const uint32_t>             
 	}
 
 	struct Insertion {
-		uint32_t                  word = 0; // dword index of the S_SWAPPC_B64 being replaced
-		std::span<const uint32_t> body;     // callee code without its trailing return
+		uint32_t                  word = 0;
+		std::span<const uint32_t> body;
 	};
 	std::vector<Insertion> insertions;
+	insertions.reserve(sites.size());
 	for (size_t index = 0; index < sites.size(); index++) {
 		const auto& site    = sites[index];
 		const auto  handler = handlers[index];
@@ -353,7 +164,7 @@ std::vector<uint32_t> SpliceIndirectCalls(std::span<const uint32_t>             
 		}
 		remap[insertion.word] = static_cast<uint32_t>(out.size());
 		out.insert(out.end(), insertion.body.begin(), insertion.body.end());
-		next = insertion.word + 1u; // the call itself is gone
+		next = insertion.word + 1u;
 	}
 	for (; next < base.size(); next++) {
 		remap[next] = static_cast<uint32_t>(out.size());

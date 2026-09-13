@@ -16,6 +16,7 @@ struct IndirectCallSite {
 
 std::vector<IndirectCallSite> ResolveIndirectCalls(std::span<const uint32_t> code,
                                                    std::span<const uint32_t> user_data,
+                                                   uint32_t                  user_data_base,
                                                    uint64_t                  shader_addr);
 
 std::span<const uint32_t> TrimToCode(std::span<const uint32_t> code,
