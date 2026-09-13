@@ -87,6 +87,10 @@ bool PipelineCacheProfileEnabled() {
 	return g_config->pipeline_cache_profile_enabled;
 }
 
+bool GpuAddressBindingDiagnosticEnabled() {
+	return g_config->gpu_address_binding_diagnostic_enabled;
+}
+
 bool ShaderDebugDisableOptimization() {
 	return g_config->shader_debug_disable_optimization;
 }

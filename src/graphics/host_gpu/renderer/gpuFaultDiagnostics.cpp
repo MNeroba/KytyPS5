@@ -176,6 +176,92 @@ void GpuFaultDiagnostics::DumpDeviceFault(const char* source, uint64_t tick) {
 		LOGF("vendor[%u]: code=0x%016" PRIx64 " data=0x%016" PRIx64 " description=\"%s\"\n", i,
 		     vendor.vendorFaultCode, vendor.vendorFaultData, vendor.description.data());
 	}
+	DumpAddressBindingCorrelations(addresses);
+}
+
+namespace {
+
+bool AddressRangesOverlap(uint64_t first_base, uint64_t first_size, uint64_t second_base,
+                          uint64_t second_size) {
+	if (first_size == 0 || second_size == 0) {
+		return false;
+	}
+	const auto first_end  = first_base > std::numeric_limits<uint64_t>::max() - first_size
+	                            ? std::numeric_limits<uint64_t>::max()
+	                            : first_base + first_size;
+	const auto second_end = second_base > std::numeric_limits<uint64_t>::max() - second_size
+	                            ? std::numeric_limits<uint64_t>::max()
+	                            : second_base + second_size;
+	return first_base < second_end && second_base < first_end;
+}
+
+} // namespace
+
+void GpuFaultDiagnostics::DumpAddressBindingCorrelations(
+    const std::vector<vk::DeviceFaultAddressInfoEXT>& addresses) {
+	if (m_graphics == nullptr || !m_graphics->address_binding_report_enabled ||
+	    !m_graphics->address_binding_tracker.Enabled()) {
+		return;
+	}
+	const auto live    = m_graphics->address_binding_tracker.LiveSnapshot();
+	const auto history = m_graphics->address_binding_tracker.HistorySnapshot();
+	LOGF("GPU_ADDRESS_BINDING_SUMMARY live=%zu history=%zu dropped_history=%" PRIu64
+	     " dropped_live=%" PRIu64 "\n",
+	     live.size(), history.size(), m_graphics->address_binding_tracker.DroppedHistory(),
+	     m_graphics->address_binding_tracker.DroppedLive());
+	for (size_t i = 0; i < history.size(); ++i) {
+		const auto& record = history[i];
+		LOGF("GPU_ADDRESS_BINDING_HISTORY seq=%" PRIu64 " type=%s base=0x%016" PRIx64
+		     " size=0x%016" PRIx64 " object_type=%u object=0x%016" PRIx64 " flags=0x%08" PRIx32
+		     " live=%s\n",
+		     record.sequence, record.bind ? "bind" : "unbind", record.base_address, record.size,
+		     record.object_type, record.object_handle, record.flags,
+		     record.live ? "true" : "false");
+	}
+	for (size_t i = 0; i < addresses.size(); ++i) {
+		const auto& address   = addresses[i];
+		const auto  precision = address.addressPrecision == 0
+		                            ? uint64_t {1}
+		                            : static_cast<uint64_t>(address.addressPrecision);
+		size_t      matches   = 0;
+		for (const auto& binding: live) {
+			if (!AddressRangesOverlap(static_cast<uint64_t>(address.reportedAddress), precision,
+			                          binding.base_address, binding.size)) {
+				continue;
+			}
+			++matches;
+			LOGF("GPU_DEVICE_FAULT_IP_BINDING address_index=%zu fault=0x%016" PRIx64
+			     " precision=0x%016" PRIx64 " seq=%" PRIu64 " base=0x%016" PRIx64
+			     " size=0x%016" PRIx64 " object_type=%u object=0x%016" PRIx64 " flags=0x%08" PRIx32
+			     " internal=%s\n",
+			     i, static_cast<uint64_t>(address.reportedAddress), precision, binding.sequence,
+			     binding.base_address, binding.size, binding.object_type, binding.object_handle,
+			     binding.flags,
+			     (binding.flags &
+			      static_cast<uint32_t>(vk::DeviceAddressBindingFlagBitsEXT::eInternalObject))
+			         ? "true"
+			         : "false");
+			std::lock_guard lock(m_mutex);
+			for (const auto& batch: m_snapshot_batches) {
+				for (const auto& command: batch.snapshots.commands) {
+					if (command.pipeline != binding.object_handle) {
+						continue;
+					}
+					LOGF("GPU_DEVICE_FAULT_IP_PIPELINE address_index=%zu tick=%" PRIu64
+					     " order=%u pipeline=0x%016" PRIx64 " shaders=0x%016" PRIx64
+					     ",0x%016" PRIx64 " op=%s guest_submit=%" PRIu64 "\n",
+					     i, batch.tick, command.operation_order, command.pipeline,
+					     command.shader_hashes[0], command.shader_hashes[1],
+					     DebugOpName(command.debug_op), command.guest_submit);
+				}
+			}
+		}
+		if (matches == 0) {
+			LOGF("GPU_DEVICE_FAULT_IP_BINDING address_index=%zu fault=0x%016" PRIx64
+			     " precision=0x%016" PRIx64 " matches=0\n",
+			     i, static_cast<uint64_t>(address.reportedAddress), precision);
+		}
+	}
 }
 
 void GpuFaultDiagnostics::DumpCheckpoints() {

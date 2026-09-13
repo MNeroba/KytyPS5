@@ -65,6 +65,8 @@ static void PrintUsage() {
 	         "packet tracing.\n");
 	::printf("  --shader-compile-profile <true|false> Compact per-shader phase timings.\n");
 	::printf("  --pipeline-cache-profile <true|false> Profile Vulkan cache reuse/probes.\n");
+	::printf("  --gpu-address-binding-diagnostic <true|false> Track Vulkan GPU-VA bindings on "
+	         "device loss.\n");
 	::printf("  --shader-debug-disable-optimization <true|false>\n"
 	         "                                       Disable Vulkan pipeline optimization for A/B "
 	         "debug runs.\n");
@@ -288,6 +290,11 @@ static bool ParseArgs(int argc, char* argv[], RunOptions& options, bool& show_he
 			}
 		} else if (arg == "--pipeline-cache-profile") {
 			if (!ParseBool(value, options.config.pipeline_cache_profile_enabled)) {
+				::printf("invalid boolean for %s: %s\n", arg.c_str(), value.c_str());
+				return false;
+			}
+		} else if (arg == "--gpu-address-binding-diagnostic") {
+			if (!ParseBool(value, options.config.gpu_address_binding_diagnostic_enabled)) {
 				::printf("invalid boolean for %s: %s\n", arg.c_str(), value.c_str());
 				return false;
 			}

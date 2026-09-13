@@ -56,26 +56,27 @@ struct ConfigOptions {
 	bool        shader_validation_enabled = false;
 	// Focused shader diagnostics keep compiler evidence while leaving high-volume graphics
 	// packet/submit tracing disabled. This is intentionally opt-in for development runs.
-	bool                   shader_debug_enabled              = false;
-	bool                   shader_swappc_diagnostic_enabled  = false;
-	bool                   shader_compile_profile_enabled    = false;
-	bool                   pipeline_cache_profile_enabled    = false;
-	bool                   shader_debug_disable_optimization = false;
-	ShaderOptimizationType shader_optimization_type          = ShaderOptimizationType::None;
-	ShaderLogDirection     shader_log_direction              = ShaderLogDirection::Silent;
-	std::filesystem::path  shader_log_folder                 = "_Shaders";
-	bool                   command_buffer_dump_enabled       = false;
-	std::filesystem::path  command_buffer_dump_folder        = "_Buffers";
-	bool                   graphics_debug_dump_enabled       = false;
-	OutputDirection        printf_direction                  = OutputDirection::Silent;
-	std::filesystem::path  printf_output_file                = "_kyty.txt";
-	ProfilerDirection      profiler_direction                = ProfilerDirection::None;
-	bool                   spirv_debug_printf_enabled        = false;
-	bool                   gpu_assisted_validation_enabled   = false;
-	bool                   renderdoc_enabled                 = false;
-	bool                   readback_linear_images            = false;
-	bool                   playgo_hack_enabled               = false;
-	bool                   bvh_stub_enabled                  = false;
+	bool                   shader_debug_enabled                   = false;
+	bool                   shader_swappc_diagnostic_enabled       = false;
+	bool                   shader_compile_profile_enabled         = false;
+	bool                   pipeline_cache_profile_enabled         = false;
+	bool                   gpu_address_binding_diagnostic_enabled = false;
+	bool                   shader_debug_disable_optimization      = false;
+	ShaderOptimizationType shader_optimization_type               = ShaderOptimizationType::None;
+	ShaderLogDirection     shader_log_direction                   = ShaderLogDirection::Silent;
+	std::filesystem::path  shader_log_folder                      = "_Shaders";
+	bool                   command_buffer_dump_enabled            = false;
+	std::filesystem::path  command_buffer_dump_folder             = "_Buffers";
+	bool                   graphics_debug_dump_enabled            = false;
+	OutputDirection        printf_direction                       = OutputDirection::Silent;
+	std::filesystem::path  printf_output_file                     = "_kyty.txt";
+	ProfilerDirection      profiler_direction                     = ProfilerDirection::None;
+	bool                   spirv_debug_printf_enabled             = false;
+	bool                   gpu_assisted_validation_enabled        = false;
+	bool                   renderdoc_enabled                      = false;
+	bool                   readback_linear_images                 = false;
+	bool                   playgo_hack_enabled                    = false;
+	bool                   bvh_stub_enabled                       = false;
 #if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
 	bool red_zone_protection_enabled = false;
 #endif
@@ -100,6 +101,7 @@ bool                   ShaderDebugEnabled();
 bool                   ShaderSwapPcDiagnosticEnabled();
 bool                   ShaderCompileProfileEnabled();
 bool                   PipelineCacheProfileEnabled();
+bool                   GpuAddressBindingDiagnosticEnabled();
 bool                   ShaderDebugDisableOptimization();
 ShaderOptimizationType GetShaderOptimizationType();
 ShaderLogDirection     GetShaderLogDirection();

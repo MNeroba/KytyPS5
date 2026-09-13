@@ -22,6 +22,7 @@
 #include "graphics/host_gpu/renderer/colorRenderTarget.h"
 #include "graphics/host_gpu/renderer/depthRenderTarget.h"
 #include "graphics/host_gpu/renderer/gpuFaultDiagnostics.h"
+#include "graphics/host_gpu/renderer/gpuAddressBindingTracker.h"
 #include "graphics/host_gpu/renderer/image/blitHelper.h"
 #include "graphics/host_gpu/renderer/image/image.h"
 #include "graphics/host_gpu/renderer/image/imageView.h"
@@ -2346,6 +2347,63 @@ public:
             "concurrent report callers did not complete");
     diagnostics.ReportDeviceLost("fixture-after-complete", vk::Result::eErrorDeviceLost,
                                  failing_tick);
+    std::printf("[host]    %-32s ok\n", name);
+  }
+
+  void CheckGpuAddressBindingTracker() {
+    constexpr const char *name = "GpuAddressBindingTracker";
+    GpuAddressBindingTracker tracker;
+    tracker.SetEnabled(true);
+    tracker.RecordBinding(0x1000, 0x1000, 0, true, 7, 0xabc);
+    Require(name, "bind and interval match", tracker.HasLiveOverlap(0x1800, 0x10),
+            "live binding was not discoverable by interval overlap");
+    Require(name, "outside interval", !tracker.HasLiveOverlap(0x2000, 0x10),
+            "non-overlapping address matched a live binding");
+    tracker.RecordBinding(0x1000, 0x1000, 0, false, 7, 0xabc);
+    Require(name, "unbind lifetime", tracker.LiveSnapshot().empty(),
+            "unbind did not retire the matching live binding");
+    const auto history = tracker.HistorySnapshot();
+    Require(name, "bind/unbind history", history.size() == 2 && history[0].bind && !history[1].bind,
+            "bounded binding history did not retain bind and unbind events");
+    tracker.RecordBinding(0x3000, 0x1000, 1, true, 7, 0xdef);
+    const auto live = tracker.LiveSnapshot();
+    Require(name, "record identity", live.size() == 1 && live[0].object_handle == 0xdef &&
+                                      live[0].flags == 1 && live[0].live,
+            "live binding identity/flags were not preserved");
+    GpuAddressBindingTracker callback_tracker;
+    callback_tracker.SetEnabled(true);
+    vk::DeviceAddressBindingCallbackDataEXT binding{};
+    binding.sType = vk::StructureType::eDeviceAddressBindingCallbackDataEXT;
+    binding.baseAddress = 0x5000;
+    binding.size = 0x200;
+    binding.bindingType = vk::DeviceAddressBindingTypeEXT::eBind;
+    binding.flags = vk::DeviceAddressBindingFlagBitsEXT::eInternalObject;
+    vk::DebugUtilsObjectNameInfoEXT object{};
+    object.sType = vk::StructureType::eDebugUtilsObjectNameInfoEXT;
+    object.objectType = vk::ObjectType::eBuffer;
+    object.objectHandle = 0x1234;
+    vk::DebugUtilsMessengerCallbackDataEXT callback{};
+    callback.sType = vk::StructureType::eDebugUtilsMessengerCallbackDataEXT;
+    callback.pNext = &binding;
+    callback.objectCount = 1;
+    callback.pObjects = &object;
+    callback_tracker.RecordCallback(binding, &callback);
+    const auto callback_live = callback_tracker.LiveSnapshot();
+    Require(name, "callback object identity", callback_live.size() == 1 &&
+                                             callback_live[0].object_type ==
+                                                 static_cast<uint32_t>(vk::ObjectType::eBuffer) &&
+                                             callback_live[0].object_handle == 0x1234 &&
+                                             callback_live[0].flags ==
+                                                 static_cast<uint32_t>(vk::DeviceAddressBindingFlagBitsEXT::eInternalObject),
+            "debug-utils object identity was not copied from the callback");
+    GpuAddressBindingTracker bounded_tracker;
+    bounded_tracker.SetEnabled(true);
+    for (size_t i = 0; i < GpuAddressBindingTracker::MaxHistoryRecords + 4; ++i) {
+      bounded_tracker.RecordBinding(0x100000 + i * 0x100, 0x80, 0, true, 9, i + 1);
+    }
+    Require(name, "bounded drops", bounded_tracker.DroppedHistory() != 0 &&
+                                      bounded_tracker.DroppedLive() != 0,
+            "binding tracker did not expose bounded live/history drops");
     std::printf("[host]    %-32s ok\n", name);
   }
 
@@ -29014,6 +29072,16 @@ int main(int argc, char **argv) {
     Log::Initialize();
     VulkanHarness vulkan;
     vulkan.CheckGpuFaultReportBarrier();
+    Log::Shutdown();
+    return 0;
+  }
+  if (argc == 2 && std::strcmp(argv[1], "--gpu-address-binding-only") == 0) {
+    Config::ConfigOptions options;
+    options.printf_direction = Config::OutputDirection::Console;
+    Config::Load(options);
+    Log::Initialize();
+    VulkanHarness vulkan;
+    vulkan.CheckGpuAddressBindingTracker();
     Log::Shutdown();
     return 0;
   }

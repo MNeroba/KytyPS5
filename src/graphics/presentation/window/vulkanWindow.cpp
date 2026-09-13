@@ -55,6 +55,7 @@ namespace Libs::Graphics {
 
 struct VulkanExtensions {
 	bool enable_validation_layers = false;
+	bool enable_debug_messenger   = false;
 
 	std::vector<const char*>             required_extensions;
 	std::vector<vk::ExtensionProperties> available_extensions;
@@ -607,6 +608,9 @@ static vk::Device VulkanCreateDevice(vk::PhysicalDevice physical_device, const V
 
 	const auto robustness2_ext_enabled =
 	    HasExtension(device_extensions, VK_EXT_ROBUSTNESS_2_EXTENSION_NAME);
+	const bool address_binding_ext_enabled =
+	    graphics.address_binding_report_enabled &&
+	    HasExtension(device_extensions, VK_EXT_DEVICE_ADDRESS_BINDING_REPORT_EXTENSION_NAME);
 	const bool pipeline_cache_control_ext_enabled =
 	    HasExtension(device_extensions, VK_EXT_PIPELINE_CREATION_CACHE_CONTROL_EXTENSION_NAME);
 
@@ -625,6 +629,11 @@ static vk::Device VulkanCreateDevice(vk::PhysicalDevice physical_device, const V
 	vk::PhysicalDeviceFaultFeaturesEXT supported_fault {};
 	if (graphics.device_fault_enabled) {
 		supported_fault.sType = vk::StructureType::ePhysicalDeviceFaultFeaturesEXT;
+	}
+	vk::PhysicalDeviceAddressBindingReportFeaturesEXT supported_address_binding {};
+	if (address_binding_ext_enabled) {
+		supported_address_binding.sType =
+		    vk::StructureType::ePhysicalDeviceAddressBindingReportFeaturesEXT;
 	}
 	vk::PhysicalDeviceMeshShaderFeaturesEXT supported_mesh {};
 	supported_mesh.pNext = &supported_features13;
@@ -653,6 +662,10 @@ static vk::Device VulkanCreateDevice(vk::PhysicalDevice physical_device, const V
 	if (graphics.device_fault_enabled) {
 		supported_fault.pNext     = supported_features2.pNext;
 		supported_features2.pNext = &supported_fault;
+	}
+	if (address_binding_ext_enabled) {
+		supported_address_binding.pNext = supported_features2.pNext;
+		supported_features2.pNext       = &supported_address_binding;
 	}
 	vk::PhysicalDevicePipelineCreationCacheControlFeatures supported_pipeline_cache_control {};
 	if (pipeline_cache_control_ext_enabled) {
@@ -779,6 +792,12 @@ static vk::Device VulkanCreateDevice(vk::PhysicalDevice physical_device, const V
 		fault_features.deviceFaultVendorBinary =
 		    graphics.device_fault_vendor_binary_enabled ? VK_TRUE : VK_FALSE;
 	}
+	vk::PhysicalDeviceAddressBindingReportFeaturesEXT address_binding_features {};
+	if (address_binding_ext_enabled) {
+		address_binding_features.sType =
+		    vk::StructureType::ePhysicalDeviceAddressBindingReportFeaturesEXT;
+		address_binding_features.reportAddressBinding = VK_TRUE;
+	}
 	vk::PhysicalDeviceMeshShaderFeaturesEXT mesh_features {};
 	mesh_features.pNext      = &features13;
 	mesh_features.meshShader = graphics.mesh_shader_enabled;
@@ -796,6 +815,10 @@ static vk::Device VulkanCreateDevice(vk::PhysicalDevice physical_device, const V
 	if (graphics.device_fault_enabled) {
 		fault_features.pNext = const_cast<void*>(create_info.pNext);
 		create_info.pNext    = &fault_features;
+	}
+	if (address_binding_ext_enabled) {
+		address_binding_features.pNext = const_cast<void*>(create_info.pNext);
+		create_info.pNext              = &address_binding_features;
 	}
 	vk::PhysicalDevicePipelineCreationCacheControlFeatures pipeline_cache_control {};
 	if (graphics.pipeline_cache_control_enabled) {
@@ -856,8 +879,11 @@ static void VulkanGetExtensions(SDL_Window* window, VulkanExtensions& r) {
 
 	if (HasExtension(r.available_extensions, VK_EXT_DEBUG_UTILS_EXTENSION_NAME)) {
 		r.required_extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+		r.enable_debug_messenger =
+		    r.enable_validation_layers || Config::GpuAddressBindingDiagnosticEnabled();
 	} else {
 		r.enable_validation_layers = false;
+		r.enable_debug_messenger   = false;
 	}
 
 	for (const char* ext: r.required_extensions) {
@@ -915,9 +941,29 @@ static void VulkanGetExtensions(SDL_Window* window, VulkanExtensions& r) {
 static VKAPI_ATTR vk::Bool32 VKAPI_CALL VulkanDebugMessengerCallback(
     vk::DebugUtilsMessageSeverityFlagBitsEXT      message_severity,
     vk::DebugUtilsMessageTypeFlagsEXT             message_types,
-    const vk::DebugUtilsMessengerCallbackDataEXT* callback_data, void* /*user_data*/) {
+    const vk::DebugUtilsMessengerCallbackDataEXT* callback_data, void* user_data) {
 	EXIT_IF(callback_data == nullptr);
 	EXIT_IF(callback_data->pMessage == nullptr);
+	if ((message_types & vk::DebugUtilsMessageTypeFlagBitsEXT::eDeviceAddressBinding) &&
+	    user_data != nullptr) {
+		struct PNextHeader {
+			vk::StructureType sType;
+			const void*       pNext;
+		};
+		const vk::DeviceAddressBindingCallbackDataEXT* binding = nullptr;
+		for (const void* p = callback_data->pNext; p != nullptr;) {
+			const auto* header = reinterpret_cast<const PNextHeader*>(p);
+			if (header->sType == vk::StructureType::eDeviceAddressBindingCallbackDataEXT) {
+				binding = reinterpret_cast<const vk::DeviceAddressBindingCallbackDataEXT*>(p);
+				break;
+			}
+			p = header->pNext;
+		}
+		if (binding != nullptr) {
+			auto* graphics = static_cast<GraphicContext*>(user_data);
+			graphics->address_binding_tracker.RecordCallback(*binding, callback_data);
+		}
+	}
 
 	const char*     severity_str   = nullptr;
 	fmt::text_style severity_style = Log::Color::Default;
@@ -1076,13 +1122,17 @@ void WindowContext::CreateVulkan() {
 	dbg_create_info.messageType     = vk::DebugUtilsMessageTypeFlagBitsEXT::eGeneral |
 	                                  vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation |
 	                                  vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance;
+	if (Config::GpuAddressBindingDiagnosticEnabled()) {
+		dbg_create_info.messageType |= vk::DebugUtilsMessageTypeFlagBitsEXT::eDeviceAddressBinding;
+	}
 	dbg_create_info.pfnUserCallback = VulkanDebugMessengerCallback;
-	dbg_create_info.pUserData       = nullptr;
+	dbg_create_info.pUserData       = &graphic_ctx;
 
 	vk::InstanceCreateInfo inst_info {};
-	inst_info.sType = vk::StructureType::eInstanceCreateInfo;
-	inst_info.pNext = (r.enable_validation_layers ? &dbg_create_info : nullptr);
-	inst_info.flags = {};
+	inst_info.sType       = vk::StructureType::eInstanceCreateInfo;
+	dbg_create_info.pNext = r.enable_validation_layers ? &validation_features : nullptr;
+	inst_info.pNext       = (r.enable_debug_messenger ? &dbg_create_info : nullptr);
+	inst_info.flags       = {};
 #if defined(__APPLE__)
 	// MoltenVK requires VK_KHR_portability_enumeration + flag to surface
 	// portability devices. Without this, enumeratePhysicalDevices hides the
@@ -1112,7 +1162,7 @@ void WindowContext::CreateVulkan() {
 	}
 	VULKAN_HPP_DEFAULT_DISPATCHER.init(graphic_ctx.instance);
 
-	if (r.enable_validation_layers) {
+	if (r.enable_debug_messenger) {
 		dbg_create_info.pNext = nullptr;
 		if (VulkanCreateDebugUtilsMessengerEXT(graphic_ctx.instance, &dbg_create_info, nullptr,
 		                                       &graphic_ctx.debug_messenger) !=
@@ -1226,6 +1276,21 @@ void WindowContext::CreateVulkan() {
 				    fault_features.deviceFaultVendorBinary == VK_TRUE;
 			}
 		}
+		if (Config::GpuAddressBindingDiagnosticEnabled() &&
+		    HasExtension(available_extensions,
+		                 VK_EXT_DEVICE_ADDRESS_BINDING_REPORT_EXTENSION_NAME)) {
+			vk::PhysicalDeviceAddressBindingReportFeaturesEXT address_binding_features {};
+			address_binding_features.sType =
+			    vk::StructureType::ePhysicalDeviceAddressBindingReportFeaturesEXT;
+			vk::PhysicalDeviceFeatures2 address_binding_features2 {};
+			address_binding_features2.sType = vk::StructureType::ePhysicalDeviceFeatures2;
+			address_binding_features2.pNext = &address_binding_features;
+			graphic_ctx.physical_device.getFeatures2(&address_binding_features2);
+			if (address_binding_features.reportAddressBinding == VK_TRUE) {
+				device_extensions.push_back(VK_EXT_DEVICE_ADDRESS_BINDING_REPORT_EXTENSION_NAME);
+				graphic_ctx.address_binding_report_enabled = true;
+			}
+		}
 		if (HasExtension(available_extensions,
 		                 VK_NV_DEVICE_DIAGNOSTIC_CHECKPOINTS_EXTENSION_NAME)) {
 			device_extensions.push_back(VK_NV_DEVICE_DIAGNOSTIC_CHECKPOINTS_EXTENSION_NAME);
@@ -1244,10 +1309,13 @@ void WindowContext::CreateVulkan() {
 			}
 		}
 	}
+	graphic_ctx.address_binding_tracker.SetEnabled(graphic_ctx.address_binding_report_enabled);
 	LOGF("GPU fault diagnostics:\n\tVK_EXT_device_fault: %s\n"
-	     "\tVK_NV_device_diagnostic_checkpoints: %s\n",
+	     "\tVK_NV_device_diagnostic_checkpoints: %s\n"
+	     "\tVK_EXT_device_address_binding_report: %s\n",
 	     graphic_ctx.device_fault_enabled ? "enabled" : "unsupported",
-	     graphic_ctx.diagnostic_checkpoints_enabled ? "enabled" : "unsupported");
+	     graphic_ctx.diagnostic_checkpoints_enabled ? "enabled" : "unsupported",
+	     graphic_ctx.address_binding_report_enabled ? "enabled" : "unsupported");
 	LOGF("Pipeline cache profiling: control=%s feedback=%s\n",
 	     graphic_ctx.pipeline_cache_control_enabled ? "enabled" : "unsupported",
 	     graphic_ctx.pipeline_creation_feedback_enabled ? "enabled" : "unsupported");
