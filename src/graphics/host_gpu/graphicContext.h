@@ -5,6 +5,7 @@
 #include "common/common.h"
 #include "common/threads.h"
 #include "graphics/host_gpu/renderer/gpuAddressBindingTracker.h"
+#include "graphics/host_gpu/renderer/gpuCrashDumpCapture.h"
 #include "graphics/host_gpu/vulkanCommon.h" // IWYU pragma: export
 
 #include <map>
@@ -36,6 +37,7 @@ struct GraphicContext {
 	bool                                      device_fault_vendor_binary_enabled    = false;
 	bool                                      diagnostic_checkpoints_enabled        = false;
 	bool                                      address_binding_report_enabled        = false;
+	bool                                      nvidia_diagnostics_config_enabled     = false;
 	bool                                      pipeline_cache_control_enabled        = false;
 	bool                                      pipeline_creation_feedback_enabled    = false;
 	bool                                      rt_extensions_enabled                 = false;
@@ -55,6 +57,7 @@ struct GraphicContext {
 	uint32_t                                  queue_family = static_cast<uint32_t>(-1);
 	vk::Queue                                 queue        = nullptr;
 	std::unique_ptr<GpuFaultDiagnostics>      gpu_fault_diagnostics;
+	std::unique_ptr<GpuCrashDumpCapture>      gpu_crash_dump_capture;
 	GpuAddressBindingTracker                  address_binding_tracker;
 
 	[[nodiscard]] const vk::PhysicalDeviceProperties& GetPhysicalDeviceProperties() const {

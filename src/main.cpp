@@ -67,6 +67,9 @@ static void PrintUsage() {
 	::printf("  --pipeline-cache-profile <true|false> Profile Vulkan cache reuse/probes.\n");
 	::printf("  --gpu-address-binding-diagnostic <true|false> Track Vulkan GPU-VA bindings on "
 	         "device loss.\n");
+	::printf("  --nvidia-gpu-crash-diagnostic <true|false> Enable opt-in NVIDIA Aftermath GPU "
+	         "crash dumps.\n");
+	::printf("  --nvidia-gpu-crash-dump-folder <path> Output folder for Aftermath dumps.\n");
 	::printf("  --shader-debug-disable-optimization <true|false>\n"
 	         "                                       Disable Vulkan pipeline optimization for A/B "
 	         "debug runs.\n");
@@ -298,6 +301,13 @@ static bool ParseArgs(int argc, char* argv[], RunOptions& options, bool& show_he
 				::printf("invalid boolean for %s: %s\n", arg.c_str(), value.c_str());
 				return false;
 			}
+		} else if (arg == "--nvidia-gpu-crash-diagnostic") {
+			if (!ParseBool(value, options.config.nvidia_gpu_crash_diagnostic_enabled)) {
+				::printf("invalid boolean for %s: %s\n", arg.c_str(), value.c_str());
+				return false;
+			}
+		} else if (arg == "--nvidia-gpu-crash-dump-folder") {
+			options.config.nvidia_gpu_crash_dump_folder = Common::FixFilenameSlash(value);
 		} else if (arg == "--shader-swappc-diagnostic") {
 			if (!ParseBool(value, options.config.shader_swappc_diagnostic_enabled)) {
 				::printf("invalid boolean for %s: %s\n", arg.c_str(), value.c_str());

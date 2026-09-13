@@ -25,6 +25,7 @@
 #include "common/threads.h"
 #include "common/timer.h"
 #include "graphics/host_gpu/graphicContext.h"
+#include "graphics/host_gpu/renderer/gpuCrashDumpCapture.h"
 #include "graphics/host_gpu/renderer/render.h"
 #include "graphics/host_gpu/renderer/renderContext.h"
 #include "graphics/host_gpu/vulkanCommon.h"
@@ -611,6 +612,9 @@ static vk::Device VulkanCreateDevice(vk::PhysicalDevice physical_device, const V
 	const bool address_binding_ext_enabled =
 	    graphics.address_binding_report_enabled &&
 	    HasExtension(device_extensions, VK_EXT_DEVICE_ADDRESS_BINDING_REPORT_EXTENSION_NAME);
+	const bool diagnostics_config_ext_enabled =
+	    graphics.nvidia_diagnostics_config_enabled &&
+	    HasExtension(device_extensions, VK_NV_DEVICE_DIAGNOSTICS_CONFIG_EXTENSION_NAME);
 	const bool pipeline_cache_control_ext_enabled =
 	    HasExtension(device_extensions, VK_EXT_PIPELINE_CREATION_CACHE_CONTROL_EXTENSION_NAME);
 
@@ -634,6 +638,11 @@ static vk::Device VulkanCreateDevice(vk::PhysicalDevice physical_device, const V
 	if (address_binding_ext_enabled) {
 		supported_address_binding.sType =
 		    vk::StructureType::ePhysicalDeviceAddressBindingReportFeaturesEXT;
+	}
+	vk::PhysicalDeviceDiagnosticsConfigFeaturesNV supported_diagnostics_config {};
+	if (diagnostics_config_ext_enabled) {
+		supported_diagnostics_config.sType =
+		    vk::StructureType::ePhysicalDeviceDiagnosticsConfigFeaturesNV;
 	}
 	vk::PhysicalDeviceMeshShaderFeaturesEXT supported_mesh {};
 	supported_mesh.pNext = &supported_features13;
@@ -667,6 +676,10 @@ static vk::Device VulkanCreateDevice(vk::PhysicalDevice physical_device, const V
 		supported_address_binding.pNext = supported_features2.pNext;
 		supported_features2.pNext       = &supported_address_binding;
 	}
+	if (diagnostics_config_ext_enabled) {
+		supported_diagnostics_config.pNext = supported_features2.pNext;
+		supported_features2.pNext          = &supported_diagnostics_config;
+	}
 	vk::PhysicalDevicePipelineCreationCacheControlFeatures supported_pipeline_cache_control {};
 	if (pipeline_cache_control_ext_enabled) {
 		supported_pipeline_cache_control.sType =
@@ -683,6 +696,8 @@ static vk::Device VulkanCreateDevice(vk::PhysicalDevice physical_device, const V
 	graphics.attachment_feedback_loop_enabled = feedback_extensions &&
 	                                            feedback_layout.attachmentFeedbackLoopLayout &&
 	                                            feedback_dynamic.attachmentFeedbackLoopDynamicState;
+	graphics.nvidia_diagnostics_config_enabled =
+	    diagnostics_config_ext_enabled && supported_diagnostics_config.diagnosticsConfig == VK_TRUE;
 	LOGF("Vulkan depth feedback support: %s\n",
 	     graphics.attachment_feedback_loop_enabled ? "true" : "false");
 	graphics.mesh_shader_enabled = mesh_extension && supported_mesh.meshShader;
@@ -798,6 +813,12 @@ static vk::Device VulkanCreateDevice(vk::PhysicalDevice physical_device, const V
 		    vk::StructureType::ePhysicalDeviceAddressBindingReportFeaturesEXT;
 		address_binding_features.reportAddressBinding = VK_TRUE;
 	}
+	vk::PhysicalDeviceDiagnosticsConfigFeaturesNV diagnostics_config_features {};
+	if (diagnostics_config_ext_enabled) {
+		diagnostics_config_features.sType =
+		    vk::StructureType::ePhysicalDeviceDiagnosticsConfigFeaturesNV;
+		diagnostics_config_features.diagnosticsConfig = VK_TRUE;
+	}
 	vk::PhysicalDeviceMeshShaderFeaturesEXT mesh_features {};
 	mesh_features.pNext      = &features13;
 	mesh_features.meshShader = graphics.mesh_shader_enabled;
@@ -819,6 +840,18 @@ static vk::Device VulkanCreateDevice(vk::PhysicalDevice physical_device, const V
 	if (address_binding_ext_enabled) {
 		address_binding_features.pNext = const_cast<void*>(create_info.pNext);
 		create_info.pNext              = &address_binding_features;
+	}
+	vk::DeviceDiagnosticsConfigCreateInfoNV diagnostics_config_info {};
+	if (graphics.nvidia_diagnostics_config_enabled) {
+		diagnostics_config_features.pNext = const_cast<void*>(create_info.pNext);
+		create_info.pNext                 = &diagnostics_config_features;
+		diagnostics_config_info.flags =
+		    vk::DeviceDiagnosticsConfigFlagBitsNV::eEnableShaderDebugInfo |
+		    vk::DeviceDiagnosticsConfigFlagBitsNV::eEnableResourceTracking |
+		    vk::DeviceDiagnosticsConfigFlagBitsNV::eEnableAutomaticCheckpoints |
+		    vk::DeviceDiagnosticsConfigFlagBitsNV::eEnableShaderErrorReporting;
+		diagnostics_config_info.pNext = const_cast<void*>(create_info.pNext);
+		create_info.pNext             = &diagnostics_config_info;
 	}
 	vk::PhysicalDevicePipelineCreationCacheControlFeatures pipeline_cache_control {};
 	if (graphics.pipeline_cache_control_enabled) {
@@ -1291,6 +1324,20 @@ void WindowContext::CreateVulkan() {
 				graphic_ctx.address_binding_report_enabled = true;
 			}
 		}
+		if (Config::NvidiaGpuCrashDiagnosticEnabled() &&
+		    HasExtension(available_extensions, VK_NV_DEVICE_DIAGNOSTICS_CONFIG_EXTENSION_NAME)) {
+			vk::PhysicalDeviceDiagnosticsConfigFeaturesNV diagnostics_features {};
+			diagnostics_features.sType =
+			    vk::StructureType::ePhysicalDeviceDiagnosticsConfigFeaturesNV;
+			vk::PhysicalDeviceFeatures2 diagnostics_features2 {};
+			diagnostics_features2.sType = vk::StructureType::ePhysicalDeviceFeatures2;
+			diagnostics_features2.pNext = &diagnostics_features;
+			graphic_ctx.physical_device.getFeatures2(&diagnostics_features2);
+			if (diagnostics_features.diagnosticsConfig == VK_TRUE) {
+				device_extensions.push_back(VK_NV_DEVICE_DIAGNOSTICS_CONFIG_EXTENSION_NAME);
+				graphic_ctx.nvidia_diagnostics_config_enabled = true;
+			}
+		}
 		if (HasExtension(available_extensions,
 		                 VK_NV_DEVICE_DIAGNOSTIC_CHECKPOINTS_EXTENSION_NAME)) {
 			device_extensions.push_back(VK_NV_DEVICE_DIAGNOSTIC_CHECKPOINTS_EXTENSION_NAME);
@@ -1310,12 +1357,20 @@ void WindowContext::CreateVulkan() {
 		}
 	}
 	graphic_ctx.address_binding_tracker.SetEnabled(graphic_ctx.address_binding_report_enabled);
+	if (Config::NvidiaGpuCrashDiagnosticEnabled()) {
+		graphic_ctx.gpu_crash_dump_capture = std::make_unique<GpuCrashDumpCapture>();
+		if (!graphic_ctx.gpu_crash_dump_capture->Enable(Config::NvidiaGpuCrashDumpFolder())) {
+			graphic_ctx.gpu_crash_dump_capture.reset();
+		}
+	}
 	LOGF("GPU fault diagnostics:\n\tVK_EXT_device_fault: %s\n"
 	     "\tVK_NV_device_diagnostic_checkpoints: %s\n"
-	     "\tVK_EXT_device_address_binding_report: %s\n",
+	     "\tVK_EXT_device_address_binding_report: %s\n"
+	     "\tVK_NV_device_diagnostics_config: %s\n",
 	     graphic_ctx.device_fault_enabled ? "enabled" : "unsupported",
 	     graphic_ctx.diagnostic_checkpoints_enabled ? "enabled" : "unsupported",
-	     graphic_ctx.address_binding_report_enabled ? "enabled" : "unsupported");
+	     graphic_ctx.address_binding_report_enabled ? "enabled" : "unsupported",
+	     graphic_ctx.nvidia_diagnostics_config_enabled ? "enabled" : "unsupported");
 	LOGF("Pipeline cache profiling: control=%s feedback=%s\n",
 	     graphic_ctx.pipeline_cache_control_enabled ? "enabled" : "unsupported",
 	     graphic_ctx.pipeline_creation_feedback_enabled ? "enabled" : "unsupported");
@@ -1386,6 +1441,10 @@ WindowContext::~WindowContext() {
 		graphic_ctx.instance.destroy(nullptr);
 		graphic_ctx.instance        = nullptr;
 		graphic_ctx.physical_device = nullptr;
+	}
+	if (graphic_ctx.gpu_crash_dump_capture != nullptr) {
+		graphic_ctx.gpu_crash_dump_capture->Disable();
+		graphic_ctx.gpu_crash_dump_capture.reset();
 	}
 	if (window != nullptr) {
 		SDL_DestroyWindow(window);

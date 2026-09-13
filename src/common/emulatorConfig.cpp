@@ -115,6 +115,14 @@ std::filesystem::path GetCommandBufferDumpFolder() {
 	return g_config->command_buffer_dump_folder;
 }
 
+bool NvidiaGpuCrashDiagnosticEnabled() {
+	return g_config->nvidia_gpu_crash_diagnostic_enabled;
+}
+
+std::filesystem::path NvidiaGpuCrashDumpFolder() {
+	return g_config->nvidia_gpu_crash_dump_folder;
+}
+
 bool GraphicsDebugDumpEnabled() {
 	return g_config->graphics_debug_dump_enabled;
 }

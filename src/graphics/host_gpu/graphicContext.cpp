@@ -1,5 +1,6 @@
 #include "graphics/host_gpu/graphicContext.h"
 
+#include "graphics/host_gpu/renderer/gpuCrashDumpCapture.h"
 #include "graphics/host_gpu/renderer/gpuFaultDiagnostics.h"
 
 namespace Libs::Graphics {
