@@ -1307,6 +1307,32 @@ RELATED CODE/COMMIT: `frontend/decode/ScalarAluOps.cpp`,
 (`ResolveSetpcTargets`, local-target validation); comparison only:
 `https://github.com/KytyPS5/KytyPS5/commit/a2cafb2f2c4a7fec745caf47e4e230bd0d1b6785`.
 
+### Production S_SWAPPC target invocation — PROVEN unresolved before fetch (2026-09-13)
+
+FACT: The complete warmed-cache invocation reached MS guest code
+`0x0000000500120600`, hash `0x2b3be82b8235ac05`, and emitted the target diagnostic. At
+`pc=0x3da8` / raw `0xbe8e210e`, `s14:s15` was unknown. The last writer was the expected
+`S_BUFFER_LOAD_DWORDX2 s14,s4,+0x60` at `0x3d74` / raw `0xf4240382`, with unknown descriptor
+base and effective load address. The static chain is `0x0000000f_e0040000` ->
+`S_LOAD_DWORDX4 s4..s7` at `0x3d68` -> the `+0x60` buffer load.
+
+FACT: No external target was resolved, so target fetch, allocation/return inspection, and
+splicing were not attempted. `ResolveIndirectCalls` returned no call site and production compiled
+the raw 4164-dword caller. The branch-aware caller extent is end-exclusive `0x3db0`; at the call
+one unique pending forward target remains, `0x3dac`, discovered by branches at `0x3d54` and
+`0x3d84`. The completed back-edge at `0x3dac` then clears the pending target and terminates
+traversal.
+
+WHY IT MATTERS: The first production divergence is descriptor-chain read/provenance before the
+external-call fetch/splice boundary. The CFG failure is therefore the expected raw fallback:
+unsupported SOP1 opcode `0x21` / raw `0xbe8e210e` at `0x3da8`. This capture does not prove which
+address-space reader should service `0x0000000f_e0040000`; do not add a resolver fallback or
+change S_SWAPPC semantics until that ownership is proven.
+
+EVIDENCE: `G:/KytyPS5/logs/SWAPPC_CFG_TRACE_20260913_2310/astro-run/runtime.log`,
+`G:/KytyPS5/logs/SWAPPC_CFG_TRACE_20260913_2310/trace-summary.txt`, and the raw stream
+`G:/KytyPS5/logs/MS_RAW_CAPTURE_20260912_2240/shaders/original/precompile_ms_2b3be82b8235ac05.bin`.
+
 ### S_SWAPPC provenance diagnostic boundary — PROVEN
 
 FACT (**PROVEN**): Commit `3f7a30c` contains the generic, opt-in dispatch-side resolver and

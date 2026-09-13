@@ -1,6 +1,6 @@
 # Current KytyPS5 debugging state
 
-Last reconciled: 2026-09-13 21:10 Europe/Riga
+Last reconciled: 2026-09-13 21:31 Europe/Riga
 
 This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable mechanisms live in REFERENCE.md.
 
@@ -8,10 +8,10 @@ This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable
 
 Repository/worktree: G:/KytyPS5/repo
 Branch: astro/materialize-resources
-Repository source HEAD for runtime checkpoint: `8717f421e4f94546eda3c68cff0daea4038fb6c4`
-Current source HEAD: `8717f42` (opt-in NVIDIA Aftermath capture wiring)
-Last ASTRO runtime source: `ef76a4b-dirty` (pre-commit tree containing the same diagnostic changes)
-Working tree for this checkpoint: clean after source commit (docs update pending)
+Repository source HEAD for runtime checkpoint: `ea0512353e4598cd123469da480076b5a16019fd`
+Current source HEAD: `aebf0c7` (exact S_SWAPPC divergence documentation; semantic runtime source is `8717f42`)
+Last ASTRO runtime source: `8717f42`
+Working tree for this checkpoint: clean after the documentation checkpoint
 Build: Release, CMake/Ninja, clang-cl, clang-lld_link-64
 Executable: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.exe
 Executable SHA-256 (current clean rebuild): `8B38B9711FBC9FC3A1E693F60AB08631190EC8F72E5BA88F050666D5352ADB62`
@@ -20,6 +20,33 @@ Matching PDB (current clean rebuild): G:/KytyPS5/repo/_Build/windows/install/kyt
 Binary provenance: post-capture Release rebuild from `8717f42`; warmed per-title cache remains the runtime input
 
 The system-wide CMake install prefix was not used because it requires administrator access.
+
+## Exact MS S_SWAPPC CFG trace — 2026-09-13
+
+The complete warmed-cache capture is under
+`G:/KytyPS5/logs/SWAPPC_CFG_TRACE_20260913_2310/astro-run/`; the bounded reconciliation is
+`G:/KytyPS5/logs/SWAPPC_CFG_TRACE_20260913_2310/trace-summary.txt`. It reached MS
+`0x2b3be82b8235ac05` at guest code `0x0000000500120600`, call `pc=0x3da8`, raw
+`0xbe8e210e`, and emitted the requested production diagnostic before CFG rejection.
+
+PROVEN: `s14:s15` is unknown at the call. Its last writer is the expected
+`S_BUFFER_LOAD_DWORDX2 s14,s4,+0x60` at `0x3d74` (`0xf4240382`), but the source pair is not
+known, so the descriptor base and effective load address are unknown. The static preceding chain
+is `0x0000000f_e0040000` -> `S_LOAD_DWORDX4 s4..s7` at `0x3d68` -> the `+0x60` buffer load.
+
+PROVEN: no external target is resolved; target fetch is not attempted, no callee allocation or
+return bytes are captured, and `ResolveIndirectCalls` returns no call site. Consequently no
+handler validation or splice occurs and the pipeline compiles the raw 4164-dword caller. The
+branch-aware executable caller boundary is end-exclusive `0x3db0` (3948 dwords); at `0x3da8`
+one unique pending forward target remains, `0x3dac`, discovered by branches at `0x3d54` and
+`0x3d84`. The completed back-edge at `0x3dac` clears that pending target and terminates the walk.
+
+The exact CFG rejection is unchanged: unsupported SOP1 opcode `0x21` / raw `0xbe8e210e` at
+`0x3da8`. The first divergence is therefore descriptor-chain read/provenance, before target
+fetch or splice. No S_SWAPPC semantic change or Aftermath/device-loss diagnostic work is
+justified from this trace. The current P0 is now the unresolved scalar descriptor read at the
+`S_LOAD_DWORDX4` boundary; no generic integration fix is committed until the read failure's
+address-space ownership is proven.
 
 ## BDA translation diagnostic capture attempt — 2026-09-13
 
