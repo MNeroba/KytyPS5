@@ -1356,6 +1356,32 @@ EVIDENCE: `G:/KytyPS5/logs/SWAPPC_ADDRESS_AUDIT_20260913_/address-ownership-audi
 `runtime-memory-map-audit.txt`, `source-prt-callsite-audit.txt`, and the passing
 `virtual_memory_allocation_tests` result.
 
+### Production S_SWAPPC AGC fixed-address provenance — PROVEN correlation, ownership still unresolved (2026-09-13)
+
+FACT: The official title `libSceAgc.sprx` (`G:/PS5 Games/PPSA21567/extracted/fakelib`,
+SHA-256 `EACE8AC152404132E632A7E170DDCCA47F230E7C0C02CD4B76F29CA9604037FF`) compares a
+library-global pointer with fixed `0x0fe0040000` before reading/writing indexed 16-byte slots.
+Its initializer obtains a Dmem base/size through an imported AGC-driver call, aligns the base,
+clears the first `0x60` bytes, and checks that the base equals the same fixed address. The
+production shader's scalar root is exactly `0x0fe0040000`, so the title binary establishes a
+strong AGC work-area correlation for the unreadable descriptor source.
+
+FACT: The warmed Kyty runtime calls HLE `AgcInit(state=0x000000090f371e28, ver=13)` and many
+`AgcCreateShader` calls, but `src/libs/agc.cpp::AgcInit` only logs and returns. No runtime
+`KernelSetPrtAperture` or mapping record covers `0x0fe0040000`; the fake library is outside the
+directories scanned by `RuntimeLinker::PreloadAdjacentPrograms`. The exact AGC-driver Dmem call
+contract, work-area size, and PRT-versus-reserved-range ownership are not established.
+
+WHY IT MATTERS: This narrows the first divergence to missing AGC work-area/driver integration,
+before external target fetch or splice, but it does not prove a generic shader reader or resolver
+defect. Do not add a PRT fallback, synthesize the work-area mapping, change S_SWAPPC semantics,
+or rerun ASTRO until the driver ownership contract is captured. No source fix or regression is
+justified by this correlation alone.
+
+EVIDENCE: `G:/KytyPS5/logs/SWAPPC_PROVENANCE_20260913_2246/agc-work-area-audit.txt`,
+`G:/KytyPS5/logs/SWAPPC_CFG_TRACE_20260913_2310/trace-summary.txt`, and the exact raw MS
+artifact `G:/KytyPS5/logs/MS_RAW_CAPTURE_20260912_2240/shaders/original/precompile_ms_2b3be82b8235ac05.bin`.
+
 ### S_SWAPPC provenance diagnostic boundary — PROVEN
 
 FACT (**PROVEN**): Commit `3f7a30c` contains the generic, opt-in dispatch-side resolver and

@@ -1,6 +1,6 @@
 # Current KytyPS5 debugging state
 
-Last reconciled: 2026-09-13 22:09 Europe/Riga
+Last reconciled: 2026-09-13 22:46 Europe/Riga
 
 This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable mechanisms live in REFERENCE.md.
 
@@ -9,7 +9,7 @@ This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable
 Repository/worktree: G:/KytyPS5/repo
 Branch: astro/materialize-resources
 Repository source HEAD for runtime checkpoint: `ea0512353e4598cd123469da480076b5a16019fd`
-Current source HEAD: `4a30bcd` (runtime memory ownership audit documentation; semantic runtime source is `8717f42`)
+Current source HEAD: `fa335cb` (AGC/PRT ownership audit documentation; semantic runtime source is `8717f42`)
 Last ASTRO runtime source: `8717f42`
 Working tree for this checkpoint: clean after the documentation checkpoint
 Build: Release, CMake/Ninja, clang-cl, clang-lld_link-64
@@ -72,6 +72,23 @@ therefore points to missing guest mapping provenance rather than a proven resolv
 Address ownership remains unproven, with no preserved host mapping to service the descriptor; no
 source change, regression, or ASTRO rerun is justified until this provenance is captured.
 
+## AGC fixed-address provenance audit — 2026-09-13
+
+The official title library `G:/PS5 Games/PPSA21567/extracted/fakelib/libSceAgc.sprx` directly
+uses the same fixed `0x0fe0040000` address: its setter/getter at raw offsets `0x8b90` and
+`0x8bd0` compare a library-global pointer to that value and access indexed 16-byte slots. Its
+initializer at raw `0xe630` obtains a base/size from an imported AGC-driver Dmem query, aligns
+the base, clears the first `0x60` bytes, and checks that the base equals `0x0fe0040000`.
+The audit is `G:/KytyPS5/logs/SWAPPC_PROVENANCE_20260913_2246/agc-work-area-audit.txt`;
+the library SHA-256 is `EACE8AC152404132E632A7E170DDCCA47F230E7C0C02CD4B76F29CA9604037FF`.
+
+The warmed runtime proves HLE `AgcInit(state=0x000000090f371e28, ver=13)` followed by shader
+creation, while `src/libs/agc.cpp::AgcInit` only logs and returns. The runtime has no
+`KernelSetPrtAperture` or mapping record for `0x0fe0040000`, and the fake library is outside
+the directories scanned by `PreloadAdjacentPrograms`. This narrows the provenance gap to AGC
+work-area/driver integration, but does not establish the driver call contract, allocation size,
+or whether the address is PRT-backed. No generic resolver fix or reader fallback is justified.
+
 ## BDA translation diagnostic capture attempt — 2026-09-13
 
 The diagnostic-only source change is committed as `6e379ab`; focused `shader_cfg_tests`,
@@ -97,8 +114,8 @@ Title ID: PPSA21567
 Game input: G:/PS5 Games/PPSA21567/extracted
 Current milestone: M5 main menu — reached in the validated title-screen progression run
 Next milestone: M6 gameplay
-Current P0: implement/validate the generic external-call handling for production `S_SWAPPC_B64` at MS `0x2b3be82b8235ac05`, `pc=0x3da8`, raw `0xbe8e210e`.
-P0 class: production CFG rejects an unresolved external `S_SWAPPC_B64`; the existing diagnostic-only splice path remains separate from production compilation.
+Current P0: establish the AGC work-area/descriptor ownership for production `S_SWAPPC_B64` at MS `0x2b3be82b8235ac05`, `pc=0x3da8`, raw `0xbe8e210e`; external-call resolution remains downstream of that read.
+P0 class: production CFG rejects an unresolved external `S_SWAPPC_B64` because its descriptor-chain source is unreadable; the existing diagnostic-only splice path remains separate from production compilation.
 Last validated progress signal: the exact Aftermath-wiring run reached MS `0x2b3be82b8235ac05` after compiling CS `0x657ad04626bf9d55`; CFG failed deterministically at `pc=0x3da8` with process result `321 (0x141)`. No GPU device-loss event occurred in that run.
 Known P1 likely blockers: incorrect color/output interpretation remains P1 and is not a current fix target
 Known P2: cold-start large dispatcher pipeline compilation latency; successful creates are not a hang. A fresh cache removes this cost on subsequent starts.
