@@ -10,6 +10,7 @@
 #include "graphics/host_gpu/renderer/pipeline/shaderResourceBarrier.h"
 #include "graphics/shader/recompiler/ShaderRecompiler.h"
 #include "graphics/shader/recompiler/ShaderSwapPcDiagnostic.h"
+#include "graphics/shader/shaderCallTrace.h"
 #include "graphics/shader/recompiler/backend/spirv/SpirvEmitter.h"
 #include "graphics/shader/recompiler/backend/spirv/spirvEmitterInternal.h"
 #include "graphics/shader/recompiler/frontend/cfg/ShaderCFG.h"
@@ -1935,6 +1936,40 @@ void TestSwapPcDiagnosticFollowsPendingBranchTarget() {
             std::none_of(capture.records.begin(), capture.records.end(),
                          [](const auto &record) { return record.pc >= 0x14; }),
         "diagnostic walker decoded unreachable post-END tail data");
+}
+
+void TestSwapPcExternalCallSplice() {
+  // Authentic production call word from MS 0x2b3be82b8235ac05.  Before dispatch-side
+  // resolution this remains an unsupported SOP1 instruction and CFG rejects the program.
+  const std::array<uint32_t, 2> caller = {0xbe8e210eu, EncodeSopp(0x01)};
+  ShaderRecompiler::Decoder::Program before;
+  ShaderRecompiler::Decoder::DecodeProgram(caller, before);
+  Check(std::any_of(before.instructions.begin(), before.instructions.end(), [](const auto& inst) {
+          return inst.opcode == ShaderRecompiler::Decoder::Opcode::UNSUPPORTED &&
+                 inst.raw[0] == 0xbe8e210eu;
+        }),
+        "production S_SWAPPC fixture did not preserve the fail-before unsupported instruction");
+
+  // The callee is a bounded guest allocation ending in S_SETPC_B64 s[14:15], the saved
+  // return pair required by the overlapping production call contract.
+  const std::array<uint32_t, 2> callee = {EncodeSopp(0x00), 0xbe8e200eu};
+  const std::array<IndirectCallSite, 1> sites = {{
+      {.pc = 0, .target_sgpr = 14, .return_sgpr = 14, .handler = 0x3000},
+  }};
+  const std::array<std::span<const uint32_t>, 1> handlers = {std::span<const uint32_t>(callee)};
+  const auto joined = SpliceIndirectCalls(caller, sites, handlers);
+  Check(joined.size() == 2 && joined[0] == callee[0] && joined[1] == caller[1] &&
+            joined[0] != caller[0],
+        "external S_SWAPPC call was not replaced with the callee body");
+
+  ShaderRecompiler::Decoder::Program after;
+  ShaderRecompiler::Decoder::DecodeProgram(joined, after);
+  const auto pass_after = ShaderRecompiler::CFG::BuildGraph(after);
+  Check(!pass_after.unsupported &&
+            std::none_of(after.instructions.begin(), after.instructions.end(), [](const auto& inst) {
+              return inst.raw[0] == 0xbe8e210eu;
+            }),
+        "spliced S_SWAPPC fixture still contains an unsupported call");
 }
 
 void TestNewShaderRecompilerTtmpOperands() {
@@ -13248,6 +13283,7 @@ int main() {
   TestSwapPcDiagnosticProvenance();
   TestSwapPcDiagnosticFusedFrontBoundary();
   TestSwapPcDiagnosticFollowsPendingBranchTarget();
+  TestSwapPcExternalCallSplice();
   TestNewShaderRecompilerTtmpOperands();
   TestImageAddressOperands();
   TestSopkCompareImmediateExtension();

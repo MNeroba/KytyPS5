@@ -17,6 +17,7 @@
 #include "graphics/shader/recompiler/ShaderReplayCapsule.h"
 #include "graphics/shader/recompiler/ShaderSwapPcDiagnostic.h"
 #include "graphics/shader/shaderCompiler.h"
+#include "graphics/shader/shaderCallTrace.h"
 #include "kernel/memory.h"
 #include "loader/systemContent.h"
 
@@ -809,7 +810,51 @@ struct PipelineCache::ProgramCache {
 			caller_name = "ProgramCache::Get<ShaderComputeInputInfo>";
 		}
 		LogSwapPcDiagnostics(stage, params, options.user_data_base, read_cache, caller_name);
-		auto translated = ShaderRecompiler::TranslateProgram(params.code, options);
+		std::vector<uint32_t> spliced_code;
+		std::span<const uint32_t> compile_code = params.code;
+		const auto call_sites = ResolveIndirectCalls(params.code, params.user_data, params.Base());
+		if (!call_sites.empty()) {
+			std::vector<std::span<const uint32_t>> handlers;
+			handlers.reserve(call_sites.size());
+			for (const auto& call_site: call_sites) {
+				uint64_t handler_base = 0;
+				uint64_t handler_size = 0;
+				ShaderMappedData handler_data;
+				if (call_site.handler == 0 ||
+				    !ShaderFindMappedRange(call_site.handler, &handler_base, &handler_size) ||
+				    !ShaderTryGetMappedData(handler_base, handler_data) ||
+				    handler_data.code_size_bytes == 0 ||
+				    handler_data.code_size_bytes % sizeof(uint32_t) != 0 ||
+				    call_site.handler < handler_base ||
+				    call_site.handler - handler_base >= handler_size ||
+				    ((call_site.handler - handler_base) & (sizeof(uint32_t) - 1u)) != 0) {
+					handlers.clear();
+					break;
+				}
+				const auto offset = call_site.handler - handler_base;
+				const auto available = handler_size - offset;
+				if (available < sizeof(uint32_t) || available % sizeof(uint32_t) != 0) {
+					handlers.clear();
+					break;
+				}
+				const auto handler_code = std::span<const uint32_t> {
+					reinterpret_cast<const uint32_t*>(call_site.handler),
+					static_cast<size_t>(available / sizeof(uint32_t))};
+				const auto trimmed = TrimToCode(handler_code, call_site.return_sgpr);
+				if (!EndsWithReturn(trimmed, call_site.return_sgpr)) {
+					handlers.clear();
+					break;
+				}
+				handlers.push_back(trimmed);
+			}
+			if (handlers.size() == call_sites.size()) {
+				spliced_code = SpliceIndirectCalls(params.code, call_sites, handlers);
+				if (!spliced_code.empty()) {
+					compile_code = spliced_code;
+				}
+			}
+		}
+		auto translated = ShaderRecompiler::TranslateProgram(compile_code, options);
 		LogShaderComputeInputBeforeCompile("pre_resource_plan", options);
 		const auto resource_begin = std::chrono::steady_clock::now();
 		if (entry == programs.end()) {

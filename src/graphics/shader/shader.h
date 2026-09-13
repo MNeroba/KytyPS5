@@ -272,6 +272,8 @@ struct ShaderMappedData {
 
 void ShaderInit();
 void ShaderMapUserData(uint64_t addr, const ShaderMappedData& data);
+// Read-only lookup for a guest shader allocation registered through ShaderMapUserData.
+bool ShaderTryGetMappedData(uint64_t addr, ShaderMappedData& out);
 
 void     ShaderDbgDumpInputInfo(const ShaderVertexInputInfo& info);
 void     ShaderDbgDumpInputInfo(const ShaderPixelInputInfo& info);
