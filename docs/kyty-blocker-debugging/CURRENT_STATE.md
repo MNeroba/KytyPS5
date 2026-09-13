@@ -1,6 +1,6 @@
 # Current KytyPS5 debugging state
 
-Last reconciled: 2026-09-13 Europe/Riga
+Last reconciled: 2026-09-13 11:46 Europe/Riga
 
 This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable mechanisms live in REFERENCE.md.
 
@@ -9,15 +9,15 @@ This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable
 Repository/worktree: G:/KytyPS5/repo
 Branch: astro/materialize-resources
 Repository HEAD for documentation checkpoint: current tip; use `git rev-parse HEAD` for the exact commit id.
-Current semantic source HEAD: `b1ef4bf2a058664655b6b5fe6193fb50ffc64e49`
-Last ASTRO runtime source HEAD: `b1ef4bf2a058664655b6b5fe6193fb50ffc64e49`
-Working tree for this checkpoint: clean
+Current semantic source HEAD: `ed310ed42975cac2ffd1e824b3d4654265bdb280` plus uncommitted diagnostic-only S_SWAPPC provenance changes
+Last ASTRO runtime source HEAD: `ed310ed42975cac2ffd1e824b3d4654265bdb280` (diagnostic working tree)
+Working tree for this checkpoint: dirty only with the diagnostic implementation/test; no generated files
 Build: Release, CMake/Ninja, clang-cl, clang-lld_link-64
 Executable: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.exe
-Executable SHA-256: `A2E986E3EBE2914747CC3B9CA311FDE95185ECF772992D2E04A79F9A2F998EA5`
-Executable size: 21,076,992 bytes; built from `b1ef4bf`
-Build label: `Source build b1ef4bf`
-Matching PDB: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.pdb; SHA-256 `6F6697122C0242F969C1E76362AE6CF20F468C7BFEDEB8D365C72064AA320A01`
+Executable SHA-256: `F97F5DCEA4A3461F8D192A304D615665604055E650B8BACE8CA4F7B191C8951D`
+Executable size: 21,090,304 bytes; built from `ed310ed` with diagnostic working tree
+Build label: `Source build ed310ed-dirty`
+Matching PDB: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.pdb; SHA-256 `D2D761463D595EAFBAF2252A2F4342790AA4256068035D1B396B3134B68D10F0`
 Binary provenance: installed Release executable/PDB used by the latest ASTRO run
 
 The system-wide CMake install prefix was not used because it requires administrator access.
@@ -29,9 +29,9 @@ Title ID: PPSA21567
 Game input: G:/PS5 Games/PPSA21567/extracted
 Current milestone: M5 main menu — reached in the validated title-screen progression run
 Next milestone: M6 gameplay
-Current P0: classify the dynamic external-call contract at `pc=0x3da8` for MS `0x2b3be82b8235ac05`: production raw `0xbe8e210e` is `S_SWAPPC_B64 s[14:15], s[14:15]`; the exact old target pair is descriptor-derived but numerically unresolved.
+Current P0: classify the earlier decoder boundary reached by the only diagnostic ASTRO run: CS `0x0000000908e86a00` / hash `0xa572ee17a880e71c`, scalar source `0x000000e0` at `pc=0x00000370`. The requested MS `S_SWAPPC_B64` capture was not reached.
 P0 class: shader/recompiler control-flow support for an external dynamic call; no `S_LSHR_B64` semantic gap proven
-Last validated progress signal: offline sequential decode reaches the genuine `S_SWAPPC_B64` boundary with no width ambiguity; both s14 and s15 are last written by `S_BUFFER_LOAD_DWORDX2` at `0x3d74`. The current MS contains no `S_SETPC_B64` return instruction, so the call is strongly classified as external. No source or ASTRO run was performed for this classification.
+Last validated progress signal: focused `shader_cfg_tests` passed with the synthetic diagnostic resolver; one ASTRO run with the opt-in flag stopped at the earlier CS scalar-source decoder failure before MS `0x2b3be82b8235ac05` was encountered.
 Known P1 likely blockers: incorrect color/output interpretation remains P1 and is not a current fix target
 Known P2: cold-start large dispatcher pipeline compilation latency; successful creates are not a hang. Cache persistence/load is proven, but a substantial warm-time reduction is not.
 
@@ -59,7 +59,23 @@ MaterializeResources error, clean-shutdown record, or crash dump was produced. M
 not proven. Do not attribute this boundary to any individual upstream port until an offline
 comparison establishes that connection.
 
-Next action: obtain a production-equivalent descriptor/code target snapshot or equivalent dispatch-side resolver proof. Then implement only the narrow generic external-call path; do not alias SOP1 `0x21` to `S_LSHR_B64`, invent local fallthrough, or rerun ASTRO before that proof.
+Next action: classify the new CS `0xe0` scalar-source boundary offline. Do not rerun ASTRO or implement S_SWAPPC semantics in this checkpoint; retain the diagnostic resolver for a future run only if the earlier blocker is cleared.
+
+## S_SWAPPC dispatch-side diagnostic capture — 2026-09-13
+
+The diagnostic-only resolver and synthetic descriptor-chain regression are present in the
+working tree. `shader_cfg_tests` rebuilt and passed (exit 0). The single permitted ASTRO run
+used the established `--stub-bvh` command plus `--shader-swappc-diagnostic true`, source
+`ed310ed42975cac2ffd1e824b3d4654265bdb280` with the diagnostic working tree, EXE SHA-256
+`F97F5DCEA4A3461F8D192A304D615665604055E650B8BACE8CA4F7B191C8951D`, and PDB SHA-256
+`D2D761463D595EAFBAF2252A2F4342790AA4256068035D1B396B3134B68D10F0`.
+
+Artifact: `G:/KytyPS5/logs/SWAPPC_DIAGNOSTIC_20260913_/`. The run loaded the warm pipeline
+cache and terminated with wrapper status `321` (`0x141`) at CS `0x0000000908e86a00` (hash
+`0xa572ee17a880e71c`), `unsupported scalar source operand 0x000000e0` at `pc=0x370` in
+`ShaderDecoder.cpp:269`. No `ShaderSwapPcDiagnostic` record for MS
+`0x2b3be82b8235ac05` / raw `0xbe8e210e` was emitted because that shader was not reached.
+No second runtime run was performed. The requested production target remains unresolved.
 
 ## SOP1 S_SWAPPC call-contract audit — 2026-09-13
 

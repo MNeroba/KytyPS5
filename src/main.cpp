@@ -279,6 +279,11 @@ static bool ParseArgs(int argc, char* argv[], RunOptions& options, bool& show_he
 				::printf("invalid boolean for %s: %s\n", arg.c_str(), value.c_str());
 				return false;
 			}
+		} else if (arg == "--shader-swappc-diagnostic") {
+			if (!ParseBool(value, options.config.shader_swappc_diagnostic_enabled)) {
+				::printf("invalid boolean for %s: %s\n", arg.c_str(), value.c_str());
+				return false;
+			}
 		} else if (arg == "--shader-debug-disable-optimization") {
 			if (!ParseBool(value, options.config.shader_debug_disable_optimization)) {
 				::printf("invalid boolean for %s: %s\n", arg.c_str(), value.c_str());

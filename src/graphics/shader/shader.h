@@ -277,6 +277,8 @@ void     ShaderDbgDumpInputInfo(const ShaderVertexInputInfo& info);
 void     ShaderDbgDumpInputInfo(const ShaderPixelInputInfo& info);
 void     ShaderDbgDumpInputInfo(const ShaderComputeInputInfo& info);
 bool ShaderAddressValid(uint64_t addr);
+// Read-only diagnostic lookup for code allocations registered through AgcCreateShader.
+bool ShaderFindMappedRange(uint64_t addr, uint64_t* range_base, uint64_t* range_size);
 
 } // namespace Libs::Graphics
 

@@ -14,6 +14,7 @@
 #include "graphics/host_gpu/renderer/renderContext.h"
 #include "graphics/shader/recompiler/ShaderRecompiler.h"
 #include "graphics/shader/recompiler/ShaderReplayCapsule.h"
+#include "graphics/shader/recompiler/ShaderSwapPcDiagnostic.h"
 #include "graphics/shader/shaderCompiler.h"
 #include "kernel/memory.h"
 #include "loader/systemContent.h"
@@ -189,6 +190,12 @@ bool IsShaderMemoryMapped(void*, uint64_t address, uint64_t size) {
 	       Libs::LibKernel::Memory::TryReadBacking(address, probe.data(), size);
 }
 
+bool FindShaderMappedRange(void*, uint64_t address, uint64_t* range_base, uint64_t* range_size) {
+	return ShaderFindMappedRange(address, range_base, range_size);
+}
+
+const char* ShaderStageName(ShaderType stage);
+
 void DumpShaderSpirv(const char* stage_name, uint64_t shader_hash,
                      const std::vector<uint32_t>& spirv) {
 	if (!Config::ShaderDebugEnabled() && !Config::GraphicsDebugDumpEnabled()) {
@@ -294,6 +301,75 @@ void LogShaderComputeInputBeforeCompile(const char*                             
 	     options.user_data_base, static_cast<uint64_t>(options.user_data.size()),
 	     user_data_values.c_str());
 	// A fail-fast immediately after this marker must not leave the record in a userspace buffer.
+	Log::Flush();
+}
+
+const char* SwapPcWriterName(ShaderRecompiler::SwapPcWriterKind kind) {
+	using Kind = ShaderRecompiler::SwapPcWriterKind;
+	switch (kind) {
+		case Kind::Unknown: return "unknown";
+		case Kind::UserData: return "user_data";
+		case Kind::MoveImmediate: return "move_immediate";
+		case Kind::MovePair: return "move_pair";
+		case Kind::ScalarLoad: return "s_load_dword";
+		case Kind::ScalarLoadPair: return "s_load_dwordx2";
+		case Kind::ScalarLoadQuad: return "s_load_dwordx4";
+		case Kind::BufferLoad: return "s_buffer_load_dword";
+		case Kind::BufferLoadPair: return "s_buffer_load_dwordx2";
+	}
+	return "unknown";
+}
+
+void LogSwapPcDiagnostics(ShaderType stage, const ShaderParams& params, uint32_t user_data_base,
+                          ShaderGuestReadCache& read_cache) {
+	if (!Config::ShaderSwapPcDiagnosticEnabled()) {
+		return;
+	}
+	const ShaderRecompiler::SwapPcDiagnosticOptions options {
+	    .shader_hash      = params.hash,
+	    .shader_base      = params.Base(),
+	    .user_data_base   = user_data_base,
+	    .user_data        = params.user_data,
+	    .memory_userdata  = &read_cache,
+	    .read_u32         = ReadShaderGuestMemory,
+	    .find_range       = FindShaderMappedRange,
+	    .max_call_sites   = 16,
+	    .max_callee_words = 64,
+	};
+	const auto records = ShaderRecompiler::ResolveSwapPcDiagnostics(params.code, options);
+	if (records.empty()) {
+		return;
+	}
+	for (const auto& record: records) {
+		LOGF("ShaderSwapPcDiagnostic stage=%s hash=0x%016" PRIx64
+		     " call_pc=0x%08x call_raw=0x%08x src=s[%u:%u] dst=s[%u:%u]"
+		     " writer_pc=0x%08x writer_raw=0x%08x writer=%s writer_pair_same=%s"
+		     " source_known=%s descriptor_base=%s0x%016" PRIx64 " effective_load=%s0x%016" PRIx64
+		     " target_lo=0x%08x target_hi=0x%08x"
+		     " target=%s0x%016" PRIx64 " mapped=%s allocation=0x%016" PRIx64 "+0x%016" PRIx64
+		     " return=%s pc=0x%016" PRIx64 " raw=0x%08x src=s[%u:%u]\n",
+		     ShaderStageName(stage), params.hash, record.call_pc, record.call_raw,
+		     record.source_sgpr, record.source_sgpr + 1u, record.destination_sgpr,
+		     record.destination_sgpr + 1u, record.writer_pc, record.writer_raw,
+		     SwapPcWriterName(record.writer_kind), record.writer_pair_same ? "true" : "false",
+		     record.source_known ? "true" : "false", record.descriptor_known ? "" : "unknown/",
+		     record.descriptor_address, record.effective_load_known ? "" : "unknown/",
+		     record.effective_load_address, record.target_lo, record.target_hi,
+		     record.target_known ? "" : "unknown/", record.target_guest_va,
+		     record.target_mapped ? "true" : "false", record.allocation_base,
+		     record.allocation_size, record.return_found ? "S_SETPC_B64" : "none", record.return_pc,
+		     record.return_raw, record.return_source_sgpr, record.return_source_sgpr + 1u);
+		std::string words;
+		for (const auto word: record.callee_words) {
+			if (!words.empty()) {
+				words += ' ';
+			}
+			words += fmt::format("0x{:08x}", word);
+		}
+		LOGF("ShaderSwapPcDiagnostic callee_words=%zu return_pair_matches=%s words=[%s]\n",
+		     record.callee_words.size(), record.return_pair_matches ? "true" : "false",
+		     words.c_str());
+	}
 	Log::Flush();
 }
 
@@ -564,6 +640,7 @@ struct PipelineCache::ProgramCache {
 		// Persist raw bytes before decoding or any later specialization/resource-plan work. A
 		// decoder failure must still leave the exact guest stream available for offline analysis.
 		DumpShaderRawBeforeCompile(ShaderStageName(stage), options.shader_hash, params.code);
+		LogSwapPcDiagnostics(stage, params, options.user_data_base, read_cache);
 		auto translated = ShaderRecompiler::TranslateProgram(params.code, options);
 		LogShaderComputeInputBeforeCompile("pre_resource_plan", options);
 		if (entry == programs.end()) {

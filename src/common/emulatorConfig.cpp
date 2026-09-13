@@ -75,6 +75,10 @@ bool ShaderDebugEnabled() {
 	return g_config->shader_debug_enabled;
 }
 
+bool ShaderSwapPcDiagnosticEnabled() {
+	return g_config->shader_swappc_diagnostic_enabled;
+}
+
 bool ShaderDebugDisableOptimization() {
 	return g_config->shader_debug_disable_optimization;
 }

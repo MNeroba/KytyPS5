@@ -932,3 +932,26 @@ RELATED CODE/COMMIT: `frontend/decode/ScalarAluOps.cpp`,
 `WriteU32Pair`), `frontend/translate/Control.cpp`, and `frontend/cfg/ShaderCFG.cpp`
 (`ResolveSetpcTargets`, local-target validation); comparison only:
 `https://github.com/KytyPS5/KytyPS5/commit/a2cafb2f2c4a7fec745caf47e4e230bd0d1b6785`.
+
+### S_SWAPPC provenance diagnostic boundary — PROVEN
+
+FACT (**PROVEN**): The generic, opt-in dispatch-side resolver and bounded synthetic
+descriptor-chain regression build successfully; `shader_cfg_tests` exits 0. It runs before
+translation/CFG failure, reads only live user-data/guest memory through the existing bounded
+read cache, and does not alter `S_SWAPPC_B64` semantics or suppress CFG errors.
+
+FACT (**PROVEN**): The one authorized ASTRO capture with the resolver enabled did not reach the
+target MS. With the warm pipeline cache it stopped first at CS `0x0000000908e86a00` (hash
+`0xa572ee17a880e71c`), scalar source `0x000000e0` at `pc=0x370`,
+`ShaderDecoder.cpp:269`, wrapper status `321` (`0x141`). No target record was emitted.
+
+WHY IT MATTERS: The target `S_SWAPPC_B64 s[14:15],s[14:15]` descriptor value remains
+unresolved; no runtime target, allocation, callee words, or return pair may be inferred from
+this run. The earlier CS decoder boundary is now the first runtime blocker for any future
+capture.
+
+EVIDENCE: `G:/KytyPS5/logs/SWAPPC_DIAGNOSTIC_20260913_/capture-report.txt`,
+`runtime/runtime.log`, `runtime/process-result.txt`, and `shader_cfg_tests.log`.
+
+RELATED CODE: `src/graphics/shader/recompiler/ShaderSwapPcDiagnostic.{h,cpp}` and
+`src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp`.

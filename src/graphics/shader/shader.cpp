@@ -936,4 +936,20 @@ bool ShaderAddressValid(uint64_t addr) {
 	return reinterpret_cast<const uint32_t*>(addr) != nullptr;
 }
 
+bool ShaderFindMappedRange(uint64_t addr, uint64_t* range_base, uint64_t* range_size) {
+	if (range_base == nullptr || range_size == nullptr || g_shader_map == nullptr) {
+		return false;
+	}
+	std::scoped_lock lock(g_shader_map_mutex);
+	for (const auto& [base, data]: *g_shader_map) {
+		const uint64_t size = data.code_size_bytes;
+		if (size != 0 && addr >= base && addr - base < size) {
+			*range_base = base;
+			*range_size = size;
+			return true;
+		}
+	}
+	return false;
+}
+
 } // namespace Libs::Graphics

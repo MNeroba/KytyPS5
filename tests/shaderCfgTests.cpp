@@ -9,6 +9,7 @@
 #include "graphics/host_gpu/renderer/image/textureCommon.h"
 #include "graphics/host_gpu/renderer/pipeline/shaderResourceBarrier.h"
 #include "graphics/shader/recompiler/ShaderRecompiler.h"
+#include "graphics/shader/recompiler/ShaderSwapPcDiagnostic.h"
 #include "graphics/shader/recompiler/backend/spirv/SpirvEmitter.h"
 #include "graphics/shader/recompiler/backend/spirv/spirvEmitterInternal.h"
 #include "graphics/shader/recompiler/frontend/cfg/ShaderCFG.h"
@@ -1718,6 +1719,78 @@ void TestDecoderStopsAfterCompletedBackedgeBeforeTailData() {
             std::none_of(decoded.instructions.begin(), decoded.instructions.end(),
                          [](const auto& inst) { return inst.pc == 0x3e74u; }),
         "decoder traversed unreachable post-backedge tail data");
+}
+
+struct SwapPcDiagnosticTestMemory {
+  std::array<std::pair<uint64_t, uint32_t>, 8> words{};
+  size_t count = 0;
+};
+
+bool ReadSwapPcDiagnosticTestMemory(void *userdata, uint64_t address, uint32_t *value) {
+  if (userdata == nullptr || value == nullptr) {
+    return false;
+  }
+  const auto &memory = *static_cast<const SwapPcDiagnosticTestMemory *>(userdata);
+  for (size_t i = 0; i < memory.count; i++) {
+    if (memory.words[i].first == address) {
+      *value = memory.words[i].second;
+      return true;
+    }
+  }
+  return false;
+}
+
+bool FindSwapPcDiagnosticTestRange(void *, uint64_t address, uint64_t *base, uint64_t *size) {
+  if (address < 0x3000 || address >= 0x3040 || base == nullptr || size == nullptr) {
+    return false;
+  }
+  *base = 0x3000;
+  *size = 0x40;
+  return true;
+}
+
+void TestSwapPcDiagnosticResolver() {
+  // SMEM S_LOAD_DWORDX4 s4, s0; S_BUFFER_LOAD_DWORDX2 s14, s4, +0x60;
+  // production SOP1 S_SWAPPC_B64 s[14:15], s[14:15].
+  const std::array<uint32_t, 5> code = {
+      0xf4080100u, 0xfa000000u,  // s_load_dwordx4 s4, s0
+      0xf4240382u, 0xfa000060u,  // s_buffer_load_dwordx2 s14, s4, +0x60
+      0xbe8e210eu,               // s_swappc_b64 s[14:15], s[14:15]
+  };
+  SwapPcDiagnosticTestMemory memory;
+  memory.words[memory.count++] = {0x1000, 0x2000};
+  memory.words[memory.count++] = {0x1004, 0x00000000};
+  memory.words[memory.count++] = {0x1008, 0x00001000};
+  memory.words[memory.count++] = {0x100c, 0x00000000};
+  memory.words[memory.count++] = {0x2060, 0x00003000};
+  memory.words[memory.count++] = {0x2064, 0x00000000};
+  memory.words[memory.count++] = {0x3000, 0xbe8e200e};  // s_setpc_b64 s[14:15]
+  const std::array<uint32_t, 2> user_data = {0x1000, 0x00000000};
+  const ShaderRecompiler::SwapPcDiagnosticOptions options{
+      .shader_hash = 0x1234,
+      .shader_base = 0,
+      .user_data_base = 0,
+      .user_data = user_data,
+      .memory_userdata = &memory,
+      .read_u32 = ReadSwapPcDiagnosticTestMemory,
+      .find_range = FindSwapPcDiagnosticTestRange,
+      .max_call_sites = 4,
+      .max_callee_words = 4,
+  };
+  const auto records = ShaderRecompiler::ResolveSwapPcDiagnostics(code, options);
+  Check(records.size() == 1, "S_SWAPPC diagnostic did not find the call site");
+  const auto &record = records.front();
+  Check(record.call_pc == 0x10 && record.source_sgpr == 14 &&
+            record.destination_sgpr == 14 && record.writer_pc == 0x8 &&
+            record.writer_kind == ShaderRecompiler::SwapPcWriterKind::BufferLoadPair &&
+            record.writer_pair_same && record.descriptor_known &&
+            record.descriptor_address == 0x2000 && record.effective_load_known &&
+            record.effective_load_address == 0x2060 && record.target_known &&
+            record.target_guest_va == 0x3000 && record.target_mapped &&
+            record.allocation_base == 0x3000 && record.allocation_size == 0x40 &&
+            record.return_found && record.return_source_sgpr == 14 &&
+            record.return_pair_matches,
+        "S_SWAPPC diagnostic did not reconstruct the descriptor target and return pair");
 }
 
 void TestNewShaderRecompilerTtmpOperands() {
@@ -13026,6 +13099,7 @@ int main() {
   TestNewShaderDecoderArchitecture();
   TestNewShaderRecompilerSoppCdbgSys();
   TestDecoderStopsAfterCompletedBackedgeBeforeTailData();
+  TestSwapPcDiagnosticResolver();
   TestNewShaderRecompilerTtmpOperands();
   TestImageAddressOperands();
   TestSopkCompareImmediateExtension();
