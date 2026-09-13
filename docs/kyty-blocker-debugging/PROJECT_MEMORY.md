@@ -234,6 +234,30 @@ scheduler tests pass. Logger flush is explicit in `Log::WriteFatal` and `Log::Sh
 RELATED CODE/COMMIT: `src/graphics/host_gpu/renderer/gpuFaultDiagnostics.{h,cpp}`,
 `tests/ShaderRecompilerComputeTests.cpp`, `d0ce0cb`.
 
+### Device-loss report completion lifecycle — PROVEN
+
+FACT: `GpuFaultDiagnostics::ReportDeviceLost` has an explicit
+`NotStarted → Reporting → Complete` lifecycle. One caller owns the dump; duplicate callers wait on
+a condition variable while Reporting, then continue the existing caller path after Complete. The
+owner flushes the logger before publishing Complete. No Vulkan retry, recovery, scheduler ordering,
+or resource semantics are involved.
+
+WHY IT MATTERS: Multiple waiters can observe one device loss. Without serialization, a duplicate
+waiter can reach the existing fatal path and terminate the process while the owner is still emitting
+the bounded snapshot, leaving an apparently truncated report and an interrupted wrapper result.
+
+EVIDENCE: The exact `3901b80` ASTRO artifact
+`G:/KytyPS5/logs/DEVICE_LOSS_SNAPSHOT_FIX_20260913_/astro-run/runtime.log` has failures at ticks
+329171 and 329194; `already_reported` is interleaved before the first report's remaining resource
+records. Deterministic real-path fixture artifacts in
+`G:/KytyPS5/logs/DEVICE_LOSS_REPORT_BARRIER_20260913_/fixture-report.txt` reproduce the race
+without timing sleeps: fail-before lets the duplicate leave while the owner is held, while
+pass-after holds it at `DuplicateWaiting` and emits one complete report (three batches, commands,
+and resources). Focused barrier, snapshot, and scheduler tests exit 0.
+
+RELATED CODE/COMMIT: `src/graphics/host_gpu/renderer/gpuFaultDiagnostics.{h,cpp}`,
+`tests/ShaderRecompilerComputeTests.cpp`, `1459c38`.
+
 ### BDA page-table initialization contract — PROVEN
 
 FACT: Vulkan device-local allocations do not provide a zero-content contract. Kyty's 512 MiB

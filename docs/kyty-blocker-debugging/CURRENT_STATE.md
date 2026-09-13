@@ -9,8 +9,8 @@ This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable
 Repository/worktree: G:/KytyPS5/repo
 Branch: astro/materialize-resources
 Repository HEAD for documentation checkpoint: current tip; use `git rev-parse HEAD` for the exact commit id.
-Current semantic source HEAD: `d0ce0cb` (`diagnostics: emit all retained GPU snapshot batches`)
-Last ASTRO runtime source HEAD: `5804443` (exact clean Release build; pre-snapshot fix)
+Current semantic source HEAD: `1459c38` (`diagnostics: serialize device-loss report completion`)
+Last ASTRO runtime source HEAD: `3901b80` (exact clean Release build; before the barrier-only follow-up)
 Working tree for this checkpoint: clean
 Build: Release, CMake/Ninja, clang-cl, clang-lld_link-64
 Executable: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.exe
@@ -29,9 +29,9 @@ Title ID: PPSA21567
 Game input: G:/PS5 Games/PPSA21567/extracted
 Current milestone: M5 main menu — reached in the validated title-screen progression run
 Next milestone: M6 gameplay
-Current P0: validate the generic tick-keyed GPU snapshot reporting fix in one exact Release ASTRO run, then classify the first post-M5 boundary.
-P0 class: source/reporting defect was proven and fixed; no S_SWAPPC or GPU semantic change is justified until the corrected same-run window is observed.
-Last validated progress signal: focused fail-before/pass-after snapshot fixture emits all three retained batches after `d0ce0cb`; prior exact `5804443` run reached 40 CS / 22 PS / 14 VS / 1 GS, then observed `ErrorDeviceLost (-4)` at ticks 329598/329575 before MS `0x2b3be82b8235ac05` was invoked.
+Current P0: validate the report-completion barrier on a future single ASTRO run, then classify the first post-M5 boundary.
+P0 class: tick filtering and duplicate-report interruption are proven reporting defects and fixed; no S_SWAPPC or GPU semantic change is justified until a corrected same-run window is observed.
+Last validated progress signal: focused fail-before/pass-after snapshot and concurrent barrier fixtures emit all retained records after `1459c38`; the one allowed ASTRO run from `3901b80` reached 40 CS / 22 PS / 14 VS / 1 GS, then observed `ErrorDeviceLost (-4)` at ticks 329171/329194 before MS `0x2b3be82b8235ac05` was invoked.
 Known P1 likely blockers: incorrect color/output interpretation remains P1 and is not a current fix target
 Known P2: cold-start large dispatcher pipeline compilation latency; successful creates are not a hang. Cache persistence/load is proven, but a substantial warm-time reduction is not.
 
@@ -52,8 +52,29 @@ three retained ticks; pass-after prints all three batches, DispatchDirect metada
 records. Focused `--gpu-fault-snapshot-only` and `--scheduler-only` runs pass. The generic
 diagnostic-only fix is committed as `d0ce0cb`; no scheduler/resource/Vulkan control flow changed.
 
-Next action: build/install exact Release from `d0ce0cb` and perform one `--stub-bvh` ASTRO run.
-If device loss recurs, classify the corrected same-run tick window before any further diagnostics.
+That snapshot fix was validated by one exact run from `3901b80`; the follow-up barrier task adds no
+runtime run. The next runtime attempt should use the exact `1459c38` Release build and only verify
+that the complete retained window survives device loss.
+
+## Device-loss report completion barrier — 2026-09-13
+
+The exact post-snapshot-fix ASTRO run is preserved at
+`G:/KytyPS5/logs/DEVICE_LOSS_SNAPSHOT_FIX_20260913_/astro-run/` (source build `3901b80`).
+It reproduced `vkDevice.waitSemaphores` `ErrorDeviceLost (-4)` at ticks `329171` and `329194`
+(`known=329170`, `current=329195`). The first reporter printed a window with three retained
+batches and began the CS `0x657ad04626bf9d55` DispatchDirect record; the duplicate waiter logged
+`already_reported` and reached the existing fatal path while the first report was still printing.
+The file contains one batch, one command, and four of ten buffer records before termination, proving
+the remaining gap was report/fail-fast concurrency. The wrapper process-result file was interrupted.
+
+Commit `1459c38` replaces the boolean gate with `NotStarted → Reporting → Complete`, waits duplicate
+callers on a condition variable, flushes the owner report before publishing Complete, and leaves
+Vulkan detection/fail-fast behavior unchanged. Deterministic artifacts are under
+`G:/KytyPS5/logs/DEVICE_LOSS_REPORT_BARRIER_20260913_/`: fail-before has duplicate output before
+the held owner report; pass-after has exactly one header, three batches, three commands, three
+resources, and post-Complete duplicate output. `--gpu-fault-report-barrier-only`,
+`--gpu-fault-snapshot-only`, and `--scheduler-only` all exit 0. No ASTRO rerun is authorized in the
+barrier task; the next runtime attempt should only verify that the complete retained window survives.
 
 ## Branch-aware S_SWAPPC diagnostic validation — 2026-09-13
 
