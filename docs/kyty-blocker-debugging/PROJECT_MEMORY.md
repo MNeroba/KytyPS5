@@ -807,3 +807,36 @@ RELATED CODE/COMMIT: `AgcAcbDispatchIndirect` (`src/libs/agc.cpp:3302-3331`), PM
 handlers (`src/graphics/guest_gpu/command_processor/pm4Handlers.cpp:1319-1345`),
 CPU dereference (`src/graphics/guest_gpu/graphicsRun.cpp:1131-1143`), and existing bounded
 snapshot commit `5ebf00a`.
+
+### Selective upstream correctness ports — PROVEN
+
+FACT: The local branch accepts six generic upstream fixes after source/test audit: indirect
+dispatch arguments are read through synchronized GPU-clean backing (`e020fab` with prerequisite
+`e47eb4b`, local `1be44d2`); submitted graphics/compute PM4 spans own immutable packet bytes
+(`515d644`, local `7d4ead9`); indirect-buffer chain control is honored, including an empty chain
+(`f1de661`, local `d43c1b7`); conditional IB predicates preserve dword bit 2 and use an unaligned-safe
+64-bit copy (`03d3f2a`, local `75e4726`); and RDNA2 `S_MUL_HI_I32`, `V_FRACT_F16`, and
+`V_CMPX_LT_U16` decode/translate through existing IR (`7bcd43d`, `a21ffde`, local `83d9f32` and
+`2298df0`).
+
+WHY IT MATTERS: These are generic queue/PM4/ISA correctness improvements, but they do not
+classify or close the current ASTRO post-M5 device-loss P0. Do not infer runtime progress from
+these offline fixes or reopen the closed resource-remap/GDS findings.
+
+EVIDENCE: Focused runs in `G:/KytyPS5/logs/UPSTREAM_AUDIT_20260913_/`: `shader_cfg_tests`,
+`shader_recompiler_compute_tests`, `resource_materialization_tests`, and
+`scalar_provenance_tests` passed; `resource_tracking_tests` reaches its known unrelated
+`dynamic storage mips` baseline failure. `CheckGpuCommandLane`, `Pm4WaitResume`, and the new
+conditional-predicate regression pass.
+
+RELATED CODE/COMMIT: `GuestGpu::Submit/SubmitCompute`, `CommandProcessor::DispatchIndirectAddress`,
+`ProcessIndirectBuffer`, `CpOpBranch`, scalar/vector decoder tables and translators; local commits
+`1be44d2`, `7d4ead9`, `d43c1b7`, `75e4726`, `83d9f32`, `2298df0`.
+
+FACT (**PROVEN deferred candidates**): A1 `ded853b` global EOP/flip synchronization is not
+portable to the current nonblocking packet contract; A4 `12c855e` synchronized indirect-register
+snapshots reject existing host-pointer PM4 fixtures; B3 `c354657` is already locally implemented;
+B4 `c913951` subvector-loop semantics failed its upstream regression on the local CFG/mask model.
+
+WHY IT MATTERS: Do not retry these ports without a new source contradiction, a regression that
+proves the local contract has changed, or target runtime evidence tying the behavior to a blocker.

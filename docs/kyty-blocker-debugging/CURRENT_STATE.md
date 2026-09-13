@@ -8,9 +8,9 @@ This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable
 
 Repository/worktree: G:/KytyPS5/repo
 Branch: astro/materialize-resources
-Repository HEAD for runtime/test provenance: `807a84daac695593906d2f0f1c7f286baa950614` (`docs: record exact MS decoder regression provenance`)
+Repository HEAD for source/test provenance: `2298df0` (`shader: support V_FRACT_F16 and V_CMPX_LT_U16`)
 Documentation checkpoint is the current tip; use `git rev-parse HEAD` for its generated commit id.
-Current semantic source HEAD: `5e2e21995c80a5b29bb84dde8e43d110c1cd6375`
+Current semantic source HEAD: `2298df0`
 Last ASTRO runtime source HEAD: `807a84daac695593906d2f0f1c7f286baa950614`
 Working tree for this checkpoint: clean
 Build: Release, CMake/Ninja, clang-cl, clang-lld_link-64
@@ -62,6 +62,28 @@ selected.
 Next action: use existing source and artifacts to select one concrete missing fact at the earliest
 device-loss boundary; only then add a bounded diagnostic or focused regression. Keep color, replay,
 resource-remap, and pipeline-cache work closed.
+
+## Selective upstream correctness audit — 2026-09-13
+
+No ASTRO run was performed. Accepted generic ports are `1be44d2` (upstream `e020fab` plus
+coherent-read prerequisite `e47eb4b`), `7d4ead9` (`515d644`), `d43c1b7` (`f1de661`),
+`75e4726` (`03d3f2a`), `83d9f32` (`7bcd43d`), and `2298df0` (`a21ffde`). They cover checked
+GPU-written indirect argument snapshots, owned submitted PM4 bytes, indirect-buffer chain
+control, dword-aligned conditional predicates, `S_MUL_HI_I32`, `V_FRACT_F16`, and
+`V_CMPX_LT_U16`.
+
+`ded853b` (A1) was not ported: its global EOP/flip synchronization failed the existing
+nonblocking packet regression and would change local boundary semantics. `12c855e` (A4) was
+not ported: synchronized indirect-register snapshots reject the current host-pointer PM4 test
+contract; no production evidence requires adapting that boundary yet. `c354657` (B3) is already
+represented by the local `S_WQM_B32` implementation. `c913951` (B4) remains deferred: the
+upstream subvector-loop regression failed on the local CFG/mask model, so no blind adaptation was
+made without target evidence.
+
+Focused validation logs are under `G:/KytyPS5/logs/UPSTREAM_AUDIT_20260913_/`. Passing suites:
+`resource_materialization_tests`, `scalar_provenance_tests`, `shader_recompiler_compute_tests`,
+and `shader_cfg_tests`; `resource_tracking_tests` still reaches the known unrelated
+`dynamic storage mips` baseline failure.
 
 ## Exact MS regression verification — 2026-09-12
 
