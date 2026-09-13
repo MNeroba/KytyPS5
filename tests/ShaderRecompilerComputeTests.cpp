@@ -28657,6 +28657,42 @@ void CheckPm4WaitResume(RenderContext &renderer) {
                   Pm4ProcessResult::Complete &&
               chain_suffix == 0,
           "empty chained indirect buffer resumed the caller");
+
+  // Conditional IB predicates are dword aligned. Verify that an address with
+  // bit 2 set reads the 64-bit predicate at that exact dword.
+  std::array<uint32_t, 3> predicate{0xdeadbeefu, 7u, 0u};
+  uint32_t branch_then = 0;
+  uint32_t branch_else = 0;
+  std::array<uint32_t, 5> then_buffer{};
+  then_buffer[0] = KYTY_PM4(5, Pm4::IT_WRITE_DATA, 0);
+  then_buffer[2] = static_cast<uint32_t>(address(&branch_then));
+  then_buffer[3] = static_cast<uint32_t>(address(&branch_then) >> 32u);
+  then_buffer[4] = 41;
+  std::array<uint32_t, 5> else_buffer{};
+  else_buffer[0] = KYTY_PM4(5, Pm4::IT_WRITE_DATA, 0);
+  else_buffer[2] = static_cast<uint32_t>(address(&branch_else));
+  else_buffer[3] = static_cast<uint32_t>(address(&branch_else) >> 32u);
+  else_buffer[4] = 42;
+  std::array<uint32_t, 14> branch_packet{};
+  branch_packet[0] = KYTY_PM4(14, Pm4::IT_INDIRECT_BUFFER, 0);
+  branch_packet[1] = 2u | (3u << 8u); // mode=both, function=equal
+  branch_packet[2] = static_cast<uint32_t>(address(&predicate[1]));
+  branch_packet[3] = static_cast<uint32_t>(address(&predicate[1]) >> 32u);
+  branch_packet[4] = UINT32_MAX;
+  branch_packet[5] = UINT32_MAX;
+  branch_packet[6] = 7;
+  branch_packet[7] = 0;
+  branch_packet[8] = static_cast<uint32_t>(address(then_buffer.data()));
+  branch_packet[9] = static_cast<uint32_t>(address(then_buffer.data()) >> 32u);
+  branch_packet[10] = static_cast<uint32_t>(then_buffer.size());
+  branch_packet[11] = static_cast<uint32_t>(address(else_buffer.data()));
+  branch_packet[12] = static_cast<uint32_t>(address(else_buffer.data()) >> 32u);
+  branch_packet[13] = static_cast<uint32_t>(else_buffer.size());
+  Pm4Execution branch_execution;
+  Require("Pm4WaitResume", "dword-aligned conditional IB",
+          processor.Process(branch_execution, branch_packet) == Pm4ProcessResult::Complete &&
+              branch_then == 41 && branch_else == 0,
+          "conditional IB cleared bit 2 or selected the wrong predicate dword");
   std::printf("[host]    %-32s ok\n", "Pm4WaitResume");
 }
 
