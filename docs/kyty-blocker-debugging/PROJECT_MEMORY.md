@@ -1213,3 +1213,23 @@ four `HIT` probes in 8 seconds wall and was stopped before normal pipeline creat
 lower-bound saving of `475.965 s` (98.35%).
 RELATED CODE/COMMIT: `pipelineCache.cpp`, `shaders.cpp`, commit `f56a8fb`; full artifacts
 `G:/KytyPS5/logs/PIPELINE_CACHE_REUSE_20260913_/`.
+
+### Warm-cache ASTRO progression — PROVEN (2026-09-13)
+
+FACT (**PROVEN**): A Release executable built from `e483b45e624477187e289a764c2ae1e2488fe900` loaded the fresh per-title cache persisted by the deterministic-SPIR-V validation. The cache payload was `8,725,962` bytes and the source file SHA-256 was `566137417818E49B4592A5D61535C24F7D3B1F27B7B8F8E6A5025BC298A2AA30`.
+
+WHY IT MATTERS: Ordinary persistent `VkPipelineCache` removes the four previously giant startup compiles on the real progression path. Do not reopen SPIR-V determinism, cache architecture, or pipeline-binary work without contradictory evidence.
+
+EVIDENCE: `G:/KytyPS5/logs/ASTRO_WARM_CACHE_M6_20260913_/runtime-classification.txt` records the exact HEAD, executable/PDB hashes, command, cache provenance, and bounded searches. The run emitted no expensive compile records for `0x78af8e269b528b5c`, `0x7bd68261b1bdfb68`, `0xf3f4e1671b30c1f4`, or `0x530dcd964f29983c`.
+
+RELATED CODE/COMMIT: `pipelineCache.cpp`, `shaders.cpp`, deterministic emitter fix `f56a8fb`, cache documentation checkpoint `e483b45`.
+
+### Warm-cache progression blocker — PROVEN (2026-09-13)
+
+FACT (**PROVEN**): The first deterministic blocker after warm-cache startup is production CFG rejection of MS hash `0x2b3be82b8235ac05`, `code_words=4164`, at `pc=0x3da8`, raw `0xbe8e210e`, SOP1 opcode `0x21`. Decode completed with 2,881 instructions before `ShaderCFG.cpp:40` reported the unsupported instruction.
+
+WHY IT MATTERS: The next runtime-critical work is the already classified `S_SWAPPC_B64 s[14:15], s[14:15]` implementation and its production-derived regression. This run did not provide a guest shader address or exact process exit code; those values must not be inferred from another run.
+
+EVIDENCE: Same-run artifact `G:/KytyPS5/logs/ASTRO_WARM_CACHE_M6_20260913_/runtime-classification.txt`, plus bounded matches in `runtime.log` and `stdout.log`. The run reached `VS 21 / PS 34 / CS 46 / GS 2`, loaded the warm cache, and showed no `VK_ERROR_DEVICE_LOST`, MaterializeResources failure, or M6 gameplay signal.
+
+RELATED CODE/COMMIT: `src/graphics/shader/recompiler/frontend/cfg/ShaderCFG.cpp:40`; external-call contract audit `G:/KytyPS5/logs/SOP1_CALL_AUDIT_20260913_/analysis.txt`; no S_SWAPPC semantic change was made in this runtime task.

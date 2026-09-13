@@ -1,6 +1,6 @@
 # Current KytyPS5 debugging state
 
-Last reconciled: 2026-09-13 16:30 Europe/Riga
+Last reconciled: 2026-09-13 16:55 Europe/Riga
 
 This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable mechanisms live in REFERENCE.md.
 
@@ -8,17 +8,17 @@ This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable
 
 Repository/worktree: G:/KytyPS5/repo
 Branch: astro/materialize-resources
-Repository HEAD for documentation checkpoint: `f56a8fbcfb3116016f1b71a1372c88fd20316484`
-Current semantic source HEAD: `f56a8fb` (`fix: stabilize dispatcher spill emission order`)
-Last ASTRO runtime source HEAD: `60273f3` (profiling/probe runs are diagnostic and stopped before giant normal compilation)
+Repository HEAD for documentation checkpoint: `e483b45e624477187e289a764c2ae1e2488fe900`
+Current semantic source HEAD: `e483b45` (documentation checkpoint on top of the deterministic spill fix)
+Last ASTRO runtime source HEAD: `e483b45` (warm-cache progression run)
 Working tree for this checkpoint: docs-only changes pending
 Build: Release, CMake/Ninja, clang-cl, clang-lld_link-64
 Executable: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.exe
-Executable SHA-256: `E7AB6EF182E390C2EED9F60F59D7142A4E615DB5C4ACEC233E703CCD8591A2D9`
-Executable built and copied to install from exact `f56a8fb`
-Build label: Release rebuild after deterministic dispatcher spill fix; no ASTRO run in this task
-Matching PDB: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.pdb; SHA-256 `7932D78DBFA98AD0D186DAC0B7E1038C0A5E24D1B5A084B0B4442592AD234B15`
-Binary provenance: current Release executable/PDB rebuilt from `f56a8fb`; cache-only probe stopped before normal giant compilation
+Executable SHA-256: `143E4BA3660D47C6C48527D7F495DACBB982DB018C0F33CFDCE28B08D5173D5D`
+Executable built and copied to install from exact `e483b45`
+Build label: Release rebuild for warm-cache ASTRO progression
+Matching PDB: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.pdb; SHA-256 `121E1DB668BD6CB33F2F3B97FF00759BDE9E7E0FB52CFCBB0926F3083BBDE7C3`
+Binary provenance: current Release executable/PDB rebuilt from `e483b45`; warm per-title cache loaded before progression run
 
 The system-wide CMake install prefix was not used because it requires administrator access.
 
@@ -29,11 +29,30 @@ Title ID: PPSA21567
 Game input: G:/PS5 Games/PPSA21567/extracted
 Current milestone: M5 main menu — reached in the validated title-screen progression run
 Next milestone: M6 gameplay
-Current P0: resume ASTRO progression toward M6 gameplay using the now-warm deterministic per-title Vulkan cache.
-P0 class: SPIR-V nondeterminism and cache reuse are proven; no pipeline-binary work is justified.
-Last validated progress signal: all four giant CS cache-only probes returned `HIT` with matching deterministic identities after one isolated population sequence.
+Current P0: implement the proven production `S_SWAPPC_B64 s[14:15], s[14:15]` path for MS `0x2b3be82b8235ac05` at `pc=0x3da8` (`raw=0xbe8e210e`).
+P0 class: deterministic production CFG blocker; the warmed cache removed the prior startup compilation stalls.
+Last validated progress signal: the exact warm-cache ASTRO run loaded the 8,725,962-byte cache payload, produced no expensive records for the four giant pipelines, and reached the MS target before CFG failed.
 Known P1 likely blockers: incorrect color/output interpretation remains P1 and is not a current fix target
 Known P2: cold-start large dispatcher pipeline compilation latency; successful creates are not a hang. A fresh cache removes this cost on subsequent starts.
+
+## Warm-cache M6 progression run — 2026-09-13
+
+The exact Release build from `e483b45` was installed and run once with the established
+`--stub-bvh` baseline. Provenance, command, hashes, and bounded classification are in
+`G:/KytyPS5/logs/ASTRO_WARM_CACHE_M6_20260913_/provenance.txt` and
+`runtime-classification.txt`; all runtime artifacts remain under that directory.
+
+The run loaded `_PipelineCache\\PPSA21567.bin` (payload `8,725,962` bytes; source cache
+SHA-256 `566137417818E49B4592A5D61535C24F7D3B1F27B7B8F8E6A5025BC298A2AA30`). No expensive
+compile records were emitted for `0x78af8e269b528b5c`, `0x7bd68261b1bdfb68`,
+`0xf3f4e1671b30c1f4`, or `0x530dcd964f29983c`, confirming warm reuse in the progression run.
+
+The first deterministic blocker was MS hash `0x2b3be82b8235ac05`, `code_words=4164`,
+`pc=0x3da8`, raw `0xbe8e210e`, unsupported SOP1 opcode `0x21` during CFG BuildGraph
+(`ShaderCFG.cpp:40`). Decode completed with 2,881 instructions; no device-loss marker,
+MaterializeResources failure, or M6 gameplay evidence occurred. The guest shader address
+and numeric process exit code are unavailable in this run and remain explicitly unknown.
+Do not reopen cache/SPIR-V work or treat this as a pipeline hang.
 
 ## Shader startup profiling — 2026-09-13
 
