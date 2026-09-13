@@ -1,6 +1,6 @@
 # Current KytyPS5 debugging state
 
-Last reconciled: 2026-09-13 21:52 Europe/Riga
+Last reconciled: 2026-09-13 22:03 Europe/Riga
 
 This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable mechanisms live in REFERENCE.md.
 
@@ -51,7 +51,8 @@ address-space ownership is proven.
 ## S_SWAPPC descriptor address ownership audit — 2026-09-13
 
 The bounded audit is `G:/KytyPS5/logs/SWAPPC_ADDRESS_AUDIT_20260913_/address-ownership-audit.txt`;
-the negative runtime search is `runtime-pointer-search.txt`. The scalar root preceding the
+the negative runtime search is `runtime-pointer-search.txt`, and the streaming mapping parse is
+`runtime-memory-map-audit.txt`. The scalar root preceding the
 production `S_LOAD_DWORDX4` is `0x0000000f_e0040000` (`0x0fe0040000`, 0x4000-aligned). It lies
 numerically inside the PRT interval `[0x0f00000000, 0xfc00000000)` and below
 `HOST_USER_MIN` in the Windows system-reserved interval `[0x0800000000, 0x1000000000)`. This is
@@ -59,11 +60,13 @@ consistent with a PRT alias, but fixed flexible mappings can also consume reserv
 numeric range membership is not ownership proof.
 
 The warmed runtime log and preserved same-run artifacts contain no `KernelSetPrtAperture`, exact
-pointer allocation, or memory-map record. The existing `virtual_memory_allocation_tests` run
+pointer allocation, or memory-map record. Its eight parsed `out_addr` mappings contain no range
+covering the target. The existing `virtual_memory_allocation_tests` run
 passes, including `PrtBackingReadPreservesSparseResidency`, which proves registered-PRT sparse
 read behavior but does not identify the production pointer's owner. The reader still has no PRT
-fallback. Address ownership remains unproven; no source change, regression, or ASTRO rerun is
-justified until this provenance is captured.
+fallback. Address ownership remains unproven, with no preserved host mapping to service the
+descriptor; no source change, regression, or ASTRO rerun is justified until this provenance is
+captured.
 
 ## BDA translation diagnostic capture attempt — 2026-09-13
 
