@@ -1333,6 +1333,29 @@ EVIDENCE: `G:/KytyPS5/logs/SWAPPC_CFG_TRACE_20260913_2310/astro-run/runtime.log`
 `G:/KytyPS5/logs/SWAPPC_CFG_TRACE_20260913_2310/trace-summary.txt`, and the raw stream
 `G:/KytyPS5/logs/MS_RAW_CAPTURE_20260912_2240/shaders/original/precompile_ms_2b3be82b8235ac05.bin`.
 
+### Production S_SWAPPC descriptor ownership audit — PROVEN unresolved (2026-09-13)
+
+FACT: The descriptor-chain scalar preceding the production `S_LOAD_DWORDX4` is
+`0x0000000f_e0040000` (`0x0fe0040000`). It is numerically inside the PRT aperture interval and
+the Windows system-reserved interval, but that range membership does not identify ownership because
+fixed flexible mappings may also consume reserved spans. The warmed runtime log has no
+`KernelSetPrtAperture`, exact-pointer allocation, or mapping record for this value; its eight parsed
+`out_addr` records contain no range covering the target.
+
+FACT: The source call-site cross-check finds no in-repository production caller of
+`KernelSetPrtAperture`; only the guest NID export can establish that mapping. The buffer-image
+staging path is the sole production consumer of `TryReadPrtBacking`, while shader guest-memory
+readers have no PRT fallback. The registered-PRT sparse-reader regression passes, but it does not
+identify the production pointer's owner.
+
+WHY IT MATTERS: Address ownership remains unproven, so the missing descriptor read cannot yet be
+classified as a resolver-reader integration defect. Do not add a PRT fallback, create a regression,
+or rerun ASTRO until guest mapping provenance for this scalar is captured.
+
+EVIDENCE: `G:/KytyPS5/logs/SWAPPC_ADDRESS_AUDIT_20260913_/address-ownership-audit.txt`,
+`runtime-memory-map-audit.txt`, `source-prt-callsite-audit.txt`, and the passing
+`virtual_memory_allocation_tests` result.
+
 ### S_SWAPPC provenance diagnostic boundary — PROVEN
 
 FACT (**PROVEN**): Commit `3f7a30c` contains the generic, opt-in dispatch-side resolver and
