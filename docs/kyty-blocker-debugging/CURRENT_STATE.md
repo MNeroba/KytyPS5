@@ -580,3 +580,39 @@ Next action: use existing source/log evidence to obtain one exact target dispatc
 or identify a different stable causal boundary. If a future capture is required, keep it
 generic and bounded, record provenance, and stop at the first exact missing fact; do not reopen
 closed resource/remap, replay, pipeline-cache, or color findings.
+
+## Offline Prosper-class GDS/indirect audit — 2026-09-13
+
+Artifact: `G:/KytyPS5/logs/ASTRO_MS_FIX_20260913_0015/`; reports:
+`gds-indirect-census.txt` and `gds-provenance-search.txt`. No ASTRO run or source/semantic
+change was made.
+
+The local DS path is explicit: `MemoryOps.cpp:381-407` decodes DS opcode/offset/GDS bit;
+`Memory.cpp:99-101,114-145,850-856` maps the GDS bit to `ResourceKind::Gds`, keeps LDS
+separate, and supplies M0 plus EXEC operands. `spirvEmitterMemory.cpp:726-800` computes
+`base=(M0>>16)`, `size=M0&0xffff`, `address=base+offset`, `raw_index=address>>2`, then
+performs a device-scope atomic append/consume against the GDS runtime array.
+`spirvEmitterMemoryHelpers.cpp:108-124,159-164` bounds the index by `OpArrayLength`;
+`bufferCache.cpp:27,209` allocates and zeroes a 64 KiB GDS buffer (16384 dwords). There is
+no explicit post-add modulo in the emitter, so this source proves a 64 KiB backing allocation,
+M0 16-bit fields, and dword indexing, not an additional host-side wrap operation. LDS uses workgroup/function storage.
+
+The retained host-tick census has DispatchDirect at tick 329598 (guest submit 6263,
+CS `0x657ad04626bf9d55`, 4096x1x1) and tick 329599 (same submit, CS
+`0x338b450551457250`, 131072x1x1); tick 329607 is DrawIndexAuto. Ticks 329600..329621
+have no retained non-EOP dispatch metadata, and no DispatchIndirect execution record carries
+dereferenced x/y/z. The renderer's capped direct sample repeats bounded per-frame dimensions
+(14 calls/frame through frame 38; 8 in frame 39) without monotonic growth.
+
+`AgcAcbDispatchIndirect` records 2280 pointer-only entries with two repeated addresses
+(`0x00000005074063c0`, 760 calls; `0x00000005074063e0`, 1520 calls). Both addresses fall
+inside the one retained allocation base `0x0000000507404000`, size `0x4000`, but the window
+identifies only a vertex subrange and has no indirect binding, x/y/z value, host tick, or
+last-writer provenance. Runtime text contains no DS_APPEND/DS_CONSUME, DMA_DATA, fill/copy,
+or DispatchIndirect execution records; 128 `gds_offset/gds_size` matches are PM4 metadata dumps.
+
+Result: all recoverable launch dimensions are bounded/sane and the Prosper runaway-indirect/GDS
+counter class is ruled out as a proven explanation for this artifact. The unseen indirect values
+remain unknown. If another capture is later justified, the single missing fact is the actual
+indirect x/y/z immediately before dispatch plus last-writer provenance keyed by host tick and
+command ordinal.

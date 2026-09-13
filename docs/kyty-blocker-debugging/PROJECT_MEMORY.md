@@ -767,3 +767,43 @@ MS hash, so exact runtime re-entry remains unproven.
 
 RELATED CODE/COMMIT: `tests/shaderCfgTests.cpp`, `5e2e219`, runtime artifacts
 `MS_RAW_CAPTURE_20260912_2240` and `ASTRO_DECODER_FIX_20260912_2340`.
+
+### Prosper-class runaway-indirect/GDS audit — PROVEN ruled out on current artifact
+
+FACT (**PROVEN**): Local DS lowering is separate for GDS and LDS. `MemoryOps.cpp:381-407`
+decodes the DS opcode, 16-bit offset, and GDS selector; `Memory.cpp:99-101,114-145,850-856`
+selects `ResourceKind::Gds` and passes M0/EXEC, while LDS remains its own resource kind.
+`spirvEmitterMemory.cpp:726-800` uses `base=(M0>>16)`, `size=M0&0xffff`,
+`address=base+offset`, `raw_index=address>>2`; GDS append/consume is a device-scope atomic
+against the runtime array. `spirvEmitterMemoryHelpers.cpp:108-124,159-164` checks
+`index < OpArrayLength`. `bufferCache.cpp:27,209` supplies a zeroed 64 KiB (16384-dword)
+backing allocation. No explicit post-add modulo is emitted, so the code proves the 64 KiB backing allocation,
+M0 16-bit fields, and dword indexing but does not prove a separate host-side wrap operation.
+
+FACT (**PROVEN for recoverable records; unavailable for unseen indirect values**): In
+`ASTRO_MS_FIX_20260913_0015`, host-tick snapshots retain DispatchDirect 329598
+(`0x657ad04626bf9d55`, 4096x1x1), DispatchDirect 329599
+(`0x338b450551457250`, 131072x1x1), and DrawIndexAuto 329607. No DispatchIndirect execution
+record contains dereferenced x/y/z. The renderer's capped direct sample repeats bounded
+per-frame dimensions through frame 39 without monotonic growth.
+
+FACT (**PROVEN absence of a recoverable chain**): `AgcAcbDispatchIndirect` logged 2280
+pointer-only records using two repeated addresses (`0x...63c0` and `0x...63e0`). They both
+fall within the retained allocation `0x...4000 + 0x4000`, but the snapshot records only a
+vertex subrange; it does not establish an indirect resource binding, argument values, host tick,
+or last writer. The artifact has no DS_APPEND/DS_CONSUME, DMA_DATA, fill/copy, or
+DispatchIndirect execution text; its 128 `gds_offset/gds_size` matches are PM4 metadata dumps.
+
+WHY IT MATTERS: The Prosper semantic class (runaway or accumulating indirect group counts
+caused by missing GDS/counter producer state) is ruled out as a proven explanation here. Do not
+add a cap, skip a dispatch, change GDS semantics, or enable address-binding diagnostics from
+this evidence. If a future capture is justified, request only actual indirect x/y/z immediately
+before dispatch and last-writer provenance keyed by host tick and command ordinal.
+
+EVIDENCE: `G:/KytyPS5/logs/ASTRO_MS_FIX_20260913_0015/gds-indirect-census.txt`;
+`gds-provenance-search.txt`; source paths above; `snapshot-window-329621.txt`.
+
+RELATED CODE/COMMIT: `AgcAcbDispatchIndirect` (`src/libs/agc.cpp:3302-3331`), PM4
+handlers (`src/graphics/guest_gpu/command_processor/pm4Handlers.cpp:1319-1345`),
+CPU dereference (`src/graphics/guest_gpu/graphicsRun.cpp:1131-1143`), and existing bounded
+snapshot commit `5ebf00a`.
