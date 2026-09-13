@@ -1846,6 +1846,65 @@ void TestSwapPcDiagnosticProvenance() {
         "diagnostic provenance callback lost invocation or span identity");
 }
 
+void TestSwapPcDiagnosticFusedFrontBoundary() {
+  // Production-derived MS invocation 29 (hash 0x4e555b0ebf3b53f8).  The
+  // captured front ends with S_SETPC_B64 s6 at pc=0x3c; the remaining words
+  // are fused-back/tail data, including the exact reserved-source word seen
+  // by the pre-fix diagnostic at pc=0x7c.
+  const std::array<uint32_t, 32> code = {
+      0x8f6a9003u, 0x94fe6ac1u, 0xbf88000bu, 0xd7650005u,
+      0x00000000u, // continuation for the VOP3 instruction at pc=0x0c
+      0x93eaff03u, 0x00000000u, // literal continuation at pc=0x14
+      0xd7660005u, 0x00000000u, // continuation at pc=0x1c
+      0xd7460005u, 0x00000000u, // continuation at pc=0x24
+      0x340a0a82u, 0xd8340000u, 0x00000000u, 0xbf8cc07fu,
+      0xbe802006u, // S_SETPC_B64 s6 at pc=0x3c (fused-front handoff)
+      0x30306c73u, 0x00000048u, 0x00000061u, 0x00000000u,
+      0x100401a6u, 0x40401009u, 0x00000000u, 0x104c104bu, 0x104e104du,
+      0x1079606fu, 0x1085107au, 0x006e0000u, 0x10255400u,
+      0x00a10000u, 0x66008002u, 0x99e758e5u};
+
+  const ShaderRecompiler::SwapPcDiagnosticOptions options{
+      .shader_hash = 0x4e555b0ebf3b53f8ULL,
+      .fused_front = true,
+      .max_call_sites = 4,
+      .max_callee_words = 1,
+  };
+  SwapPcDiagnosticDecodeCapture capture;
+  auto traced_options = options;
+  traced_options.decode_callback = CaptureSwapPcDiagnosticDecode;
+  traced_options.decode_userdata = &capture;
+  const auto records =
+      ShaderRecompiler::ResolveSwapPcDiagnostics(code, traced_options);
+  Check(records.empty(),
+        "fused-front diagnostic unexpectedly reported a tail call site");
+  Check(!capture.records.empty() &&
+            std::all_of(capture.records.begin(), capture.records.end(),
+                        [](const auto &record) { return record.pc <= 0x3c; }),
+        "fused-front diagnostic decoded beyond the production handoff");
+  Check(std::none_of(capture.records.begin(), capture.records.end(),
+                     [](const auto &record) {
+                       return record.pc == 0x7c && record.raw == 0x99e758e5u;
+                     }),
+        "fused-front diagnostic reached the reserved-source tail word");
+
+  // A S_SWAPPC site inside the valid front remains discoverable.  The
+  // diagnostic scanner recognizes this opcode without changing production
+  // decoder semantics, then the shared fused-front helper trims at S_SETPC.
+  const std::array<uint32_t, 3> positive = {0xbe8e210eu, 0xbe802006u,
+                                             0x99e758e5u};
+  const ShaderRecompiler::SwapPcDiagnosticOptions positive_options{
+      .shader_hash = 0x4e555b0ebf3b53f8ULL,
+      .fused_front = true,
+      .max_call_sites = 1,
+      .max_callee_words = 1,
+  };
+  const auto positive_records = ShaderRecompiler::ResolveSwapPcDiagnostics(
+      positive, positive_options);
+  Check(positive_records.size() == 1 && positive_records.front().call_pc == 0,
+        "S_SWAPPC inside fused executable front was not discovered");
+}
+
 void TestNewShaderRecompilerTtmpOperands() {
   // RDNA2 scalar source code 0x73 names TTMP7.  Keep both source and
   // destination forms here because trap temporaries use a separate register
@@ -13155,6 +13214,7 @@ int main() {
   TestSwapPcDiagnosticResolver();
   TestSwapPcDiagnosticStopsAtTerminalShader();
   TestSwapPcDiagnosticProvenance();
+  TestSwapPcDiagnosticFusedFrontBoundary();
   TestNewShaderRecompilerTtmpOperands();
   TestImageAddressOperands();
   TestSopkCompareImmediateExtension();

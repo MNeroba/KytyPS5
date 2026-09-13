@@ -352,9 +352,11 @@ void LogSwapPcDiagnostics(ShaderType stage, const ShaderParams& params, uint32_t
 	const auto invocation_id = NextSwapPcDiagnosticInvocationId();
 	LOGF("ShaderSwapPcDiagnosticInvocation invocation_id=%" PRIu64
 	     " stage=%s guest_shader=0x%016" PRIx64 " shader_hash=0x%016" PRIx64
-	     " code_words=%zu code_bytes=%zu span_base=0x%016" PRIx64 " caller=%s\n",
+	     " code_words=%zu code_bytes=%zu span_base=0x%016" PRIx64 " fused_front=%s"
+	     " back_code_words=%zu caller=%s\n",
 	     invocation_id, ShaderStageName(stage), params.Base(), params.hash, params.code.size(),
-	     params.code.size_bytes(), params.Base(), caller_name != nullptr ? caller_name : "unknown");
+	     params.code.size_bytes(), params.Base(), params.back_code.empty() ? "false" : "true",
+	     params.back_code.size(), caller_name != nullptr ? caller_name : "unknown");
 	// This header must reach the artifact before any resolver instruction can fail-fast.
 	Log::Flush();
 	SwapPcDiagnosticTraceState                      trace_state;
@@ -362,6 +364,7 @@ void LogSwapPcDiagnostics(ShaderType stage, const ShaderParams& params, uint32_t
 	    .shader_hash      = params.hash,
 	    .shader_base      = params.Base(),
 	    .invocation_id    = invocation_id,
+	    .fused_front      = !params.back_code.empty(),
 	    .user_data_base   = user_data_base,
 	    .user_data        = params.user_data,
 	    .memory_userdata  = &read_cache,

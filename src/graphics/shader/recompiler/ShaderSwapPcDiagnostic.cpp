@@ -1,5 +1,6 @@
 #include "graphics/shader/recompiler/ShaderSwapPcDiagnostic.h"
 
+#include "graphics/shader/recompiler/ShaderRecompiler.h"
 #include "graphics/shader/recompiler/frontend/decode/ShaderDecoder.h"
 
 #include <algorithm>
@@ -460,6 +461,9 @@ ResolveSwapPcDiagnostics(std::span<const uint32_t> code, const SwapPcDiagnosticO
 	std::vector<SwapPcDiagnosticRecord> records;
 	if (code.empty() || options.max_call_sites == 0) {
 		return records;
+	}
+	if (options.fused_front) {
+		code = code.first(FusedFrontWordCount(code));
 	}
 	ScalarState state;
 	InitializeUserData(state, options);

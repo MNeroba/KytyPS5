@@ -38,6 +38,7 @@ struct SwapPcDiagnosticOptions {
 	uint64_t                       shader_hash      = 0;
 	uint64_t                       shader_base      = 0;
 	uint64_t                       invocation_id    = 0;
+	bool                           fused_front      = false;
 	uint32_t                       user_data_base   = 0;
 	std::span<const uint32_t>      user_data        = {};
 	void*                          memory_userdata  = nullptr;

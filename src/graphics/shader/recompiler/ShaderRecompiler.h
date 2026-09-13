@@ -43,10 +43,14 @@ struct CompileResult {
 
 [[nodiscard]] TranslateResult TranslateProgram(std::span<const uint32_t> code,
                                                const CompileOptions&     options);
-[[nodiscard]] CompileResult   CompileProgram(TranslateResult                   translated,
-                                             const CompileOptions&             options,
-                                             const IR::ResourceSpecialization& specialization,
-                                             uint32_t push_data_start_dword = 0);
+// Returns the number of words in the executable front of a fused shader.  The front must end
+// with the merged-stage ABI handoff S_SETPC_B64 s6; this is the boundary used before back-code
+// splicing and by opt-in diagnostics that inspect the front independently.
+[[nodiscard]] uint32_t      FusedFrontWordCount(std::span<const uint32_t> front);
+[[nodiscard]] CompileResult CompileProgram(TranslateResult                   translated,
+                                           const CompileOptions&             options,
+                                           const IR::ResourceSpecialization& specialization,
+                                           uint32_t push_data_start_dword = 0);
 
 } // namespace Libs::Graphics::ShaderRecompiler
 

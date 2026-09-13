@@ -515,20 +515,12 @@ Decoder::Program DecodeFusedProgram(std::span<const uint32_t> front, std::span<c
                                     std::vector<uint32_t>& joined_code) {
 	EXIT_IF(back.empty());
 	Decoder::Program result;
-	uint32_t         front_words = 0;
-	while (front_words < front.size()) {
+	const auto       front_words = FusedFrontWordCount(front);
+	for (uint32_t word_index = 0; word_index < front_words;) {
 		auto& inst = result.instructions.emplace_back();
-		Decoder::DecodeInstruction(front, front_words, inst);
-		front_words += inst.word_count;
-		if (inst.opcode == Decoder::Opcode::S_SETPC_B64) {
-			EXIT_NOT_IMPLEMENTED(inst.src0.kind != Decoder::OperandKind::Sgpr ||
-			                     inst.src0.reg != 6u);
-			break;
-		}
-		EXIT_NOT_IMPLEMENTED(inst.opcode == Decoder::Opcode::S_ENDPGM);
+		Decoder::DecodeInstruction(front, word_index, inst);
+		word_index += inst.word_count;
 	}
-	EXIT_IF(result.instructions.empty() ||
-	        result.instructions.back().opcode != Decoder::Opcode::S_SETPC_B64);
 	joined_code.assign(front.begin(), front.begin() + front_words);
 	joined_code.insert(joined_code.end(), back.begin(), back.end());
 	// The merged-stage ABI passes the back shader in s[6:7]. Give that handoff an
@@ -551,6 +543,24 @@ Decoder::Program DecodeFusedProgram(std::span<const uint32_t> front, std::span<c
 }
 
 } // namespace
+
+uint32_t FusedFrontWordCount(std::span<const uint32_t> front) {
+	EXIT_IF(front.empty());
+	uint32_t front_words = 0;
+	while (front_words < front.size()) {
+		Decoder::Instruction inst;
+		Decoder::DecodeInstruction(front, front_words, inst);
+		front_words += inst.word_count;
+		if (inst.opcode == Decoder::Opcode::S_SETPC_B64) {
+			EXIT_NOT_IMPLEMENTED(inst.src0.kind != Decoder::OperandKind::Sgpr ||
+			                     inst.src0.reg != 6u);
+			return front_words;
+		}
+		EXIT_NOT_IMPLEMENTED(inst.opcode == Decoder::Opcode::S_ENDPGM);
+	}
+	EXIT("fused shader front has no S_SETPC_B64 handoff\n");
+	return 0;
+}
 
 TranslateResult TranslateProgram(std::span<const uint32_t> code, const CompileOptions& options) {
 	if (code.empty()) {
