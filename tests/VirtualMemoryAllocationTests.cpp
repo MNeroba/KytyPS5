@@ -10,6 +10,8 @@
 #include "loader/redZonePatcher.h"
 #include "loader/runtimeLinker.h"
 #include "loader/systemContent.h"
+#include "libs/agc.h"
+#include "graphics/shader/recompiler/ShaderSwapPcDiagnostic.h"
 
 #include <array>
 #include <cinttypes>
@@ -54,6 +56,8 @@ constexpr uint64_t SceKernelMemoryPoolCommitLen  = 0x10000;
 constexpr uint64_t SceKernelMemoryPoolExpandLen  = 0x400000;
 constexpr uint64_t SceKernelMemoryPoolAlignment  = 0x10000;
 constexpr int      ErrorAccess                   = Libs::LibKernel::KERNEL_ERROR_EACCES;
+constexpr uint64_t AgcDmemWorkAreaBase           = 0x0fe0040000ull;
+constexpr uint64_t AgcDmemWorkAreaSize           = 0x001b0000ull;
 
 struct TestFailure {};
 
@@ -429,6 +433,88 @@ void TestPrtBackingReadPreservesSparseResidency() {
 	        Libs::LibKernel::Memory::KernelReleaseDirectMemory(pool_offset, commit_size * 2),
 	        "KernelReleaseDirectMemory(pool expansion)");
 
+	std::printf("[host]    %-48s ok\n", test);
+}
+
+bool ReadAgcSwapPcBacking(void*, uint64_t address, uint32_t* value) {
+	return Libs::LibKernel::Memory::TryReadBacking(address, value, sizeof(*value));
+}
+
+bool FindAgcSwapPcRange(void*, uint64_t address, uint64_t* base, uint64_t* size) {
+	VirtualQueryInfo info {};
+	if (Libs::LibKernel::Memory::KernelVirtualQuery(
+	        reinterpret_cast<const void*>(address), 0, &info, sizeof(info)) != OK) {
+		return false;
+	}
+	if (base != nullptr) {
+		*base = info.start;
+	}
+	if (size != nullptr) {
+		*size = info.end - info.start;
+	}
+	return true;
+}
+
+void TestAgcDmemWorkAreaFeedsProductionSwapPc() {
+	const char* test = "AgcDmemWorkAreaFeedsProductionSwapPc";
+
+	CheckOk(test, Libs::Graphics::Gen5::AgcInit(nullptr, 13), "AgcInit");
+	VirtualQueryInfo work_area {};
+	CheckOk(test,
+	        Libs::LibKernel::Memory::KernelVirtualQuery(
+	            reinterpret_cast<const void*>(AgcDmemWorkAreaBase), 0, &work_area,
+	            sizeof(work_area)),
+	        "KernelVirtualQuery(AGC work area)");
+	Check(test, work_area.start == AgcDmemWorkAreaBase &&
+	                  work_area.end == AgcDmemWorkAreaBase + AgcDmemWorkAreaSize &&
+	                  work_area.is_flexible == 1,
+	      "AgcInit did not provision the official fixed AGC DMEM work area");
+
+	void* callee = nullptr;
+	CheckOk(test,
+	        Libs::LibKernel::Memory::KernelMapNamedFlexibleMemory(
+	            &callee, SceKernelPageSize, SceKernelProtCpuRw, 0, "agc_swap_pc_callee"),
+	        "KernelMapNamedFlexibleMemory(callee)");
+	const auto target = reinterpret_cast<uint64_t>(callee);
+	const std::array<uint32_t, 2> callee_code = {0xbe8e200eu, 0xbf820000u};
+	std::memcpy(callee, callee_code.data(), sizeof(callee_code));
+	Check(test,
+	      Libs::LibKernel::Memory::TryWriteBacking(AgcDmemWorkAreaBase + 0x60, &target,
+                                                 sizeof(target)),
+	      "TryWriteBacking(AGC descriptor target)");
+
+	const std::array<uint32_t, 4> caller = {
+		0xf4240382u, // S_BUFFER_LOAD_DWORDX2 s14,s4,+0x60
+		0xfa000060u,
+		0xbe8e210eu, // S_SWAPPC_B64 s[14:15],s[14:15]
+		0xbf820000u, // S_ENDPGM
+	};
+	const std::array<uint32_t, 2> user_data = {
+		static_cast<uint32_t>(AgcDmemWorkAreaBase),
+		static_cast<uint32_t>(AgcDmemWorkAreaBase >> 32u),
+	};
+	const Libs::Graphics::ShaderRecompiler::SwapPcDiagnosticOptions options{
+		.shader_hash = 0x2b3be82b8235ac05ull,
+		.user_data_base = 4,
+		.user_data = user_data,
+		.read_u32 = ReadAgcSwapPcBacking,
+		.find_range = FindAgcSwapPcRange,
+		.max_call_sites = 1,
+		.max_callee_words = 2,
+	};
+	const auto records = Libs::Graphics::ShaderRecompiler::ResolveSwapPcDiagnostics(caller, options);
+	Check(test, records.size() == 1, "production S_SWAPPC fixture was not visited");
+	const auto& record = records.front();
+	Check(test, record.source_known && record.writer_pc == 0 && record.writer_pair_same &&
+	                  record.descriptor_address == AgcDmemWorkAreaBase &&
+	                  record.effective_load_address == AgcDmemWorkAreaBase + 0x60 &&
+	                  record.target_guest_va == target && record.target_mapped &&
+	                  record.callee_words.size() == callee_code.size() && record.return_found &&
+	                  record.return_pair_matches,
+	      "AGC work-area descriptor did not resolve the production external S_SWAPPC target");
+
+	CheckOk(test, Libs::LibKernel::Memory::KernelMunmap(target, SceKernelPageSize),
+	        "KernelMunmap(callee)");
 	std::printf("[host]    %-48s ok\n", test);
 }
 
@@ -2563,6 +2649,7 @@ int main(int argc, char** argv) {
 	RunTest(TestMemoryPoolCommitDecommitQueryFlags);
 	RunTest(TestProgramMemoryAllocationAndProtection);
 	RunTest(TestModuleRelocationUsesWritableHostMapping);
+	RunTest(TestAgcDmemWorkAreaFeedsProductionSwapPc);
 
 	if (g_failed_tests != 0) {
 		std::printf("VirtualMemoryAllocationTests: %d case(s) failed\n", g_failed_tests);

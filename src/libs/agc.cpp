@@ -20,6 +20,7 @@
 #include "graphics/presentation/videoOut.h"
 #include "graphics/presentation/window.h"
 #include "graphics/shader/shader.h"
+#include "kernel/memory.h"
 #include "kernel/pthread.h"
 #include "libs/errno.h"
 #include "libs/libs.h"
@@ -43,6 +44,46 @@
 namespace Libs::Graphics {
 
 static RenderContext* g_renderer = nullptr;
+
+// libSceAgc's DMEM query returns this fixed work-area window.  The title's AGC
+// initializer validates the exact base and uses the first 0x60 bytes for its
+// own table before shaders consume descriptors from the same allocation.
+constexpr uint64_t AGC_DMEM_WORK_AREA_BASE = 0x0fe0040000ull;
+constexpr size_t   AGC_DMEM_WORK_AREA_SIZE = 0x001b0000ull;
+constexpr int      AGC_DMEM_WORK_AREA_PROT = 0x33; // CPU/GPU read-write
+constexpr int      AGC_DMEM_MAP_FIXED      = 0x10;
+constexpr int      AGC_DMEM_MAP_NO_COALESCE = 0x400000;
+
+bool EnsureAgcDmemWorkArea() {
+	using namespace Libs::LibKernel::Memory;
+
+	VirtualQueryInfo info {};
+	if (KernelVirtualQuery(reinterpret_cast<const void*>(AGC_DMEM_WORK_AREA_BASE), 0, &info,
+	                       sizeof(info)) == OK) {
+		return info.start == AGC_DMEM_WORK_AREA_BASE &&
+		       info.end == AGC_DMEM_WORK_AREA_BASE + AGC_DMEM_WORK_AREA_SIZE &&
+		       info.is_flexible != 0;
+	}
+
+	void* address = reinterpret_cast<void*>(AGC_DMEM_WORK_AREA_BASE);
+	const auto result = KernelMapNamedFlexibleMemory(
+	    &address, AGC_DMEM_WORK_AREA_SIZE, AGC_DMEM_WORK_AREA_PROT,
+	    AGC_DMEM_MAP_FIXED | AGC_DMEM_MAP_NO_COALESCE, "agc_dmem_work_area");
+	if (result != OK || reinterpret_cast<uint64_t>(address) != AGC_DMEM_WORK_AREA_BASE) {
+		LOGF_COLOR(Log::Color::Red,
+		           "AGC DMEM work-area mapping failed: result=0x%08" PRIx32
+		           " address=0x%016" PRIx64 "\n",
+		           static_cast<uint32_t>(result), reinterpret_cast<uint64_t>(address));
+		return false;
+	}
+	return true;
+}
+
+bool ClearAgcDmemWorkAreaHeader() {
+	std::array<uint8_t, 0x60> zeroes {};
+	return Libs::LibKernel::Memory::TryWriteBacking(AGC_DMEM_WORK_AREA_BASE, zeroes.data(),
+	                                                 zeroes.size());
+}
 
 template <typename... Args>
 static void AgcTrace(const char* format, const Args&... args) {
@@ -344,6 +385,11 @@ int KYTY_SYSV_ABI AgcInit(uint32_t* state, uint32_t ver) {
 
 	if (ver > GRAPHICS_REGISTER_DEFAULTS_MAX_VERSION) {
 		LOGF_COLOR(Log::Color::Red, "\t unsupported version %u\n", ver);
+	}
+
+	if (!EnsureAgcDmemWorkArea() || !ClearAgcDmemWorkAreaHeader()) {
+		LOGF_COLOR(Log::Color::Red, "\t AGC DMEM work area is unavailable\n");
+		return Libs::LibKernel::KERNEL_ERROR_ENOMEM;
 	}
 
 	printf("version = %u\n", ver);
