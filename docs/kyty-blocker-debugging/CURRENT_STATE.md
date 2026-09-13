@@ -1,6 +1,6 @@
 # Current KytyPS5 debugging state
 
-Last reconciled: 2026-09-13 12:52 Europe/Riga
+Last reconciled: 2026-09-13 13:20 Europe/Riga
 
 This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable mechanisms live in REFERENCE.md.
 
@@ -9,16 +9,16 @@ This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable
 Repository/worktree: G:/KytyPS5/repo
 Branch: astro/materialize-resources
 Repository HEAD for documentation checkpoint: current tip; use `git rev-parse HEAD` for the exact commit id.
-Current semantic source HEAD: `53996c0` (`diagnostics: capture swap-pc invocation provenance`)
-Last ASTRO runtime source HEAD: `53996c0` (exact clean Release build)
+Current semantic source HEAD: `0ca5990` (`diagnostics: align swap-pc scan with fused front`)
+Last ASTRO runtime source HEAD: `0ca5990` (exact clean Release build)
 Working tree for this checkpoint: clean
 Build: Release, CMake/Ninja, clang-cl, clang-lld_link-64
 Executable: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.exe
-Executable SHA-256: `2B2CE85F1108A561CF2389D469E29B5CDF26F121684398D1E8B399698CBAF846`
-Executable built and copied to install from exact `53996c0`
-Build label: `Source build 53996c0`
-Matching PDB: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.pdb; SHA-256 `89EF9AC7AC482251D0C450EF336797760A876DF6255257934AA18AB04EDD6A3E`
-Binary provenance: installed Release executable/PDB used by the single provenance ASTRO run
+Executable SHA-256: `0594B0D3FF23067973D0BAC2FAE00954D111ED01A43572E4DBD437285C75726B`
+Executable built and copied to install from exact `0ca5990`
+Build label: `Source build 0ca5990`
+Matching PDB: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.pdb; SHA-256 `2FCFFAB7D033F1A472D777ADE1B4DB3668A36229861B20092B16373B2E0A455E`
+Binary provenance: installed Release executable/PDB used by the single fused-front validation run
 
 The system-wide CMake install prefix was not used because it requires administrator access.
 
@@ -29,9 +29,9 @@ Title ID: PPSA21567
 Game input: G:/PS5 Games/PPSA21567/extracted
 Current milestone: M5 main menu — reached in the validated title-screen progression run
 Next milestone: M6 gameplay
-Current P0: apply the smallest diagnostic-only fused-front boundary correction for `0xe5@pc=0x7c`; no production decoder/scalar semantics are implicated.
-P0 class: diagnostic traversal continues past reachable `S_SETPC_B64` in an MS/GS-front fused span.
-Last validated progress signal: invocation 29 of the exact `53996c0` run captured stage MS, guest shader `0x00000005007d1700`, hash `0x4e555b0ebf3b53f8`, 56 words, and raw `0x99e758e5` at pc `0x7c`; the preceding `S_SETPC_B64 s6` at pc `0x3c` is the fused-front boundary.
+Current P0: obtain S_SWAPPC target provenance; the corrected diagnostic walk now stops at fused-front handoffs but still does not traverse a normal shader's pending branch target after `S_ENDPGM`.
+P0 class: diagnostic target capture is blocked by the existing linear `S_ENDPGM` stop; production `DecodeProgram` keeps the branch-target path to `pc=0x3da8`.
+Last validated progress signal: the exact `0ca5990` run reached MS hash `0x2b3be82b8235ac05` (invocation 104), passed the former `e0/e5` diagnostic boundaries, and reproduced production CFG failure at raw `0xbe8e210e`, `pc=0x3da8`.
 Known P1 likely blockers: incorrect color/output interpretation remains P1 and is not a current fix target
 Known P2: cold-start large dispatcher pipeline compilation latency; successful creates are not a hang. Cache persistence/load is proven, but a substantial warm-time reduction is not.
 
@@ -750,3 +750,23 @@ splicing the back shader. The diagnostic resolver currently scans linearly past 
 and reaches embedded tail data at `0x40..0x7c`; `0xe5` is therefore not proven reachable
 production code. No decoder/scalar/CFG semantic change was made. A separate task must add the
 same fused-boundary contract to the opt-in diagnostic walk with an authentic regression.
+
+## Fused-front diagnostic fix and validation — 2026-09-13
+
+Semantic/diagnostic commit: `0ca59901d51d2a083cee8ba3732651e7fa8258f3`. The shared
+`FusedFrontWordCount` contract is used by both production fused decoding and the opt-in
+S_SWAPPC scanner; `shader_cfg_tests` and `shader_recompiler_compute_tests` pass. The
+production-derived invocation-29 fixture fails before the fix at `pc=0x7c`/raw
+`0x99e758e5` (reserved source `0xe5`, exit `0x141`) and passes after without decoding the
+tail; an in-front S_SWAPPC remains discoverable.
+
+The exact Release run artifact is
+`G:/KytyPS5/logs/E5_FUSED_FRONT_FIX_20260913_/astro-run/`. Source HEAD is `0ca5990`;
+installed EXE/PDB SHA-256 values are recorded in `release-provenance.txt`. The run reached
+MS invocation 104, hash `0x2b3be82b8235ac05`, and then stopped at the existing production CFG
+failure `SOP1 opcode=0x21`, raw `0xbe8e210e`, `pc=0x3da8` (exit `321`/`0x141`). The corrected
+diagnostic emitted no e0/e5 traversal failure, but no S_SWAPPC record was produced: its
+linear non-fused walk stops at `S_ENDPGM` `pc=0x3d30`, while production decoding retains a
+pending branch-target path through `0x3dac` to the later call site. No second runtime run is
+authorized by this checkpoint; next action is offline classification of that normal-shader
+diagnostic boundary before any further capture.

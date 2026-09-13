@@ -1005,6 +1005,40 @@ WHY IT MATTERS: The opt-in S_SWAPPC scanner must stop at the same front boundary
 EVIDENCE: Exact clean `53996c0` run artifact `G:/KytyPS5/logs/E5_PROVENANCE_RUNTIME_20260913_/astro-run/`; invocation 29 header identifies stage MS, guest shader `0x00000005007d1700`, hash `0x4e555b0ebf3b53f8`, 56 words. Raw `0x99e758e5` at pc `0x7c` is SOP2 `S_PACK_LH_B32_B16` with reserved `ssrc0=0xe5`; preceding pc `0x3c` is `S_SETPC_B64 s6`. AGC logs show the same front/back fusion operation, and `ShaderRecompiler.cpp::DecodeFusedProgram` stops at S_SETPC before splicing `back_code`.
 RELATED CODE/COMMIT: `src/graphics/shader/recompiler/ShaderRecompiler.cpp` (`DecodeFusedProgram`); `src/graphics/shader/recompiler/ShaderSwapPcDiagnostic.cpp` (`ResolveSwapPcDiagnostics`); diagnostic provenance commit `53996c0`.
 
+### Fused-front diagnostic contract — PROVEN (2026-09-13)
+
+FACT (**PROVEN**): Commit `0ca59901d51d2a083cee8ba3732651e7fa8258f3` exposes the exact
+production fused-front boundary as `FusedFrontWordCount`. `DecodeFusedProgram` and the opt-in
+`ResolveSwapPcDiagnostics` scanner share this result when `back_code` is present, so the
+scanner stops at `S_SETPC_B64 s6` without changing scalar decoding, production CFG, or
+S_SWAPPC semantics.
+
+FACT (**PROVEN**): The invocation-29 fixture from hash `0x4e555b0ebf3b53f8` fails before the
+fix at raw `0x99e758e5`, `pc=0x7c`, reserved source `0xe5`, then passes after the boundary
+trim; an S_SWAPPC inside the valid front remains discoverable. Focused `shader_cfg_tests` and
+`shader_recompiler_compute_tests` both exit 0.
+
+FACT (**PROVEN**): The one Release validation run from `0ca5990` (artifact
+`G:/KytyPS5/logs/E5_FUSED_FRONT_FIX_20260913_/astro-run/`) passed the former e0/e5
+diagnostic boundaries and reached MS hash `0x2b3be82b8235ac05`, then stopped at production
+CFG `SOP1 opcode=0x21`, raw `0xbe8e210e`, `pc=0x3da8`, exit `321`/`0x141`. No S_SWAPPC record
+was emitted because the scanner's non-fused linear walk stops at `S_ENDPGM` `pc=0x3d30`;
+production `DecodeProgram` retains pending branch-target paths and reaches `0x3da8`. The
+next diagnostic question is this normal-shader boundary contract; do not infer S_SWAPPC
+target values from this run or rerun ASTRO until that boundary is classified offline.
+
+WHY IT MATTERS: The fused-front fix is closed. A future generic scanner change must preserve
+the distinction between fused handoff trimming and branch-aware normal-shader traversal; do
+not add a global `S_SETPC`/`S_ENDPGM` break or scalar-source workaround.
+
+EVIDENCE: `G:/KytyPS5/logs/E5_FUSED_FRONT_FIX_20260913_/fail-before-v2.log`,
+`shader_cfg_tests-pass-after-v2.log`, `shader_recompiler_compute_tests-pass-after-v2.log`,
+`astro-run/runtime.log`, and
+`G:/KytyPS5/logs/SOP1_CALL_AUDIT_20260913_/decode_full.txt`.
+
+RELATED CODE/COMMIT: `src/graphics/shader/recompiler/ShaderRecompiler.cpp`,
+`ShaderSwapPcDiagnostic.cpp`, `tests/shaderCfgTests.cpp`, commit `0ca5990`.
+
 FACT: The bounded same-run decode window is `pc=0x00..0x7c`; both paths from `S_CBRANCH_EXECZ` at `0x08` converge at `S_WAITCNT 0x38`, then terminate the fused front at `S_SETPC_B64 0x3c`. Words after `0x3c` are tail data for this front span; `0xe5` is not a production scalar-source contract.
 WHY IT MATTERS: Do not add scalar-source table entries, fake fallthrough, or production CFG changes for this failure.
 EVIDENCE: `G:/KytyPS5/logs/E5_PROVENANCE_RUNTIME_20260913_/diagnostic-boundary-analysis.txt` lists all captured raw words and boundary reasoning.
