@@ -1,6 +1,6 @@
 # Current KytyPS5 debugging state
 
-Last reconciled: 2026-09-13 21:31 Europe/Riga
+Last reconciled: 2026-09-13 21:52 Europe/Riga
 
 This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable mechanisms live in REFERENCE.md.
 
@@ -9,7 +9,7 @@ This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable
 Repository/worktree: G:/KytyPS5/repo
 Branch: astro/materialize-resources
 Repository source HEAD for runtime checkpoint: `ea0512353e4598cd123469da480076b5a16019fd`
-Current source HEAD: `aebf0c7` (exact S_SWAPPC divergence documentation; semantic runtime source is `8717f42`)
+Current source HEAD: `f9ec19e` (exact S_SWAPPC divergence documentation; semantic runtime source is `8717f42`)
 Last ASTRO runtime source: `8717f42`
 Working tree for this checkpoint: clean after the documentation checkpoint
 Build: Release, CMake/Ninja, clang-cl, clang-lld_link-64
@@ -47,6 +47,23 @@ fetch or splice. No S_SWAPPC semantic change or Aftermath/device-loss diagnostic
 justified from this trace. The current P0 is now the unresolved scalar descriptor read at the
 `S_LOAD_DWORDX4` boundary; no generic integration fix is committed until the read failure's
 address-space ownership is proven.
+
+## S_SWAPPC descriptor address ownership audit — 2026-09-13
+
+The bounded audit is `G:/KytyPS5/logs/SWAPPC_ADDRESS_AUDIT_20260913_/address-ownership-audit.txt`;
+the negative runtime search is `runtime-pointer-search.txt`. The scalar root preceding the
+production `S_LOAD_DWORDX4` is `0x0000000f_e0040000` (`0x0fe0040000`, 0x4000-aligned). It lies
+numerically inside the PRT interval `[0x0f00000000, 0xfc00000000)` and below
+`HOST_USER_MIN` in the Windows system-reserved interval `[0x0800000000, 0x1000000000)`. This is
+consistent with a PRT alias, but fixed flexible mappings can also consume reserved spans, so
+numeric range membership is not ownership proof.
+
+The warmed runtime log and preserved same-run artifacts contain no `KernelSetPrtAperture`, exact
+pointer allocation, or memory-map record. The existing `virtual_memory_allocation_tests` run
+passes, including `PrtBackingReadPreservesSparseResidency`, which proves registered-PRT sparse
+read behavior but does not identify the production pointer's owner. The reader still has no PRT
+fallback. Address ownership remains unproven; no source change, regression, or ASTRO rerun is
+justified until this provenance is captured.
 
 ## BDA translation diagnostic capture attempt — 2026-09-13
 
