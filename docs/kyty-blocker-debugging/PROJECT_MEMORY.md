@@ -1196,3 +1196,20 @@ reuse. Do not infer a cache defect or add pipeline binaries without a fresh cach
 experiment using this stable SPIR-V.
 EVIDENCE: `G:/KytyPS5/logs/SPIRV_DETERMINISM_20260913_/cache-probe-after/`; probe stopped
 before normal compilation.
+
+## Persistent Vulkan cache reuse after deterministic SPIR-V — PROVEN (2026-09-13)
+
+FACT (**PROVEN**): A fresh isolated per-title `_PipelineCache/PPSA21567.bin` populated by exact
+Release `f56a8fb` reused all four giant compute pipelines. Cache-only probes returned `HIT` for
+`0x78af8e269b528b5c`, `0x7bd68261b1bdfb68`, `0xf3f4e1671b30c1f4`, and `0x530dcd964f29983c` with
+the same SPIR-V hashes, specialization hashes, layout hashes, and fingerprints as the successful
+cold population.
+WHY IT MATTERS: Ordinary persistent `VkPipelineCache` is sufficient once emitted SPIR-V is
+deterministic; a `VK_KHR_pipeline_binary` prototype is not justified for this blocker.
+EVIDENCE: the first giant compiled in `85482 ms`; the remaining three compiled in `114048`,
+`131535`, and `152900 ms`. The persisted fresh cache is `8726040` bytes with SHA-256
+`566137417818E49B4592A5D61535C24F7D3B1F27B7B8F8E6A5025BC298A2AA30`. A warm process reached all
+four `HIT` probes in 8 seconds wall and was stopped before normal pipeline creation, a measured
+lower-bound saving of `475.965 s` (98.35%).
+RELATED CODE/COMMIT: `pipelineCache.cpp`, `shaders.cpp`, commit `f56a8fb`; full artifacts
+`G:/KytyPS5/logs/PIPELINE_CACHE_REUSE_20260913_/`.

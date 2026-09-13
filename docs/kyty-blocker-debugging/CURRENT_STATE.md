@@ -29,11 +29,11 @@ Title ID: PPSA21567
 Game input: G:/PS5 Games/PPSA21567/extracted
 Current milestone: M5 main menu — reached in the validated title-screen progression run
 Next milestone: M6 gameplay
-Current P0: validate warm reuse or choose the next cache/runtime action after deterministic SPIR-V; the existing cache does not contain the new giant SPIR-V identity.
-P0 class: SPIR-V nondeterminism is fixed and proven; the existing cache predates the stable giant identity, so warm reuse remains unproven.
-Last validated progress signal: three independent giant replays now emit byte-identical SPIR-V after `f56a8fb`; the cache-only probe reached giant CS `0x78af...` without compiling.
+Current P0: resume ASTRO progression toward M6 gameplay using the now-warm deterministic per-title Vulkan cache.
+P0 class: SPIR-V nondeterminism and cache reuse are proven; no pipeline-binary work is justified.
+Last validated progress signal: all four giant CS cache-only probes returned `HIT` with matching deterministic identities after one isolated population sequence.
 Known P1 likely blockers: incorrect color/output interpretation remains P1 and is not a current fix target
-Known P2: cold-start large dispatcher pipeline compilation latency; successful creates are not a hang. Cache persistence/load is proven, but the existing cache still returns `COMPILE_REQUIRED` for the newly stable giant CS identity.
+Known P2: cold-start large dispatcher pipeline compilation latency; successful creates are not a hang. A fresh cache removes this cost on subsequent starts.
 
 ## Shader startup profiling — 2026-09-13
 
@@ -929,3 +929,22 @@ the unstable identity, so warm reuse is not yet proven. Artifacts:
 
 M6 gameplay remains unproven. Do not add pipeline binaries or rerun ASTRO until the next
 runtime/cache decision is made from this stable identity.
+
+## Persistent Vulkan cache reuse — 2026-09-13
+
+The old per-title cache was preserved at `G:/KytyPS5/logs/PIPELINE_CACHE_REUSE_20260913_/historical-old-cache/`
+(SHA-256 `4F75FC651723824AD2BDFAE727A6EE6DE275124A8530B0E2A9C78C2FBC3147CC`). A fresh isolated
+`_PipelineCache/PPSA21567.bin` namespace was populated by the exact `f56a8fb` Release binary.
+The four giant compute pipelines compiled successfully once (`85482`, `114048`, `131535`, and
+`152900 ms`) and the cache persisted at `8726040` bytes.
+
+A second process using that same cache and deterministic state returned `HIT` for all four giant
+hashes (`0x78af8e269b528b5c`, `0x7bd68261b1bdfb68`, `0xf3f4e1671b30c1f4`, and
+`0x530dcd964f29983c`) in 8 seconds wall, before normal pipeline creation. This proves ordinary
+persistent `VkPipelineCache` reuse after the SPIR-V ordering fix; no `VK_KHR_pipeline_binary`
+prototype is justified. The measured lower-bound saving versus the `483.965 s` cold giant compile
+total is `475.965 s` (98.35%).
+
+Artifacts: `G:/KytyPS5/logs/PIPELINE_CACHE_REUSE_20260913_/cache-reuse-report.txt` and the
+cold/warm run directories. M6 gameplay remains unproven; next action is runtime progression with
+this warmed deterministic cache.
