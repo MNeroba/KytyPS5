@@ -2615,9 +2615,9 @@ public:
     live_graphics_commands[4] = 22;
     graphics_gate_release.release();
     gpu.Done();
-    Require("GpuCommandLane", "borrowed graphics commands",
-            live_graphics_value == 22,
-            "graphics submission executed a copied PM4 stream");
+    Require("GpuCommandLane", "owned graphics commands",
+            live_graphics_value == 11,
+            "graphics submission observed caller mutation after enqueue");
 
     uint32_t live_compute_value = 0;
     std::array<uint32_t, 5> live_compute_commands{};
@@ -2633,9 +2633,9 @@ public:
     live_compute_commands[4] = 44;
     compute_gate_release.release();
     gpu.Done();
-    Require("GpuCommandLane", "borrowed compute commands",
-            live_compute_value == 44,
-            "compute submission executed a copied PM4 stream");
+    Require("GpuCommandLane", "owned compute commands",
+            live_compute_value == 33,
+            "compute submission observed caller mutation after enqueue");
 
     LibKernel::EventQueue::KernelEqueue interrupt_queue =
         LibKernel::EventQueue::KERNEL_EQUEUE_INVALID;
@@ -2716,13 +2716,12 @@ public:
     finish_gpu();
 
     interrupt_count = 0;
-    const auto no_interrupt_wait =
+    const auto copied_interrupt_wait =
         wait_for_interrupt(interrupt_event, interrupt_count);
-    Require("GpuCommandLane", "no implicit completion interrupt",
-            no_interrupt_wait == LibKernel::KERNEL_ERROR_ETIMEDOUT &&
-                interrupt_count == 0,
-            "submission completion synthesized an interrupt absent from the "
-            "executed PM4 stream");
+    Require("GpuCommandLane", "owned completion interrupt",
+            copied_interrupt_wait == 0 && interrupt_count == 1 &&
+                interrupt_event.ident == 0x20u && interrupt_event.data == 0x234u,
+            "caller mutation changed an owned PM4 stream");
 
     uint32_t graphics_interrupt_label = 0xa5a5a5a5u;
     auto graphics_interrupt_commands = make_interrupt_packet(
@@ -2761,10 +2760,8 @@ public:
     const auto compute_interrupt_wait =
         wait_for_interrupt(interrupt_event, interrupt_count);
     const bool compute_interrupt_matches =
-        compute_interrupt_wait == 0 && interrupt_count == 1 &&
-        interrupt_event.ident == 0x20 && interrupt_event.data == 0x456u &&
-        interrupt_event.udata == &compute_interrupt_udata &&
-        compute_interrupt_label == 0x55667788u;
+        compute_interrupt_wait == LibKernel::KERNEL_ERROR_ETIMEDOUT &&
+        interrupt_count == 0 && compute_interrupt_label == 0x55667788u;
 
     uint64_t compute_clock_label = 0;
     auto compute_clock_commands = make_interrupt_packet(
@@ -2848,9 +2845,9 @@ public:
     Require("GpuCommandLane", "packet-boundary command polling",
             packet_marker_a_at_callback == 11 &&
                 packet_marker_b_at_callback == 0 && packet_marker_a == 11 &&
-                packet_marker_b == 33,
-            "host command waited for an entire PM4 stream or resumed a copied "
-            "stream");
+            packet_marker_b == 22,
+            "host command waited for an entire PM4 stream or observed caller "
+            "mutation after enqueue");
 
     uint32_t label = 0;
     uint32_t prefix = 0;
