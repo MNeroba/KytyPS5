@@ -8,7 +8,7 @@ This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable
 
 Repository/worktree: G:/KytyPS5/repo
 Branch: astro/materialize-resources
-Repository HEAD for source/test provenance: `2298df0` (`shader: support V_FRACT_F16 and V_CMPX_LT_U16`)
+Repository HEAD for documentation checkpoint: `fa17c7f` (`docs: record indirect command ownership rules`)
 Documentation checkpoint is the current tip; use `git rev-parse HEAD` for its generated commit id.
 Current semantic source HEAD: `2298df0`
 Last ASTRO runtime source HEAD: `807a84daac695593906d2f0f1c7f286baa950614`
