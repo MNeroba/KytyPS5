@@ -1793,6 +1793,25 @@ void TestSwapPcDiagnosticResolver() {
         "S_SWAPPC diagnostic did not reconstruct the descriptor target and return pair");
 }
 
+void TestSwapPcDiagnosticStopsAtTerminalShader() {
+  // The production fb948a435a4e295e stream ends with S_ENDPGM at 0x2dc. Its
+  // preserved post-END dword at 0x370 is 0x881000e0, which decodes as VOP2
+  // V_SUB_F32 with reserved scalar source 0xe0. The diagnostic scanner must
+  // honor the executable terminal boundary before visiting that tail data.
+  std::array<uint32_t, 221> code{};
+  code[0] = 0xbf810000u;   // S_ENDPGM
+  code[220] = 0x881000e0u; // exact preserved post-END dword at pc=0x370
+
+  const ShaderRecompiler::SwapPcDiagnosticOptions options{
+      .shader_hash = 0xfb948a435a4e295eULL,
+      .shader_base = 0,
+      .max_call_sites = 1,
+      .max_callee_words = 1,
+  };
+  const auto records = ShaderRecompiler::ResolveSwapPcDiagnostics(code, options);
+  Check(records.empty(), "diagnostic scanner decoded post-END shader tail data");
+}
+
 void TestNewShaderRecompilerTtmpOperands() {
   // RDNA2 scalar source code 0x73 names TTMP7.  Keep both source and
   // destination forms here because trap temporaries use a separate register
@@ -13100,6 +13119,7 @@ int main() {
   TestNewShaderRecompilerSoppCdbgSys();
   TestDecoderStopsAfterCompletedBackedgeBeforeTailData();
   TestSwapPcDiagnosticResolver();
+  TestSwapPcDiagnosticStopsAtTerminalShader();
   TestNewShaderRecompilerTtmpOperands();
   TestImageAddressOperands();
   TestSopkCompareImmediateExtension();

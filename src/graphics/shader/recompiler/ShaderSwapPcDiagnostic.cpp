@@ -495,6 +495,13 @@ ResolveSwapPcDiagnostics(std::span<const uint32_t> code, const SwapPcDiagnosticO
 		}
 		ApplyInstruction(state, inst, options);
 		word_index += inst.word_count;
+		// The diagnostic walk is intentionally read-only and must follow the same
+		// executable boundary as the production decoder.  Post-END padding and
+		// embedded metadata are not instructions and can contain reserved source
+		// fields that would otherwise make this diagnostic path fail-fast.
+		if (inst.opcode == Opcode::S_ENDPGM) {
+			break;
+		}
 	}
 	return records;
 }
