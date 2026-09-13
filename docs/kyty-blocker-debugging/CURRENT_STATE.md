@@ -712,7 +712,7 @@ command ordinal.
 
 ## Diagnostic provenance fix — 2026-09-13
 
-Commit `191cc73` (`diagnostics: honor shader terminal boundary`) fixes the source-level provenance defect in the opt-in S_SWAPPC resolver. `ResolveSwapPcDiagnostics` now stops after `S_ENDPGM`, matching the executable boundary of `Decoder::DecodeProgram`; it does not alter shader semantics, CFG, or scalar-source decoding.
+Commit `191cc73` (`diagnostics: honor shader terminal boundary`) fixes the source-level provenance defect in the opt-in S_SWAPPC resolver for streams whose `S_ENDPGM` has no pending branch targets. `ResolveSwapPcDiagnostics` now stops after that terminal boundary; production `Decoder::DecodeProgram` can still retain a post-END branch-target path when pending targets exist, as shown by the later MS target capture. It does not alter shader semantics, CFG, or scalar-source decoding.
 
 Artifact: `G:/KytyPS5/logs/PROVENANCE_AUDIT_20260913_/`. The production-derived fixture contains `S_ENDPGM` (`0xbf810000`) and the exact preserved post-END dword `0x881000e0` at `pc=0x370`. Pre-fix `shader_cfg_tests` exited `321` with the same reserved scalar-source error; post-fix exited `0`. `shader_recompiler_compute_tests` exited `0`. Source proof and ownership analysis are in `source-audit.txt`.
 

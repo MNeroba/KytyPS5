@@ -978,9 +978,9 @@ EVIDENCE: `G:/KytyPS5/logs/CS_E0_CLASSIFICATION_20260913_/analysis.txt` and
 
 ### Diagnostic resolver terminal-boundary provenance — PROVEN
 
-FACT: The opt-in `ResolveSwapPcDiagnostics` path used by `ProgramCache::Get` was scanning `params.code` linearly before `TranslateProgram` and called `Decoder::DecodeInstruction` after `S_ENDPGM`. This violated the executable traversal contract and could decode post-END metadata such as production raw `0x881000e0` at `pc=0x370`, causing `DecodeScalarSource(0xe0)` to fail without the current shader's exact span/hash context.
+FACT: The opt-in `ResolveSwapPcDiagnostics` path used by `ProgramCache::Get` was scanning `params.code` linearly before `TranslateProgram` and called `Decoder::DecodeInstruction` after `S_ENDPGM` when no pending branch target remained. This violated the executable traversal contract for terminal streams and could decode post-END metadata such as production raw `0x881000e0` at `pc=0x370`, causing `DecodeScalarSource(0xe0)` to fail without the current shader's exact span/hash context. A later same-hash MS stream proves that production `Decoder::DecodeProgram` may retain a post-END path when pending targets exist, so this fix is not a complete branch-aware traversal contract.
 
-WHY IT MATTERS: A reported decoder PC can be impossible for the stage/hash/code span shown by the normal phase log when a pre-Translate diagnostic path fails first. Do not add support for reserved scalar source `0xe0` or infer a shader identity from that mismatch. Diagnostic scans must stop at terminal shader boundaries.
+WHY IT MATTERS: A reported decoder PC can be impossible for the stage/hash/code span shown by the normal phase log when a pre-Translate diagnostic path fails first. Do not add support for reserved scalar source `0xe0` or infer a shader identity from that mismatch. Diagnostic scans must stop at terminal shader boundaries unless production decoding has a pending branch-target path to retain.
 
 EVIDENCE: `G:/KytyPS5/logs/PROVENANCE_AUDIT_20260913_/source-audit.txt`; fail-before `shader_cfg_tests` exit `321` at `pc=0x370`/`0x881000e0`; pass-after exit `0`; `shader_recompiler_compute_tests` exit `0`.
 
