@@ -105,12 +105,12 @@ struct KernelMemoryPoolBlockStats {
 static_assert(sizeof(KernelMemoryPoolBlockStats) == 16,
               "KernelMemoryPoolBlockStats struct size is incorrect");
 
-void                   RegisterCallbacks(callback_func_t alloc_func, callback_func_t free_func);
-void                   SetFlexibleMemorySize(uint64_t size);
-bool                   TryWriteBacking(uint64_t vaddr, const void* data, uint64_t size);
-bool                   TryReadBacking(uint64_t vaddr, void* data, uint64_t size);
-bool                   TryReadGpuCleanBacking(uint64_t vaddr, void* data, uint64_t size);
-bool                   TryReadPrtBacking(uint64_t vaddr, void* data, uint64_t size);
+void RegisterCallbacks(callback_func_t alloc_func, callback_func_t free_func);
+void SetFlexibleMemorySize(uint64_t size);
+bool TryWriteBacking(uint64_t vaddr, const void* data, uint64_t size);
+bool TryReadBacking(uint64_t vaddr, void* data, uint64_t size);
+bool TryReadGpuCleanBacking(uint64_t vaddr, void* data, uint64_t size, bool synchronize = false);
+bool TryReadPrtBacking(uint64_t vaddr, void* data, uint64_t size);
 [[nodiscard]] uint64_t ClampRangeSize(uint64_t vaddr, uint64_t size);
 void                   WriteBacking(uint64_t vaddr, const void* data, uint64_t size) noexcept;
 void                   InvalidateMemory(uint64_t vaddr, uint64_t size);
