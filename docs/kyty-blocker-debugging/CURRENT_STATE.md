@@ -29,9 +29,9 @@ Title ID: PPSA21567
 Game input: G:/PS5 Games/PPSA21567/extracted
 Current milestone: M5 main menu — reached in the validated title-screen progression run
 Next milestone: M6 gameplay
-Current P0: classify the authentic mesh-stage `Family::SOP1` opcode `0x21` at `pc=0x3da8` for MS `0x2b3be82b8235ac05`; the requested `S_LSHR_B64` path is already implemented as `SOP2` opcode `0x21`, while this raw `0xbe8e210e` is a distinct one-source SOP1 encoding.
-P0 class: shader/recompiler mesh-stage decoder coverage; no `S_LSHR_B64` semantic gap proven
-Last validated progress signal: the exact `b1ef4bf` Release run reached frame 848 at 18 FPS, with `VS 21 / PS 34 / CS 46 / GS 2`; it then completed MS decode (2881 instructions) and failed in CFG BuildGraph on raw `0xbe8e210e`. Offline comparison of local and fetched `origin/main` found the enum, SOP2 decode table, scalar translator, and SPIR-V `ShiftRightLogical64` lowering already present. No device loss or MaterializeResources failure occurred in this run.
+Current P0: classify the dynamic external-call contract at `pc=0x3da8` for MS `0x2b3be82b8235ac05`: production raw `0xbe8e210e` is `S_SWAPPC_B64 s[14:15], s[14:15]`; the exact old target pair is descriptor-derived but numerically unresolved.
+P0 class: shader/recompiler control-flow support for an external dynamic call; no `S_LSHR_B64` semantic gap proven
+Last validated progress signal: offline sequential decode reaches the genuine `S_SWAPPC_B64` boundary with no width ambiguity; both s14 and s15 are last written by `S_BUFFER_LOAD_DWORDX2` at `0x3d74`. The current MS contains no `S_SETPC_B64` return instruction, so the call is strongly classified as external. No source or ASTRO run was performed for this classification.
 Known P1 likely blockers: incorrect color/output interpretation remains P1 and is not a current fix target
 Known P2: cold-start large dispatcher pipeline compilation latency; successful creates are not a hang. Cache persistence/load is proven, but a substantial warm-time reduction is not.
 
@@ -59,7 +59,27 @@ MaterializeResources error, clean-shutdown record, or crash dump was produced. M
 not proven. Do not attribute this boundary to any individual upstream port until an offline
 comparison establishes that connection.
 
-Next action: do not alias SOP1 `0x21` to two-source `S_LSHR_B64` without a source-level encoding contract. The exact raw needs classification as its own SOP1 instruction before any semantic change; no ASTRO run is authorized by this checkpoint.
+Next action: obtain a production-equivalent descriptor/code target snapshot or equivalent dispatch-side resolver proof. Then implement only the narrow generic external-call path; do not alias SOP1 `0x21` to `S_LSHR_B64`, invent local fallthrough, or rerun ASTRO before that proof.
+
+## SOP1 S_SWAPPC call-contract audit — 2026-09-13
+
+Artifact: `G:/KytyPS5/logs/SOP1_CALL_AUDIT_20260913_/analysis.txt` (also appended to
+`SOP1_LSHR_AUDIT_20260913_/analysis.txt`). The preserved raw MS stream is 4164 dwords,
+SHA-256 `A3D856918B88B05D05CFFC079E625D109261920FABBF4C7E5D32E03D7584DF49`.
+
+The bounded window `0x3d30..0x3dac` decodes without continuation/literal ambiguity. The
+last writer of both s14 and s15 before `0x3da8` is the two-dword
+`S_BUFFER_LOAD_DWORDX2 s14, s4, offset=96` at `0x3d74`; the old pair is therefore loaded
+from a descriptor chain rooted at scalar memory `0x0000000f_e0040000`, not a literal.
+The exact 64-bit value and allocation are absent from available same-run artifacts.
+
+**PROVEN:** The instruction contract snapshots old `s[14:15]`, writes `PC+4 = 0x3dac` to
+the overlapping pair, and jumps to the old target. **STRONG EVIDENCE:** the target is an
+external guest code allocation because this MS has no `S_SETPC_B64` return instruction.
+The current CFG only accepts local/in-binary `S_SETPC_B64` targets, so the matching
+architecture is dispatch-side target resolution plus callee splicing, as in KytyPS5 PR #427
+(`a2cafb2f2c4a7fec745caf47e4e230bd0d1b6785`). No source change or runtime run is justified
+until the numeric target and return bytes are captured or otherwise proven.
 
 ## Latest tick coverage and static device-loss correlation — 2026-09-13
 

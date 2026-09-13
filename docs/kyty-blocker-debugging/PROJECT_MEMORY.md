@@ -895,3 +895,40 @@ operand widths), `frontend/decode/ShaderDecoder.cpp` (family selection),
 (`ReadU32Pair`), `ir/opcodes/ValueOpcodes.inc`, and
 `backend/spirv/spirvEmitterAlu*.cpp`; this documentation checkpoint is the
 current repository tip.
+
+### Production S_SWAPPC external-call contract — PROVEN / target value unresolved
+
+FACT (**PROVEN**): In production MS `0x2b3be82b8235ac05`, raw `0xbe8e210e` at
+`pc=0x3da8` is `S_SWAPPC_B64 s[14:15], s[14:15]`. Its semantics require an old-value
+snapshot: the instruction reads the old 64-bit pair as the target, writes `PC+4`
+(`0x3dac`) into the same pair, then jumps to the old target. Any implementation must
+preserve that overlap ordering explicitly.
+
+FACT (**PROVEN**): The bounded stream walk has no width ambiguity. Both s14 and s15 are
+last written by `S_BUFFER_LOAD_DWORDX2 s14, s4, offset=96` at `0x3d74`; no later instruction
+before `0x3da8` writes either register. The load chain is scalar memory
+`0x0000000f_e0040000` -> `S_LOAD_DWORDX4` into s4..s7 -> descriptor payload at `+0x60`.
+The exact old pair, host allocation, and target code bytes are not present in the available
+same-run artifacts, so direct numeric target provenance remains unresolved.
+
+FACT (**STRONG EVIDENCE**): This is an external guest-code call. The current MS contains no
+`S_SETPC_B64` instruction to consume the saved return pair, while the continuation at
+`0x3dac` is exactly the saved-return location. The callee therefore must be outside the
+current MS binary and return through `S_SETPC_B64 s[14:15]` (or equivalent saved-pair form).
+
+WHY IT MATTERS: Local CFG resolution in `ShaderCFG.cpp` accepts only local PC-relative or
+validated in-binary jump-table targets. A dynamic external target cannot be represented as
+an ordinary local CFG edge or fake fallthrough. The semantically appropriate design is
+dispatch-side target resolution and callee-body splicing, matching KytyPS5 PR #427 commit
+`a2cafb2f2c4a7fec745caf47e4e230bd0d1b6785`; no source was ported in this audit.
+
+EVIDENCE: `G:/KytyPS5/logs/SOP1_CALL_AUDIT_20260913_/analysis.txt`,
+`G:/KytyPS5/logs/MS_RAW_CAPTURE_20260912_2240/shaders/original/precompile_ms_2b3be82b8235ac05.bin`
+(SHA-256 `A3D856918B88B05D05CFFC079E625D109261920FABBF4C7E5D32E03D7584DF49`), and the
+bounded decode `G:/KytyPS5/logs/SOP1_CALL_AUDIT_20260913_/decode_full.txt`.
+
+RELATED CODE/COMMIT: `frontend/decode/ScalarAluOps.cpp`,
+`frontend/decode/MemoryOps.cpp`, `frontend/translate/Translate.cpp` (`ReadU32Pair`,
+`WriteU32Pair`), `frontend/translate/Control.cpp`, and `frontend/cfg/ShaderCFG.cpp`
+(`ResolveSetpcTargets`, local-target validation); comparison only:
+`https://github.com/KytyPS5/KytyPS5/commit/a2cafb2f2c4a7fec745caf47e4e230bd0d1b6785`.
