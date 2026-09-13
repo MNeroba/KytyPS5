@@ -2,6 +2,27 @@
 
 Durable, non-chronological facts that are expensive to rediscover. Read `CURRENT_STATE.md` first. Put current milestones, P0, worktree, executable, and next action there; stable mechanisms live in `REFERENCE.md`.
 
+### S_SWAPPC c0/6e divergence — PROVEN PROVENANCE GAP (2026-09-13)
+
+FACT: `c0d46a2` is an ancestor of `6e379ab`. Resolver, splice, decoder, and production pipeline
+files are byte-identical across them; `6e379ab` adds only bounded BDA snapshot code and docs.
+
+WHY IT MATTERS: The c0 runtime artifact does not contain the target MS
+`0x2b3be82b8235ac05` invocation at all (only fused MS `0x4e555b0ebf3b53f8`), so its downstream
+device loss cannot prove that the target site was successfully spliced. The 6e run reaches the
+target with `code_words=4164` and fails CFG at pc `0x3da8`/raw `0xbe8e210e`.
+
+EVIDENCE: `G:/KytyPS5/logs/SWAPPC_RUNTIME_DIVERGENCE_AUDIT_20260913_/comparison.txt`; c0/6e
+provenance and hashes; neither run contains target resolver, handler, or splice records.
+
+FACT: The exact missing datum is the target invocation's production `ResolveIndirectCalls` result,
+handler fetch/return validation, `SpliceIndirectCalls` result, and resulting `compile_code` span
+paired with `params.user_data` and `params.Base()`. Existing opt-in `--shader-swappc-diagnostic`
+is the bounded mechanism; no new ASTRO run or BDA diagnostics are justified now.
+
+RELATED CODE/COMMIT: `pipelineCache.cpp`, `shaderCallTrace.cpp`, `ShaderSwapPcDiagnostic.cpp`,
+commits `c0d46a2` and `6e379ab`.
+
 ### BDA translation diagnostic capture — PROVEN INCOMPLETE (2026-09-13)
 
 FACT: The bounded generic BDA translation snapshot diagnostic is committed as `6e379ab`.

@@ -1,6 +1,6 @@
 # Current KytyPS5 debugging state
 
-Last reconciled: 2026-09-13 18:55 Europe/Riga
+Last reconciled: 2026-09-13 19:10 Europe/Riga
 
 This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable mechanisms live in REFERENCE.md.
 
@@ -47,9 +47,9 @@ Title ID: PPSA21567
 Game input: G:/PS5 Games/PPSA21567/extracted
 Current milestone: M5 main menu — reached in the validated title-screen progression run
 Next milestone: M6 gameplay
-Current P0: reconcile the recurring MS `S_SWAPPC_B64` CFG failure at hash `0x2b3be82b8235ac05`, pc `0x3da8`, raw `0xbe8e210e`; the BDA translation capture did not reach its target dispatch.
-P0 class: deterministic production CFG blocker in the exact `6e379ab` run; no new device-loss or BDA conclusion is drawn.
-Last validated progress signal: the exact `6e379ab` Release run loaded the warmed cache and reached the known MS call site, but exited 321 (`0x141`) during CFG BuildGraph before CS `0x657ad04626bf9d55` and before any fault snapshot.
+Current P0: explain the apparent `c0d46a2`/`6e379ab` S_SWAPPC divergence; the c0 artifact never enters the target MS invocation, while `6e379ab` reaches raw CFG and fails at `0x3da8`.
+P0 class: runtime provenance mismatch; resolver/splice/decoder source semantics are byte-identical across the two commits, and the target user-data/handler/splice result is absent from both runs.
+Last validated progress signal: the exact `6e379ab` Release run loaded the warmed cache and reached the target MS call site, but exited 321 (`0x141`) during CFG BuildGraph before CS `0x657ad04626bf9d55` and before any fault snapshot.
 Known P1 likely blockers: incorrect color/output interpretation remains P1 and is not a current fix target
 Known P2: cold-start large dispatcher pipeline compilation latency; successful creates are not a hang. A fresh cache removes this cost on subsequent starts.
 
@@ -83,6 +83,22 @@ The only unresolved address path is the page-table translation of guest
 `0x00000005034ff4b0`; the snapshot has the page-table buffer identity but not
 entry contents or publication state. Keep the classification at C and do not add
 diagnostics or rerun ASTRO until that datum is specifically required.
+
+## S_SWAPPC c0/6e runtime divergence audit — 2026-09-13
+
+Offline report: `G:/KytyPS5/logs/SWAPPC_RUNTIME_DIVERGENCE_AUDIT_20260913_/comparison.txt`.
+`c0d46a2` is an ancestor of `6e379ab`, and resolver, splice, decoder, and production pipeline
+blobs are byte-identical across those commits. Both runs used the same `--stub-bvh` baseline and
+the same warmed cache payload. The c0 runtime log contains no compilation of target MS
+`0x2b3be82b8235ac05`; it contains only the fused MS `0x4e555b0ebf3b53f8` before its device loss.
+The absence of a CFG failure in c0 therefore does not prove a successful target splice.
+
+The `6e379ab` run explicitly compiled the target with `code_words=4164`, completed decode, and
+failed in CFG at `0x3da8`/`0xbe8e210e`, proving that its compile span remained the raw caller.
+Neither run captured the target invocation's user data, descriptor load, resolver result, handler
+fetch, return validation, or splice result. The exact missing datum is one same-invocation,
+production resolver/splice provenance record; the existing opt-in S_SWAPPC diagnostic can provide
+it. No new ASTRO run or BDA diagnostic expansion is authorized until that evidence is available.
 
 ## External S_SWAPPC runtime validation — 2026-09-13
 
