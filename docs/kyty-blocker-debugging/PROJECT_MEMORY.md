@@ -2,6 +2,29 @@
 
 Durable, non-chronological facts that are expensive to rediscover. Read `CURRENT_STATE.md` first. Put current milestones, P0, worktree, executable, and next action there; stable mechanisms live in `REFERENCE.md`.
 
+### c0d46a2 post-SWAPPC device-loss audit — PROVEN, CLASSIFICATION C
+
+FACT: The exact c0d46a2 Release run reached 40 compute shaders after the S_SWAPPC fix, then
+the host observed `VK_ERROR_DEVICE_LOST (-4)` while waiting for tick 329960 (`known=329959`,
+`current=329984`). The machine became unresponsive and required a forced reboot, confirming a
+real GPU/driver/system hang.
+
+WHY IT MATTERS: The first non-retired tick is a temporal candidate, not a proven causal command.
+No scheduler, resource, shader, or diagnostic semantic change is justified from this run.
+
+EVIDENCE: Same-run report
+`G:/KytyPS5/logs/SWAPPC_EXTERNAL_SPLICE_FIX_20260913_/astro-run/device-loss-c0d46a2-report.txt`.
+Tick 329960 is a complete `DispatchDirect` (guest submit 6256, pipeline
+`0x000000ff6aae46d0`) for CS `0x657ad04626bf9d55` at guest code
+`0x000000050052a400`, groups `4096x1x1`, with 10 live/non-deleted buffer records, 13 image
+records, 18 push dwords, and no explicit range/layout violation. Tick 329959 is proven
+completed and has only submit/last-non-EOP metadata for guest code `0x0000000908e86a00`,
+same-run CS hash `0xa572ee17a880e71c`; its resource, push-data, BDA, and pipeline records are
+absent. `VK_EXT_device_fault` returned 39 type-4 unknown addresses, no vendor records, and
+unknown checkpoint markers.
+
+RELATED CODE/COMMIT: `MasterSemaphore::Wait`, `GpuFaultDiagnostics`, commit `c0d46a2`.
+
 ### External S_SWAPPC call lowering — PROVEN
 
 FACT: The local front end does not decode `S_SWAPPC_B64` as a normal CFG instruction. For a

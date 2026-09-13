@@ -1,6 +1,6 @@
 # Current KytyPS5 debugging state
 
-Last reconciled: 2026-09-13 17:39 Europe/Riga
+Last reconciled: 2026-09-13 18:20 Europe/Riga
 
 This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable mechanisms live in REFERENCE.md.
 
@@ -8,17 +8,17 @@ This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable
 
 Repository/worktree: G:/KytyPS5/repo
 Branch: astro/materialize-resources
-Repository source HEAD for runtime checkpoint: `77d499e94115046661fe8c6d2ff13552399753b0`
-Current semantic source HEAD: `77d499e` (external S_SWAPPC resolution and integration guard)
-Last ASTRO runtime source HEAD: `77d499e` (post-S_SWAPPC progression run)
+Repository source HEAD for runtime checkpoint: `c0d46a29e9e5c17d9607fa7db70b064019c83fa6`
+Current semantic source HEAD: `c0d46a2` (preserve pending branch path during S_SWAPPC splice)
+Last ASTRO runtime source HEAD: `c0d46a2` (post-S_SWAPPC progression run)
 Working tree for this checkpoint: clean after offline device-loss classification update
 Build: Release, CMake/Ninja, clang-cl, clang-lld_link-64
 Executable: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.exe
-Executable SHA-256: `D695A9512E22100611D928B56CAEC4B242F2939F2D0553FEE3C549DF55E45DF9`
-Executable built and copied to install from exact `77d499e`
-Build label: Release rebuild for warm-cache ASTRO progression
-Matching PDB: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.pdb; SHA-256 `A30BBFB3949DCA12545A61AF1FDA1D654AF01A3DCCED7F5F573A42BB9EC97676`
-Binary provenance: current Release executable/PDB rebuilt from `77d499e`; warm per-title cache loaded before progression run
+Executable SHA-256: `95BA32C8011831FAC23AE1FC080B9C43EB86119B6049B4B6A12E81E583C70218`
+Executable built and copied to install from exact `c0d46a2`
+Build label: Release rebuild for S_SWAPPC external-call validation
+Matching PDB: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.pdb; SHA-256 `21FBBBBC5077F51C2840C9E2FBB40ACB410030B7D81C82C2449085F440D084A3`
+Binary provenance: current Release executable/PDB rebuilt from `c0d46a2`; warm per-title cache loaded before progression run
 
 The system-wide CMake install prefix was not used because it requires administrator access.
 
@@ -29,22 +29,22 @@ Title ID: PPSA21567
 Game input: G:/PS5 Games/PPSA21567/extracted
 Current milestone: M5 main menu — reached in the validated title-screen progression run
 Next milestone: M6 gameplay
-Current P0: classify the first post-S_SWAPPC runtime `VK_ERROR_DEVICE_LOST (-4)` boundary in `G:/KytyPS5/logs/ASTRO_SWAPPC_M6_20260913_1725/`.
-P0 class: asynchronous Vulkan device loss after the former production CFG blocker; same-run classification remains C (no concrete command/resource cause proven).
-Last validated progress signal: the exact warm-cache ASTRO run loaded the persisted cache, reached 40 CS shaders and continued beyond MS `0x2b3be82b8235ac05`; `vkDevice.waitSemaphores` then returned `ErrorDeviceLost (-4)`.
+Current P0: classify the c0d46a2 post-S_SWAPPC `VK_ERROR_DEVICE_LOST (-4)` boundary in `G:/KytyPS5/logs/SWAPPC_EXTERNAL_SPLICE_FIX_20260913_/astro-run/`.
+P0 class: real GPU/system hang observed after the former production CFG blocker; same-run classification remains C (no concrete command/resource cause proven).
+Last validated progress signal: the exact c0d46a2 warm-cache ASTRO run loaded the persisted cache, reached 40 CS shaders and continued beyond MS `0x2b3be82b8235ac05`; `vkDevice.waitSemaphores` then returned `ErrorDeviceLost (-4)` for known=329959, first non-retired=329960, current=329984.
 Known P1 likely blockers: incorrect color/output interpretation remains P1 and is not a current fix target
 Known P2: cold-start large dispatcher pipeline compilation latency; successful creates are not a hang. A fresh cache removes this cost on subsequent starts.
 
-The bounded offline audit is recorded in
-`G:/KytyPS5/logs/device_loss_offline_20260913/classification.txt`. It proves
-`known=329975`, first non-retired tick `329976`, and complete snapshots for ticks
-`329976`, `329977`, and `329985`; all captured non-null owners are live with no
-explicit range/layout violation. `VK_EXT_device_fault` returned 35 instruction-pointer-
-unknown addresses with no vendor records, and queue checkpoints were unknown. Static
-BDA/page-table publication and image-transition contracts are internally consistent.
-The precise remaining evidence gap is the push-data values and page-table entries
-actually consumed by CS `0x657ad04626bf9d55` at tick `329976`; no source or runtime
-semantic change is justified until that datum is captured.
+The c0d46a2 bounded audit is recorded in
+`G:/KytyPS5/logs/SWAPPC_EXTERNAL_SPLICE_FIX_20260913_/astro-run/device-loss-c0d46a2-report.txt`.
+It contains a complete tick-329960 `DispatchDirect` snapshot for CS
+`0x657ad04626bf9d55` (4096x1x1), 10 buffer records, 13 image records, 18 push dwords,
+and live/non-deleted resource owners with no explicit range/layout violation. Tick
+329959 is proven completed and has only submit/last-non-EOP metadata (same-run CS
+`0xa572ee17a880e71c`, guest code `0x0000000908e86a00`); its resource/push/BDA snapshot
+is absent. Device fault returned 39 type-4 unknown addresses, no vendor records, and
+unknown checkpoints. Host observation required a forced reboot after a full-system hang,
+but the causal operation remains unproven; no semantic or diagnostic change is justified.
 
 ## External S_SWAPPC runtime validation — 2026-09-13
 
