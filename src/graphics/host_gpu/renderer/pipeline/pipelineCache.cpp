@@ -264,6 +264,11 @@ uint64_t NextShaderReplayInvocationId() {
 	return next_id.fetch_add(1, std::memory_order_relaxed);
 }
 
+uint64_t NextSwapPcDiagnosticInvocationId() {
+	static std::atomic_uint64_t next_id {1};
+	return next_id.fetch_add(1, std::memory_order_relaxed);
+}
+
 // Capture the dynamic compute specialization before resource-plan extraction can terminate the
 // process.  A raw shader binary does not contain these PM4-derived fields, so this marker is the
 // production provenance needed to build an exact replay later.  Keep it opt-in and diagnostic;
@@ -320,19 +325,50 @@ const char* SwapPcWriterName(ShaderRecompiler::SwapPcWriterKind kind) {
 	return "unknown";
 }
 
+struct SwapPcDiagnosticTraceState {
+	static constexpr uint32_t MaxRecords = 512;
+	uint32_t                  records    = 0;
+};
+
+void LogSwapPcDiagnosticDecode(void*                                                 userdata,
+                               const ShaderRecompiler::SwapPcDiagnosticDecodeRecord& record) {
+	auto* state = static_cast<SwapPcDiagnosticTraceState*>(userdata);
+	if (state == nullptr || state->records >= SwapPcDiagnosticTraceState::MaxRecords) {
+		return;
+	}
+	state->records++;
+	LOGF("ShaderSwapPcDiagnosticDecode invocation_id=%" PRIu64
+	     " pc=0x%08x raw=0x%08x remaining_words=%" PRIu64 " span_words=%" PRIu64 "\n",
+	     record.invocation_id, record.pc, record.raw, record.remaining_words, record.span_words);
+	// Preserve the pre-decode marker if the decoder fail-fasts immediately afterwards.
+	Log::Flush();
+}
+
 void LogSwapPcDiagnostics(ShaderType stage, const ShaderParams& params, uint32_t user_data_base,
-                          ShaderGuestReadCache& read_cache) {
+                          ShaderGuestReadCache& read_cache, const char* caller_name) {
 	if (!Config::ShaderSwapPcDiagnosticEnabled()) {
 		return;
 	}
+	const auto invocation_id = NextSwapPcDiagnosticInvocationId();
+	LOGF("ShaderSwapPcDiagnosticInvocation invocation_id=%" PRIu64
+	     " stage=%s guest_shader=0x%016" PRIx64 " shader_hash=0x%016" PRIx64
+	     " code_words=%zu code_bytes=%zu span_base=0x%016" PRIx64 " caller=%s\n",
+	     invocation_id, ShaderStageName(stage), params.Base(), params.hash, params.code.size(),
+	     params.code.size_bytes(), params.Base(), caller_name != nullptr ? caller_name : "unknown");
+	// This header must reach the artifact before any resolver instruction can fail-fast.
+	Log::Flush();
+	SwapPcDiagnosticTraceState                      trace_state;
 	const ShaderRecompiler::SwapPcDiagnosticOptions options {
 	    .shader_hash      = params.hash,
 	    .shader_base      = params.Base(),
+	    .invocation_id    = invocation_id,
 	    .user_data_base   = user_data_base,
 	    .user_data        = params.user_data,
 	    .memory_userdata  = &read_cache,
 	    .read_u32         = ReadShaderGuestMemory,
 	    .find_range       = FindShaderMappedRange,
+	    .decode_callback  = LogSwapPcDiagnosticDecode,
+	    .decode_userdata  = &trace_state,
 	    .max_call_sites   = 16,
 	    .max_callee_words = 64,
 	};
@@ -640,7 +676,15 @@ struct PipelineCache::ProgramCache {
 		// Persist raw bytes before decoding or any later specialization/resource-plan work. A
 		// decoder failure must still leave the exact guest stream available for offline analysis.
 		DumpShaderRawBeforeCompile(ShaderStageName(stage), options.shader_hash, params.code);
-		LogSwapPcDiagnostics(stage, params, options.user_data_base, read_cache);
+		const char* caller_name = nullptr;
+		if constexpr (std::is_same_v<InputInfo, ShaderVertexInputInfo>) {
+			caller_name = "ProgramCache::Get<ShaderVertexInputInfo>";
+		} else if constexpr (std::is_same_v<InputInfo, ShaderPixelInputInfo>) {
+			caller_name = "ProgramCache::Get<ShaderPixelInputInfo>";
+		} else {
+			caller_name = "ProgramCache::Get<ShaderComputeInputInfo>";
+		}
+		LogSwapPcDiagnostics(stage, params, options.user_data_base, read_cache, caller_name);
 		auto translated = ShaderRecompiler::TranslateProgram(params.code, options);
 		LogShaderComputeInputBeforeCompile("pre_resource_plan", options);
 		if (entry == programs.end()) {

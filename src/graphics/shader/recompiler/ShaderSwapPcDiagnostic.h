@@ -11,6 +11,17 @@ using SwapPcReadU32   = bool (*)(void* userdata, uint64_t address, uint32_t* val
 using SwapPcFindRange = bool (*)(void* userdata, uint64_t address, uint64_t* range_base,
                                  uint64_t* range_size);
 
+struct SwapPcDiagnosticDecodeRecord {
+	uint64_t invocation_id   = 0;
+	uint32_t pc              = 0;
+	uint32_t raw             = 0;
+	uint64_t remaining_words = 0;
+	uint64_t span_words      = 0;
+};
+
+using SwapPcDiagnosticDecodeCallback = void (*)(void*                               userdata,
+                                                const SwapPcDiagnosticDecodeRecord& record);
+
 enum class SwapPcWriterKind : uint8_t {
 	Unknown,
 	UserData,
@@ -24,15 +35,18 @@ enum class SwapPcWriterKind : uint8_t {
 };
 
 struct SwapPcDiagnosticOptions {
-	uint64_t                  shader_hash      = 0;
-	uint64_t                  shader_base      = 0;
-	uint32_t                  user_data_base   = 0;
-	std::span<const uint32_t> user_data        = {};
-	void*                     memory_userdata  = nullptr;
-	SwapPcReadU32             read_u32         = nullptr;
-	SwapPcFindRange           find_range       = nullptr;
-	uint32_t                  max_call_sites   = 16;
-	uint32_t                  max_callee_words = 64;
+	uint64_t                       shader_hash      = 0;
+	uint64_t                       shader_base      = 0;
+	uint64_t                       invocation_id    = 0;
+	uint32_t                       user_data_base   = 0;
+	std::span<const uint32_t>      user_data        = {};
+	void*                          memory_userdata  = nullptr;
+	SwapPcReadU32                  read_u32         = nullptr;
+	SwapPcFindRange                find_range       = nullptr;
+	SwapPcDiagnosticDecodeCallback decode_callback  = nullptr;
+	void*                          decode_userdata  = nullptr;
+	uint32_t                       max_call_sites   = 16;
+	uint32_t                       max_callee_words = 64;
 };
 
 struct SwapPcDiagnosticRecord {

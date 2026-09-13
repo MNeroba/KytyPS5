@@ -1812,6 +1812,40 @@ void TestSwapPcDiagnosticStopsAtTerminalShader() {
   Check(records.empty(), "diagnostic scanner decoded post-END shader tail data");
 }
 
+struct SwapPcDiagnosticDecodeCapture {
+  std::vector<ShaderRecompiler::SwapPcDiagnosticDecodeRecord> records;
+};
+
+void CaptureSwapPcDiagnosticDecode(void *userdata,
+                                   const ShaderRecompiler::SwapPcDiagnosticDecodeRecord &record) {
+  if (userdata != nullptr) {
+    static_cast<SwapPcDiagnosticDecodeCapture *>(userdata)->records.push_back(record);
+  }
+}
+
+void TestSwapPcDiagnosticProvenance() {
+  // The callback runs immediately before DecodeInstruction.  Keeping the exact span and
+  // invocation id in the record lets a fail-fast decoder error be correlated with its owner.
+  const std::array<uint32_t, 1> code = {0xbf810000u}; // s_endpgm
+  SwapPcDiagnosticDecodeCapture capture;
+  const ShaderRecompiler::SwapPcDiagnosticOptions options{
+      .shader_hash = 0xfeedbeefULL,
+      .shader_base = 0x0000000900001000ULL,
+      .invocation_id = 37,
+      .decode_callback = CaptureSwapPcDiagnosticDecode,
+      .decode_userdata = &capture,
+      .max_call_sites = 1,
+      .max_callee_words = 1,
+  };
+  const auto records = ShaderRecompiler::ResolveSwapPcDiagnostics(code, options);
+  Check(records.empty() && capture.records.size() == 1,
+        "diagnostic provenance callback did not run before DecodeInstruction");
+  const auto &trace = capture.records.front();
+  Check(trace.invocation_id == 37 && trace.pc == 0 && trace.raw == 0xbf810000u &&
+            trace.remaining_words == 1 && trace.span_words == 1,
+        "diagnostic provenance callback lost invocation or span identity");
+}
+
 void TestNewShaderRecompilerTtmpOperands() {
   // RDNA2 scalar source code 0x73 names TTMP7.  Keep both source and
   // destination forms here because trap temporaries use a separate register
@@ -13120,6 +13154,7 @@ int main() {
   TestDecoderStopsAfterCompletedBackedgeBeforeTailData();
   TestSwapPcDiagnosticResolver();
   TestSwapPcDiagnosticStopsAtTerminalShader();
+  TestSwapPcDiagnosticProvenance();
   TestNewShaderRecompilerTtmpOperands();
   TestImageAddressOperands();
   TestSopkCompareImmediateExtension();

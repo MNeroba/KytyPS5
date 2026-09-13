@@ -338,7 +338,7 @@ void ApplyInstruction(ScalarState& state, const Instruction& inst,
 		}
 		const uint32_t count = inst.opcode == Opcode::S_BUFFER_LOAD_DWORD ? 1u : 2u;
 		const auto     kind =
-            count == 1u ? SwapPcWriterKind::BufferLoad : SwapPcWriterKind::BufferLoadPair;
+		    count == 1u ? SwapPcWriterKind::BufferLoad : SwapPcWriterKind::BufferLoadPair;
 		std::array<uint32_t, 2> values {};
 		if (count > values.size()) {
 			return;
@@ -430,12 +430,12 @@ SwapPcDiagnosticRecord MakeRecord(const ScalarState& state, const Instruction& c
 	record.writer_pair_same = record.source_known && low.writer_pc == high.writer_pc &&
 	                          low.writer_raw == high.writer_raw &&
 	                          low.writer_kind != SwapPcWriterKind::Unknown;
-	record.writer_pc    = low.writer_pc;
-	record.writer_raw   = low.writer_raw;
-	record.writer_kind  = low.writer_kind;
-	record.target_lo    = low.value;
-	record.target_hi    = high.value;
-	record.target_known = record.source_known;
+	record.writer_pc        = low.writer_pc;
+	record.writer_raw       = low.writer_raw;
+	record.writer_kind      = low.writer_kind;
+	record.target_lo        = low.value;
+	record.target_hi        = high.value;
+	record.target_known     = record.source_known;
 	if (record.target_known) {
 		record.target_guest_va = static_cast<uint64_t>(record.target_lo) |
 		                         (static_cast<uint64_t>(record.target_hi) << 32u);
@@ -466,7 +466,7 @@ ResolveSwapPcDiagnostics(std::span<const uint32_t> code, const SwapPcDiagnosticO
 	uint32_t       word_index = 0;
 	uint32_t       steps      = 0;
 	const uint32_t max_steps  = static_cast<uint32_t>(
-        std::min<size_t>(code.size() * 2u, std::numeric_limits<uint32_t>::max()));
+	    std::min<size_t>(code.size() * 2u, std::numeric_limits<uint32_t>::max()));
 	while (word_index < code.size() && steps++ < max_steps) {
 		const uint32_t raw = code[word_index];
 		if (IsSwapPc(raw)) {
@@ -488,6 +488,14 @@ ResolveSwapPcDiagnostics(std::span<const uint32_t> code, const SwapPcDiagnosticO
 			continue;
 		}
 		Instruction inst;
+		if (options.decode_callback != nullptr) {
+			options.decode_callback(options.decode_userdata,
+			                        {.invocation_id = options.invocation_id,
+			                         .pc  = static_cast<uint32_t>(word_index * sizeof(uint32_t)),
+			                         .raw = raw,
+			                         .remaining_words = code.size() - word_index,
+			                         .span_words      = code.size()});
+		}
 		Decoder::DecodeInstruction(code, word_index, inst);
 		if (inst.word_count == 0 || inst.word_count > code.size() - word_index) {
 			word_index++;
