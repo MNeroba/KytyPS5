@@ -418,6 +418,19 @@ void RenderExecutor::DispatchDirect(uint64_t submit_id, CommandBuffer& buffer,
 	                             0,
 	                             0,
 	                             0};
+	// Capture the exact push-constant payload assembled for this dispatch.  The
+	// payload is bounded by the native 32-dword push layout and is diagnostic
+	// state only; CommitBindings emits the same values below.
+	if (program.bindings.UsesPushData()) {
+		const auto start = program.bindings.push_data_start_dword;
+		if (start < bindings.shader_data.size() && start < snapshot.MaxPushDataDwords) {
+			const auto count = std::min<size_t>(snapshot.MaxPushDataDwords - start,
+			                                    bindings.shader_data.size() - start);
+			std::copy_n(bindings.shader_data.begin() + start, count,
+			            snapshot.push_data.begin() + start);
+			snapshot.push_data_count = static_cast<uint32_t>(start + count);
+		}
+	}
 	AppendBindingSnapshots(snapshot, bindings, static_cast<uint32_t>(ShaderType::Compute));
 	buffer.RecordGpuCommandSnapshot(std::move(snapshot));
 	buffer.SetGpuCheckpoint(GpuCheckpointPhase::Before);

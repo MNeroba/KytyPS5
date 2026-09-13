@@ -110,16 +110,20 @@ struct GpuImageSnapshot {
 };
 
 struct GpuCommandSnapshot {
-	uint32_t                       operation_order = 0;
-	uint32_t                       debug_op        = 0;
-	uint64_t                       guest_submit    = 0;
-	uint64_t                       pipeline        = 0;
-	std::array<uint64_t, 2>        shader_hashes {};
-	std::array<uint64_t, 8>        arguments {};
-	std::vector<GpuBufferSnapshot> buffers;
-	std::vector<GpuImageSnapshot>  images;
-	uint32_t                       dropped_buffers = 0;
-	uint32_t                       dropped_images  = 0;
+	static constexpr size_t MaxPushDataDwords = 32;
+
+	uint32_t                                operation_order = 0;
+	uint32_t                                debug_op        = 0;
+	uint64_t                                guest_submit    = 0;
+	uint64_t                                pipeline        = 0;
+	std::array<uint64_t, 2>                 shader_hashes {};
+	std::array<uint64_t, 8>                 arguments {};
+	std::array<uint32_t, MaxPushDataDwords> push_data {};
+	uint32_t                                push_data_count = 0;
+	std::vector<GpuBufferSnapshot>          buffers;
+	std::vector<GpuImageSnapshot>           images;
+	uint32_t                                dropped_buffers = 0;
+	uint32_t                                dropped_images  = 0;
 };
 
 struct GpuCommandSnapshotBatch {

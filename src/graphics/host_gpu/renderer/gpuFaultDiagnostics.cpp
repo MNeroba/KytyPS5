@@ -245,6 +245,15 @@ size_t GpuFaultDiagnostics::DumpCommandSnapshots(uint64_t failing_tick) {
 			     command.arguments[5], command.arguments[6], command.arguments[7],
 			     command.buffers.size(), command.images.size(), command.dropped_buffers,
 			     command.dropped_images);
+			if (command.push_data_count != 0) {
+				LOGF("GPU_COMMAND_PUSH_DATA tick=%" PRIu64 " order=%u count=%u\n", batch.tick,
+				     command.operation_order, command.push_data_count);
+				for (uint32_t i = 0; i < command.push_data_count; ++i) {
+					LOGF("GPU_COMMAND_PUSH_DWORD tick=%" PRIu64
+					     " order=%u index=%u value=0x%08" PRIx32 "\n",
+					     batch.tick, command.operation_order, i, command.push_data[i]);
+				}
+			}
 			for (const auto& resource: command.buffers) {
 				LOGF("GPU_COMMAND_BUFFER tick=%" PRIu64 " order=%u kind=%s stage=%u resource=%u"
 				     " slot=%u:%u vk=0x%016" PRIx64 " guest=0x%016" PRIx64 " host_bda=0x%016" PRIx64
