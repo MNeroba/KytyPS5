@@ -1,6 +1,6 @@
 # Current KytyPS5 debugging state
 
-Last reconciled: 2026-09-13 17:25 Europe/Riga
+Last reconciled: 2026-09-13 17:39 Europe/Riga
 
 This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable mechanisms live in REFERENCE.md.
 
@@ -11,7 +11,7 @@ Branch: astro/materialize-resources
 Repository source HEAD for runtime checkpoint: `77d499e94115046661fe8c6d2ff13552399753b0`
 Current semantic source HEAD: `77d499e` (external S_SWAPPC resolution and integration guard)
 Last ASTRO runtime source HEAD: `77d499e` (post-S_SWAPPC progression run)
-Working tree for this checkpoint: docs-only changes pending
+Working tree for this checkpoint: clean after offline device-loss classification update
 Build: Release, CMake/Ninja, clang-cl, clang-lld_link-64
 Executable: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.exe
 Executable SHA-256: `D695A9512E22100611D928B56CAEC4B242F2939F2D0553FEE3C549DF55E45DF9`
@@ -30,10 +30,21 @@ Game input: G:/PS5 Games/PPSA21567/extracted
 Current milestone: M5 main menu — reached in the validated title-screen progression run
 Next milestone: M6 gameplay
 Current P0: classify the first post-S_SWAPPC runtime `VK_ERROR_DEVICE_LOST (-4)` boundary in `G:/KytyPS5/logs/ASTRO_SWAPPC_M6_20260913_1725/`.
-P0 class: asynchronous Vulkan device loss after the former production CFG blocker; no command/resource cause is proven yet.
+P0 class: asynchronous Vulkan device loss after the former production CFG blocker; same-run classification remains C (no concrete command/resource cause proven).
 Last validated progress signal: the exact warm-cache ASTRO run loaded the persisted cache, reached 40 CS shaders and continued beyond MS `0x2b3be82b8235ac05`; `vkDevice.waitSemaphores` then returned `ErrorDeviceLost (-4)`.
 Known P1 likely blockers: incorrect color/output interpretation remains P1 and is not a current fix target
 Known P2: cold-start large dispatcher pipeline compilation latency; successful creates are not a hang. A fresh cache removes this cost on subsequent starts.
+
+The bounded offline audit is recorded in
+`G:/KytyPS5/logs/device_loss_offline_20260913/classification.txt`. It proves
+`known=329975`, first non-retired tick `329976`, and complete snapshots for ticks
+`329976`, `329977`, and `329985`; all captured non-null owners are live with no
+explicit range/layout violation. `VK_EXT_device_fault` returned 35 instruction-pointer-
+unknown addresses with no vendor records, and queue checkpoints were unknown. Static
+BDA/page-table publication and image-transition contracts are internally consistent.
+The precise remaining evidence gap is the push-data values and page-table entries
+actually consumed by CS `0x657ad04626bf9d55` at tick `329976`; no source or runtime
+semantic change is justified until that datum is captured.
 
 ## External S_SWAPPC runtime validation — 2026-09-13
 

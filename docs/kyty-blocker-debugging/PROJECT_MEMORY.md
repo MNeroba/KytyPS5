@@ -41,6 +41,30 @@ in `77d499e` prevents that regression.
 
 RELATED CODE/COMMIT: `masterSemaphore.cpp`, `gpuFaultDiagnostics.cpp`, `77d499e`.
 
+### Warm-cache post-SWAPPC device-loss audit — PROVEN CLASSIFICATION C
+
+FACT: The exact `77d499e` warm-cache run first observed `VK_ERROR_DEVICE_LOST (-4)`
+while waiting for ticks `329976` and `329999`; `KnownGpuTick=329975`, so `329976` is
+the first definitely non-retired tick and `[329976,329999]` is the bounded interval.
+The retained report contains complete command/resource snapshots for ticks `329976`,
+`329977`, and `329985`; all captured non-null owners are live/non-deleted and no
+explicit range or image-layout violation is recorded. `VK_EXT_device_fault` returned
+35 type-4 instruction-pointer-unknown addresses and no vendor records; checkpoints
+were unknown. Classification is **C: insufficient same-run evidence to attribute a
+specific command/resource defect**.
+
+WHY IT MATTERS: The wait is an asynchronous observation point, and later EOP records
+are not causal proof. Do not change scheduling, resource lifetime, BDA semantics,
+image layouts, or shader semantics from this artifact. The exact missing runtime datum
+is the push-data values plus BDA page-table entries/effective physical addresses read
+by CS `0x657ad04626bf9d55` at tick `329976`, keyed by host tick and command order.
+
+EVIDENCE: `G:/KytyPS5/logs/device_loss_offline_20260913/classification.txt` and
+`G:/KytyPS5/logs/ASTRO_SWAPPC_M6_20260913_1725/runtime.log`.
+
+RELATED CODE/COMMIT: `bufferCache.cpp`, `gpuResourceManager.cpp`,
+`spirvEmitterMemory.cpp`, `renderCompute.cpp`, `descriptors.cpp`, `77d499e`.
+
 ## Environment and baselines
 
 - **PROVEN:** Main repository is `G:/KytyPS5/repo`; the fork is `MNeroba/KytyPS5`. The normal installed executable is `G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.exe`.
