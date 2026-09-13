@@ -1,6 +1,6 @@
 # Current KytyPS5 debugging state
 
-Last reconciled: 2026-09-13 12:45 Europe/Riga
+Last reconciled: 2026-09-13 12:52 Europe/Riga
 
 This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable mechanisms live in REFERENCE.md.
 
@@ -9,16 +9,16 @@ This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable
 Repository/worktree: G:/KytyPS5/repo
 Branch: astro/materialize-resources
 Repository HEAD for documentation checkpoint: current tip; use `git rev-parse HEAD` for the exact commit id.
-Current semantic source HEAD: `191cc73` (`diagnostics: honor shader terminal boundary`)
-Last ASTRO runtime source HEAD: `ed310ed42975cac2ffd1e824b3d4654265bdb280` plus diagnostic working tree; post-fix runtime validation is pending
+Current semantic source HEAD: `53996c0` (`diagnostics: capture swap-pc invocation provenance`)
+Last ASTRO runtime source HEAD: `53996c0` (exact clean Release build)
 Working tree for this checkpoint: clean
 Build: Release, CMake/Ninja, clang-cl, clang-lld_link-64
 Executable: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.exe
-Executable SHA-256: `F97F5DCEA4A3461F8D192A304D615665604055E650B8BACE8CA4F7B191C8951D`
-Executable size: 21,090,304 bytes; built from `ed310ed` with diagnostic working tree
-Build label: `Source build ed310ed-dirty`
-Matching PDB: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.pdb; SHA-256 `D2D761463D595EAFBAF2252A2F4342790AA4256068035D1B396B3134B68D10F0`
-Binary provenance: installed Release executable/PDB used by the latest ASTRO run
+Executable SHA-256: `2B2CE85F1108A561CF2389D469E29B5CDF26F121684398D1E8B399698CBAF846`
+Executable built and copied to install from exact `53996c0`
+Build label: `Source build 53996c0`
+Matching PDB: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.pdb; SHA-256 `89EF9AC7AC482251D0C450EF336797760A876DF6255257934AA18AB04EDD6A3E`
+Binary provenance: installed Release executable/PDB used by the single provenance ASTRO run
 
 The system-wide CMake install prefix was not used because it requires administrator access.
 
@@ -29,9 +29,9 @@ Title ID: PPSA21567
 Game input: G:/PS5 Games/PPSA21567/extracted
 Current milestone: M5 main menu — reached in the validated title-screen progression run
 Next milestone: M6 gameplay
-Current P0: classify the first post-fix `0xe5@pc=0x7c` failure; ownership is proven in the diagnostic resolver, but same-run shader identity/span is missing.
-P0 class: diagnostic traversal provenance (fixed offline); no source-`0xe0` support or S_SWAPPC semantic gap is proven
-Last validated progress signal: offline inspection of the only preserved raw stream containing `pc=0x370` finds `0x881000e0` (`VOP2 V_SUB_F32 v8, src0=0xe0, v0`) after `S_ENDPGM`; that stream is an older hash `0xfb948a435a4e295e` artifact, not the current run's `a572...` 60-dword stream. Current-run provenance remains incomplete.
+Current P0: apply the smallest diagnostic-only fused-front boundary correction for `0xe5@pc=0x7c`; no production decoder/scalar semantics are implicated.
+P0 class: diagnostic traversal continues past reachable `S_SETPC_B64` in an MS/GS-front fused span.
+Last validated progress signal: invocation 29 of the exact `53996c0` run captured stage MS, guest shader `0x00000005007d1700`, hash `0x4e555b0ebf3b53f8`, 56 words, and raw `0x99e758e5` at pc `0x7c`; the preceding `S_SETPC_B64 s6` at pc `0x3c` is the fused-front boundary.
 Known P1 likely blockers: incorrect color/output interpretation remains P1 and is not a current fix target
 Known P2: cold-start large dispatcher pipeline compilation latency; successful creates are not a hang. Cache persistence/load is proven, but a substantial warm-time reduction is not.
 
@@ -726,3 +726,27 @@ The exact Release binary was `f47c496` (EXE SHA-256 `54C4A4BB2919F0D4491AECF6015
 PDB symbolization proves ownership by the diagnostic path: `DbgExitHandler → DecodeScalarSource → DecodeSop2 → DecodeInstruction → ResolveSwapPcDiagnostics → ProgramCache::Get<ShaderVertexInputInfo> → GetGraphicsPrograms → DrawAuto`. This is failure class A, before `TranslateProgram`; it is not a normal production decode failure. The stack identifies a graphics vertex-input template (VS-or-Mesh selection), but the exact selected stage, guest address, shader hash, code_words/span, and raw word at `pc=0x7c` were not logged before the resolver and no raw precompile dump was enabled. The last normal PS hash `0xee4a30dd74f51f5f` is a prior completed invocation and must not be attributed to this error.
 
 No second opcode-specific terminal break, scalar-source table change, CFG change, or S_SWAPPC change is justified. The next discriminating action is a generic pre-resolver invocation provenance/raw capture; only after exact identity/span is available can executable reachability and any second boundary class be classified.
+
+## Diagnostic scalar-source 0xe5 same-run provenance — 2026-09-13
+
+Artifact: `G:/KytyPS5/logs/E5_PROVENANCE_RUNTIME_20260913_/`; exact clean Release source
+HEAD `53996c064b29d5e7cd3ae9e3422205804484dc61`, EXE SHA-256
+`2B2CE85F1108A561CF2389D469E29B5CDF26F121684398D1E8B399698CBAF846`, matching PDB SHA-256
+`89EF9AC7AC482251D0C450EF336797760A876DF6255257934AA18AB04EDD6A3E`. One run used the
+known `--stub-bvh` command with `--shader-swappc-diagnostic true`; process exited `321`
+(`0x141`) at 2026-09-13 09:46:09Z.
+
+Invocation 29 proves the owner: stage `MS`, guest shader `0x00000005007d1700`, hash
+`0x4e555b0ebf3b53f8`, `code_words=56`, `code_bytes=224`, caller
+`ProgramCache::Get<ShaderVertexInputInfo>`. The exact pre-decode record is pc `0x7c`, raw
+`0x99e758e5`, followed by the reserved-source fatal. The raw word is SOP2 opcode `0x33`
+(`S_PACK_LH_B32_B16`), `sdst=103`, `ssrc0=0xe5`, `ssrc1=0x58`.
+
+Offline control-flow classification is B for this diagnostic span. Both sides of
+`S_CBRANCH_EXECZ` at pc `0x8` converge on `S_WAITCNT` at `0x38`; `S_SETPC_B64 s6` at
+`0x3c` is the indirect fused-front boundary. The runtime AGC records the corresponding
+front/back pair near this code, and `DecodeFusedProgram` stops the front at S_SETPC before
+splicing the back shader. The diagnostic resolver currently scans linearly past that boundary
+and reaches embedded tail data at `0x40..0x7c`; `0xe5` is therefore not proven reachable
+production code. No decoder/scalar/CFG semantic change was made. A separate task must add the
+same fused-boundary contract to the opt-in diagnostic walk with an authentic regression.

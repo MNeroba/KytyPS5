@@ -997,3 +997,15 @@ EVIDENCE: `G:/KytyPS5/logs/E5_OWNERSHIP_20260913_/ownership.txt` and `stack-symb
 FACT (**PROVEN**): The same run did not log the failing invocation's selected VS/Mesh stage, guest address, hash, code_words/span, or raw word because `DumpShaderRawBeforeCompile` and any pre-resolver marker were disabled by the launch flags. Exact tail/reachability classification is therefore unresolved and must not be inferred from historical shader files.
 
 RELATED CODE/COMMIT: `pipelineCache.cpp:552-560,640-645`, `ShaderSwapPcDiagnostic.cpp:458-500`, commit `191cc73`.
+
+## Diagnostic fused-front boundary provenance — PROVEN (2026-09-13)
+
+FACT: The first post-`191cc73` `0xe5 @ pc=0x7c` is a diagnostic-only traversal failure in an MS/GS-front fused invocation, not evidence that reserved scalar source `0xe5` is reachable production code.
+WHY IT MATTERS: The opt-in S_SWAPPC scanner must stop at the same front boundary as fused production decoding before any semantic decoder change is considered.
+EVIDENCE: Exact clean `53996c0` run artifact `G:/KytyPS5/logs/E5_PROVENANCE_RUNTIME_20260913_/astro-run/`; invocation 29 header identifies stage MS, guest shader `0x00000005007d1700`, hash `0x4e555b0ebf3b53f8`, 56 words. Raw `0x99e758e5` at pc `0x7c` is SOP2 `S_PACK_LH_B32_B16` with reserved `ssrc0=0xe5`; preceding pc `0x3c` is `S_SETPC_B64 s6`. AGC logs show the same front/back fusion operation, and `ShaderRecompiler.cpp::DecodeFusedProgram` stops at S_SETPC before splicing `back_code`.
+RELATED CODE/COMMIT: `src/graphics/shader/recompiler/ShaderRecompiler.cpp` (`DecodeFusedProgram`); `src/graphics/shader/recompiler/ShaderSwapPcDiagnostic.cpp` (`ResolveSwapPcDiagnostics`); diagnostic provenance commit `53996c0`.
+
+FACT: The bounded same-run decode window is `pc=0x00..0x7c`; both paths from `S_CBRANCH_EXECZ` at `0x08` converge at `S_WAITCNT 0x38`, then terminate the fused front at `S_SETPC_B64 0x3c`. Words after `0x3c` are tail data for this front span; `0xe5` is not a production scalar-source contract.
+WHY IT MATTERS: Do not add scalar-source table entries, fake fallthrough, or production CFG changes for this failure.
+EVIDENCE: `G:/KytyPS5/logs/E5_PROVENANCE_RUNTIME_20260913_/diagnostic-boundary-analysis.txt` lists all captured raw words and boundary reasoning.
+RELATED CODE/COMMIT: `ShaderDecoder.cpp` SOP2 decode; `ShaderRecompiler.cpp` fused front/back handoff.
