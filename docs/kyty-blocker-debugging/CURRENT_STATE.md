@@ -1,6 +1,6 @@
 # Current KytyPS5 debugging state
 
-Last reconciled: 2026-09-13 20:30 Europe/Riga
+Last reconciled: 2026-09-13 21:10 Europe/Riga
 
 This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable mechanisms live in REFERENCE.md.
 
@@ -8,17 +8,16 @@ This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable
 
 Repository/worktree: G:/KytyPS5/repo
 Branch: astro/materialize-resources
-Repository source HEAD for runtime checkpoint: `17859c47bdf1fc0ddda81099f440a90abfe47bba`
-Current source HEAD: `17859c4` (address-binding diagnostic)
-Last ASTRO runtime source HEAD: `17859c4` (address-binding correlation capture)
-Working tree for this checkpoint: clean after the runtime capture (docs update pending)
+Repository source HEAD for runtime checkpoint: `8717f421e4f94546eda3c68cff0daea4038fb6c4`
+Current source HEAD: `8717f42` (opt-in NVIDIA Aftermath capture wiring)
+Last ASTRO runtime source: `ef76a4b-dirty` (pre-commit tree containing the same diagnostic changes)
+Working tree for this checkpoint: clean after source commit (docs update pending)
 Build: Release, CMake/Ninja, clang-cl, clang-lld_link-64
 Executable: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.exe
-Executable SHA-256: `6B66C84AAF50FB5A84D1CCC319FB7849642B6F8749C183FEBAD40D99E722624B`
-Executable built and copied to install from exact `17859c4`
-Build label: Release build for opt-in VK_EXT_device_address_binding_report correlation
-Matching PDB: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.pdb; SHA-256 `6E36AA2A5AA5F9B325E000042CE12DDBC54AFE5DA101050D79B825839198CEFC`
-Binary provenance: current Release executable/PDB rebuilt from `17859c4`; warmed per-title cache loaded before the capture
+Executable SHA-256 (current clean rebuild): `8B38B9711FBC9FC3A1E693F60AB08631190EC8F72E5BA88F050666D5352ADB62`
+Executable/PDB used by the capture (pre-commit diagnostic tree): EXE `144A8890A1793CE6AC0FFFCD7DC4B8CD2A75A3DBB54627C9FD5880D25941F39A`, PDB `387D1B0DC87DE544A6B3EDE2C65D7AB4CA3CBAA15845FA28EADC114DC2D61811`
+Matching PDB (current clean rebuild): G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.pdb; SHA-256 `EB209C46E16568795D102FCD626ADD47C5C1BB0F76876A7FF8833F685B9792E4`
+Binary provenance: post-capture Release rebuild from `8717f42`; warmed per-title cache remains the runtime input
 
 The system-wide CMake install prefix was not used because it requires administrator access.
 
@@ -47,11 +46,28 @@ Title ID: PPSA21567
 Game input: G:/PS5 Games/PPSA21567/extracted
 Current milestone: M5 main menu — reached in the validated title-screen progression run
 Next milestone: M6 gameplay
-Current P0: attribute the recurring device loss beyond the cleared BDA hypothesis; the 41 same-run type-4 fault addresses have no executable-range mapping.
-P0 class: `VK_EXT_device_address_binding_report` exposed no live binding covering the executable/IP cluster and no pipeline-object correlation; the exact limitation is missing GPU executable-address to pipeline/shader-module mapping.
-Last validated progress signal: the exact `17859c4` Release run enabled `VK_EXT_device_address_binding_report`, reached CS `0x657ad04626bf9d55` at `DispatchDirect 4096x1x1`, and then reported `ErrorDeviceLost (-4)` at tick `329990` (`known=329966`, `current=329991`). The fault query returned 41 type-4 IP hints; all 41 had zero binding matches.
+Current P0: implement/validate the generic external-call handling for production `S_SWAPPC_B64` at MS `0x2b3be82b8235ac05`, `pc=0x3da8`, raw `0xbe8e210e`.
+P0 class: production CFG rejects an unresolved external `S_SWAPPC_B64`; the existing diagnostic-only splice path remains separate from production compilation.
+Last validated progress signal: the exact Aftermath-wiring run reached MS `0x2b3be82b8235ac05` after compiling CS `0x657ad04626bf9d55`; CFG failed deterministically at `pc=0x3da8` with process result `321 (0x141)`. No GPU device-loss event occurred in that run.
 Known P1 likely blockers: incorrect color/output interpretation remains P1 and is not a current fix target
 Known P2: cold-start large dispatcher pipeline compilation latency; successful creates are not a hang. A fresh cache removes this cost on subsequent starts.
+
+## NVIDIA Aftermath attribution capture — 2026-09-13
+
+`VK_NV_device_diagnostics_config` and `VK_NV_device_diagnostic_checkpoints` are supported by the
+RTX 3090 and were enabled only through the new opt-in `--nvidia-gpu-crash-diagnostic` path. The
+single warm-cache run is under
+`G:/KytyPS5/logs/AFTERMATH_DIAGNOSTIC_20260913_2200/astro-run/`; exact command and hashes are in
+`launch.txt` and `provenance.txt` (post-commit rebuild provenance is in
+`provenance-postcommit.txt`). Aftermath initialized successfully, but no GPU crash dump or shader
+debug callback was produced because the run stopped first at the deterministic production CFG
+blocker: MS `0x2b3be82b8235ac05`, `pc=0x3da8`, raw `0xbe8e210e`, unsupported SOP1 `0x21`.
+Process result was `321 (0x141)`; M6 and a new device loss were not reached. The vendor attribution
+question is therefore still open and must not be inferred from this run.
+
+Current P0 is the existing generic S_SWAPPC_B64 external-call implementation/CFG boundary. Do not
+expand Aftermath or other GPU diagnostics until that blocker is cleared and a later device-loss
+capture is actually reached.
 
 ## Address-binding IP correlation — 2026-09-13
 

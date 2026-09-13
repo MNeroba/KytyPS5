@@ -2,6 +2,27 @@
 
 Durable, non-chronological facts that are expensive to rediscover. Read `CURRENT_STATE.md` first. Put current milestones, P0, worktree, executable, and next action there; stable mechanisms live in `REFERENCE.md`.
 
+### NVIDIA Aftermath wiring and runtime boundary — PROVEN (2026-09-13)
+
+FACT: The RTX 3090 exposes `VK_NV_device_diagnostics_config` (diagnosticsConfig=true) and
+`VK_NV_device_diagnostic_checkpoints`; the opt-in `--nvidia-gpu-crash-diagnostic` path now enables
+the requested shader debug info, resource tracking, automatic checkpoints, and shader error
+reporting flags and dynamically registers Nsight Aftermath crash/debug callbacks.
+
+WHY IT MATTERS: The wiring is generic and bounded, preserves existing Vulkan object identity, and
+is disabled by default. It does not alter renderer, scheduler, shader, or resource semantics.
+
+EVIDENCE: Focused `shader_cfg_tests`, `shader_recompiler_compute_tests --scheduler-only`, and
+`shader_recompiler_compute_tests --gpu-address-binding-only` passed. Commit `8717f42` contains the
+wiring. The one warm-cache run under
+`G:/KytyPS5/logs/AFTERMATH_DIAGNOSTIC_20260913_2200/astro-run/` logged Aftermath and diagnostics
+config enabled, then stopped first at the deterministic production CFG failure
+`MS 0x2b3be82b8235ac05`, `pc=0x3da8`, raw `0xbe8e210e`, process result `321 (0x141)`. No device
+loss occurred, so no Aftermath dump or vendor shader attribution was produced.
+
+RELATED CODE/COMMIT: `gpuCrashDumpCapture.{h,cpp}`, `vulkanWindow.cpp`, `emulatorConfig.*`,
+`main.cpp`; commit `8717f42`.
+
 ### Address-binding IP correlation — PROVEN LIMITATION, CLASSIFICATION C (2026-09-13)
 
 FACT: A Release run from `17859c4` enabled `VK_EXT_device_address_binding_report` and captured
