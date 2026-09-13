@@ -215,6 +215,13 @@ Vulkan indirect-command calls. GPU-written guest ranges are protected and a CPU 
 downloads dirty bytes and waits for completion before dereference, so `eIndirectCommandRead` is
 not a required Vulkan stage in this execution model.
 
+The dispatch path snapshots both absolute and base-plus-offset indirect arguments through
+`TryReadGpuCleanBacking(..., synchronize=true)` before calling the direct entry point. Submitted
+graphics and compute PM4 spans are owned by `GuestGpu::Submission` until execution completes.
+`IT_INDIRECT_BUFFER` chain control truncates the caller stream (including an empty-chain
+termination), and conditional-IB predicates preserve dword alignment when copying their 64-bit
+value.
+
 ## BVH and fault tracking
 
 `--stub-bvh` provides an always-miss control-flow path for downstream diagnosis. It does not implement node layout, traversal, ray intersection, or address semantics.
