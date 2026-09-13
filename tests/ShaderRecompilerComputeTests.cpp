@@ -28616,6 +28616,47 @@ void CheckPm4WaitResume(RenderContext &renderer) {
       processor.Process(execution, commands) == Pm4ProcessResult::Complete &&
           prefix == 11 && child_observation == 0 && suffix == 22,
       "resumed indirect wait replayed a child or did not finish its parent");
+
+  // A chained indirect buffer replaces the remainder of its caller. The child
+  // executes, while a packet after the chain remains untouched.
+  uint32_t chain_value = 0;
+  uint32_t chain_suffix = 0;
+  std::array<uint32_t, 5> chain_child{};
+  chain_child[0] = KYTY_PM4(5, Pm4::IT_WRITE_DATA, 0);
+  chain_child[1] = 0;
+  chain_child[2] = static_cast<uint32_t>(address(&chain_value));
+  chain_child[3] = static_cast<uint32_t>(address(&chain_value) >> 32u);
+  chain_child[4] = 77;
+  std::array<uint32_t, 9> chain_root{};
+  chain_root[0] = KYTY_PM4(4, Pm4::IT_INDIRECT_BUFFER, 0);
+  chain_root[1] = static_cast<uint32_t>(address(chain_child.data()));
+  chain_root[2] = static_cast<uint32_t>(address(chain_child.data()) >> 32u);
+  chain_root[3] = 0x0f200000u | (1u << 20u) | static_cast<uint32_t>(chain_child.size());
+  chain_root[4] = KYTY_PM4(5, Pm4::IT_WRITE_DATA, 0);
+  chain_root[5] = 0;
+  chain_root[6] = static_cast<uint32_t>(address(&chain_suffix));
+  chain_root[7] = static_cast<uint32_t>(address(&chain_suffix) >> 32u);
+  chain_root[8] = 88;
+  Pm4Execution chain_execution;
+  Require("Pm4WaitResume", "indirect chain",
+          processor.Process(chain_execution, chain_root) == Pm4ProcessResult::Complete &&
+              chain_value == 77 && chain_suffix == 0,
+          "chained indirect buffer resumed the caller after its child");
+
+  std::array<uint32_t, 9> empty_chain{};
+  empty_chain[0] = KYTY_PM4(4, Pm4::IT_INDIRECT_BUFFER, 0);
+  empty_chain[3] = 0x0f200000u | (1u << 20u);
+  empty_chain[4] = KYTY_PM4(5, Pm4::IT_WRITE_DATA, 0);
+  empty_chain[6] = static_cast<uint32_t>(address(&chain_suffix));
+  empty_chain[7] = static_cast<uint32_t>(address(&chain_suffix) >> 32u);
+  empty_chain[8] = 99;
+  chain_suffix = 0;
+  Pm4Execution empty_chain_execution;
+  Require("Pm4WaitResume", "empty indirect chain",
+          processor.Process(empty_chain_execution, empty_chain) ==
+                  Pm4ProcessResult::Complete &&
+              chain_suffix == 0,
+          "empty chained indirect buffer resumed the caller");
   std::printf("[host]    %-32s ok\n", "Pm4WaitResume");
 }
 
