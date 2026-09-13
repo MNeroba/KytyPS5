@@ -1,6 +1,6 @@
 # Current KytyPS5 debugging state
 
-Last reconciled: 2026-09-13 12:20 Europe/Riga
+Last reconciled: 2026-09-13 12:45 Europe/Riga
 
 This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable mechanisms live in REFERENCE.md.
 
@@ -29,7 +29,7 @@ Title ID: PPSA21567
 Game input: G:/PS5 Games/PPSA21567/extracted
 Current milestone: M5 main menu — reached in the validated title-screen progression run
 Next milestone: M6 gameplay
-Current P0: validate the generic diagnostic terminal-boundary fix in one clean Release ASTRO run, then stop at the first trustworthy post-fix runtime blocker.
+Current P0: classify the first post-fix `0xe5@pc=0x7c` failure; ownership is proven in the diagnostic resolver, but same-run shader identity/span is missing.
 P0 class: diagnostic traversal provenance (fixed offline); no source-`0xe0` support or S_SWAPPC semantic gap is proven
 Last validated progress signal: offline inspection of the only preserved raw stream containing `pc=0x370` finds `0x881000e0` (`VOP2 V_SUB_F32 v8, src0=0xe0, v0`) after `S_ENDPGM`; that stream is an older hash `0xfb948a435a4e295e` artifact, not the current run's `a572...` 60-dword stream. Current-run provenance remains incomplete.
 Known P1 likely blockers: incorrect color/output interpretation remains P1 and is not a current fix target
@@ -716,4 +716,13 @@ Commit `191cc73` (`diagnostics: honor shader terminal boundary`) fixes the sourc
 
 Artifact: `G:/KytyPS5/logs/PROVENANCE_AUDIT_20260913_/`. The production-derived fixture contains `S_ENDPGM` (`0xbf810000`) and the exact preserved post-END dword `0x881000e0` at `pc=0x370`. Pre-fix `shader_cfg_tests` exited `321` with the same reserved scalar-source error; post-fix exited `0`. `shader_recompiler_compute_tests` exited `0`. Source proof and ownership analysis are in `source-audit.txt`.
 
-Next action: build/install Release from exact `191cc73`, verify executable/PDB provenance, then perform one ASTRO run with `--stub-bvh --shader-swappc-diagnostic true`; stop at the first trustworthy blocker. Do not add scalar source `0xe0`, reopen S_SWAPPC semantics, or run further diagnostics before that validation.
+The clean Release validation run from `f47c496` is complete; it reached this new failure. Do not rerun ASTRO, add scalar-source support, or reopen S_SWAPPC semantics until invocation provenance is captured.
+## Post-fix scalar-source 0xe5 ownership — 2026-09-13
+
+Artifact: `G:/KytyPS5/logs/E5_OWNERSHIP_20260913_/`; runtime: `G:/KytyPS5/logs/PROVENANCE_AUDIT_20260913_/runtime-validation/astro-run/`.
+
+The exact Release binary was `f47c496` (EXE SHA-256 `54C4A4BB2919F0D4491AECF601585F24A52446A4EDCEFE9DD853DA873E9715AB`, matching PDB SHA-256 `778BEB7F6E10C2D288CFDABCB8D590A51FFA72EFA83C59F1C41607B7036F7EB3`). The run passed the old `pc=0x370`/`src=0xe0` point and completed CS `0x530dcd964f29983c` SPIR-V emission (289489 words). It then exited `321 (0x141)` with `unsupported scalar source operand 0xe5 at pc=0x7c`.
+
+PDB symbolization proves ownership by the diagnostic path: `DbgExitHandler → DecodeScalarSource → DecodeSop2 → DecodeInstruction → ResolveSwapPcDiagnostics → ProgramCache::Get<ShaderVertexInputInfo> → GetGraphicsPrograms → DrawAuto`. This is failure class A, before `TranslateProgram`; it is not a normal production decode failure. The stack identifies a graphics vertex-input template (VS-or-Mesh selection), but the exact selected stage, guest address, shader hash, code_words/span, and raw word at `pc=0x7c` were not logged before the resolver and no raw precompile dump was enabled. The last normal PS hash `0xee4a30dd74f51f5f` is a prior completed invocation and must not be attributed to this error.
+
+No second opcode-specific terminal break, scalar-source table change, CFG change, or S_SWAPPC change is justified. The next discriminating action is a generic pre-resolver invocation provenance/raw capture; only after exact identity/span is available can executable reachability and any second boundary class be classified.

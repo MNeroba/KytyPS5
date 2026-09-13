@@ -985,3 +985,15 @@ WHY IT MATTERS: A reported decoder PC can be impossible for the stage/hash/code 
 EVIDENCE: `G:/KytyPS5/logs/PROVENANCE_AUDIT_20260913_/source-audit.txt`; fail-before `shader_cfg_tests` exit `321` at `pc=0x370`/`0x881000e0`; pass-after exit `0`; `shader_recompiler_compute_tests` exit `0`.
 
 RELATED CODE/COMMIT: `src/graphics/shader/recompiler/ShaderSwapPcDiagnostic.cpp`, `tests/shaderCfgTests.cpp`, commit `191cc73`.
+
+### Post-fix e5 failure ownership — PROVEN diagnostic path, identity unavailable
+
+FACT (**PROVEN**): On the exact `f47c496` Release run, the first post-fix fail-fast was `unsupported scalar source operand 0xe5 at pc=0x7c`. Matching PDB symbolization shows `DecodeScalarSource → DecodeSop2 → DecodeInstruction → ResolveSwapPcDiagnostics → ProgramCache::Get<ShaderVertexInputInfo> → GetGraphicsPrograms → DrawAuto`. The error therefore originates in the opt-in diagnostic resolver before `TranslateProgram`.
+
+WHY IT MATTERS: The prior `e0@0x370` issue is closed, but this new reserved source must not be added or suppressed. The last normal PS phase log is a completed prior invocation; it is not the failing shader identity.
+
+EVIDENCE: `G:/KytyPS5/logs/E5_OWNERSHIP_20260913_/ownership.txt` and `stack-symbolized.txt`; runtime `G:/KytyPS5/logs/PROVENANCE_AUDIT_20260913_/runtime-validation/astro-run/` (`exit=321`, build label `f47c496`).
+
+FACT (**PROVEN**): The same run did not log the failing invocation's selected VS/Mesh stage, guest address, hash, code_words/span, or raw word because `DumpShaderRawBeforeCompile` and any pre-resolver marker were disabled by the launch flags. Exact tail/reachability classification is therefore unresolved and must not be inferred from historical shader files.
+
+RELATED CODE/COMMIT: `pipelineCache.cpp:552-560,640-645`, `ShaderSwapPcDiagnostic.cpp:458-500`, commit `191cc73`.
