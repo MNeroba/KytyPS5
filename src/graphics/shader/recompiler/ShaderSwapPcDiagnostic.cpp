@@ -454,6 +454,41 @@ SwapPcDiagnosticRecord MakeRecord(const ScalarState& state, const Instruction& c
 	return record;
 }
 
+struct DiagnosticWalkState {
+	ScalarState*                         scalar_state = nullptr;
+	const SwapPcDiagnosticOptions*       options      = nullptr;
+	std::vector<SwapPcDiagnosticRecord>* records      = nullptr;
+};
+
+void DiagnosticWalkPre(void* userdata, std::span<const uint32_t> code, uint32_t word_index) {
+	const auto* state = static_cast<const DiagnosticWalkState*>(userdata);
+	if (state == nullptr || state->options == nullptr ||
+	    state->options->decode_callback == nullptr) {
+		return;
+	}
+	state->options->decode_callback(state->options->decode_userdata,
+	                                {.invocation_id = state->options->invocation_id,
+	                                 .pc  = static_cast<uint32_t>(word_index * sizeof(uint32_t)),
+	                                 .raw = code[word_index],
+	                                 .remaining_words = code.size() - word_index,
+	                                 .span_words      = code.size()});
+}
+
+bool DiagnosticWalkPost(void* userdata, const Instruction& instruction) {
+	auto* state = static_cast<DiagnosticWalkState*>(userdata);
+	if (state == nullptr || state->scalar_state == nullptr || state->options == nullptr ||
+	    state->records == nullptr) {
+		return false;
+	}
+	if (IsSwapPc(instruction.raw[0])) {
+		Instruction call = instruction;
+		state->records->push_back(MakeRecord(*state->scalar_state, call, *state->options));
+		return state->records->size() < state->options->max_call_sites;
+	}
+	ApplyInstruction(*state->scalar_state, instruction, *state->options);
+	return true;
+}
+
 } // namespace
 
 std::vector<SwapPcDiagnosticRecord>
@@ -467,6 +502,12 @@ ResolveSwapPcDiagnostics(std::span<const uint32_t> code, const SwapPcDiagnosticO
 	}
 	ScalarState state;
 	InitializeUserData(state, options);
+	if (!options.fused_front) {
+		DiagnosticWalkState walk_state {
+		    .scalar_state = &state, .options = &options, .records = &records};
+		Decoder::WalkProgram(code, DiagnosticWalkPre, DiagnosticWalkPost, &walk_state, false);
+		return records;
+	}
 	uint32_t       word_index = 0;
 	uint32_t       steps      = 0;
 	const uint32_t max_steps  = static_cast<uint32_t>(

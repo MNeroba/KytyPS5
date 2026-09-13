@@ -1905,6 +1905,38 @@ void TestSwapPcDiagnosticFusedFrontBoundary() {
         "S_SWAPPC inside fused executable front was not discovered");
 }
 
+void TestSwapPcDiagnosticFollowsPendingBranchTarget() {
+  // Production MS control-flow shape reduced to a bounded fixture: a
+  // conditional branch discovers a target beyond S_ENDPGM, and the target
+  // contains the production S_SWAPPC encoding.  Words after the second END
+  // model unreachable tail data and must never be decoded.
+  const std::array<uint32_t, 7> code = {
+      EncodeSopp(0x17, 2), // target pc=0x0c remains pending across END at 0x04
+      EncodeSopp(0x01),    // S_ENDPGM (fallthrough retained while target is pending)
+      EncodeSopp(0x00),    // fallthrough instruction before the pending target
+      0xbe8e210eu,         // S_SWAPPC_B64 s[14:15], s[14:15] at pc=0x0c
+      EncodeSopp(0x01),    // terminal instruction on the retained target path
+      0x00000000u,
+      0x99e758e5u,         // unreachable post-END tail data
+  };
+  SwapPcDiagnosticDecodeCapture capture;
+  const ShaderRecompiler::SwapPcDiagnosticOptions options{
+      .shader_hash = 0x2b3be82b8235ac05ULL,
+      .decode_callback = CaptureSwapPcDiagnosticDecode,
+      .decode_userdata = &capture,
+      .max_call_sites = 4,
+      .max_callee_words = 1,
+  };
+  const auto records = ShaderRecompiler::ResolveSwapPcDiagnostics(code, options);
+  Check(records.size() == 1 && records.front().call_pc == 0x0c &&
+            records.front().call_raw == 0xbe8e210eu,
+        "diagnostic walker did not follow a pending target beyond S_ENDPGM");
+  Check(!capture.records.empty() &&
+            std::none_of(capture.records.begin(), capture.records.end(),
+                         [](const auto &record) { return record.pc >= 0x14; }),
+        "diagnostic walker decoded unreachable post-END tail data");
+}
+
 void TestNewShaderRecompilerTtmpOperands() {
   // RDNA2 scalar source code 0x73 names TTMP7.  Keep both source and
   // destination forms here because trap temporaries use a separate register
@@ -13215,6 +13247,7 @@ int main() {
   TestSwapPcDiagnosticStopsAtTerminalShader();
   TestSwapPcDiagnosticProvenance();
   TestSwapPcDiagnosticFusedFrontBoundary();
+  TestSwapPcDiagnosticFollowsPendingBranchTarget();
   TestNewShaderRecompilerTtmpOperands();
   TestImageAddressOperands();
   TestSopkCompareImmediateExtension();

@@ -389,11 +389,8 @@ void DecodeInstruction(std::span<const uint32_t> code, uint32_t word_index, Inst
 	}
 }
 
-void DecodeProgram(std::span<const uint32_t> code, Program& program) {
-	program.instructions.clear();
-	program.instructions.reserve(code.size());
-	program.code = code;
-
+void WalkProgram(std::span<const uint32_t> code, ProgramDecodePreCallback pre_callback,
+                 ProgramDecodePostCallback post_callback, void* userdata, bool require_terminal) {
 	std::vector<bool> branch_targets;
 	uint32_t          pending_targets = 0;
 	bool              saw_endpgm      = false;
@@ -401,10 +398,11 @@ void DecodeProgram(std::span<const uint32_t> code, Program& program) {
 		if (!branch_targets.empty() && branch_targets[word_index] && pending_targets != 0) {
 			pending_targets--;
 		}
-		program.instructions.emplace_back();
-		DecodeInstruction(code, word_index, program.instructions.back());
-
-		const auto& inst = program.instructions.back();
+		if (pre_callback != nullptr) {
+			pre_callback(userdata, code, word_index);
+		}
+		Instruction inst;
+		DecodeInstruction(code, word_index, inst);
 		word_index += inst.word_count;
 
 		if (IsControlFlowBranch(inst.opcode)) {
@@ -418,6 +416,9 @@ void DecodeProgram(std::span<const uint32_t> code, Program& program) {
 				}
 				branch_targets[target_index] = true;
 			}
+		}
+		if (post_callback != nullptr && !post_callback(userdata, inst)) {
+			return;
 		}
 		if (inst.opcode == Opcode::S_ENDPGM) {
 			saw_endpgm = true;
@@ -434,7 +435,21 @@ void DecodeProgram(std::span<const uint32_t> code, Program& program) {
 		}
 	}
 
-	EXIT("shader decode reached the code boundary before S_ENDPGM");
+	if (require_terminal) {
+		EXIT("shader decode reached the code boundary before S_ENDPGM");
+	}
+}
+
+void DecodeProgram(std::span<const uint32_t> code, Program& program) {
+	program.instructions.clear();
+	program.instructions.reserve(code.size());
+	program.code       = code;
+	const auto collect = [](void* userdata, const Instruction& instruction) {
+		auto* output = static_cast<Program*>(userdata);
+		output->instructions.push_back(instruction);
+		return true;
+	};
+	WalkProgram(code, nullptr, collect, &program, true);
 }
 
 std::string OperandToString(const Operand& operand) {

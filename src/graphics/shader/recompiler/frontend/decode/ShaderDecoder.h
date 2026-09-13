@@ -727,11 +727,21 @@ struct Program {
 	std::vector<Instruction>  instructions;
 };
 
+using ProgramDecodePreCallback  = void (*)(void* userdata, std::span<const uint32_t> code,
+                                           uint32_t word_index);
+using ProgramDecodePostCallback = bool (*)(void* userdata, const Instruction& instruction);
+
 // Code spans are trusted to contain complete instructions, valid branch targets, and 32-bit PCs.
 Family GetInstructionFamily(uint32_t word);
 // The output object must be freshly initialized.
 void DecodeInstruction(std::span<const uint32_t> code, uint32_t word_index, Instruction& inst);
 void DecodeProgram(std::span<const uint32_t> code, Program& program);
+// Walk the same branch-aware executable instruction sequence used by DecodeProgram.  The
+// pre-callback runs immediately before DecodeInstruction (so fail-fast provenance is retained);
+// the post-callback may return false to stop after a bounded diagnostic result.
+void WalkProgram(std::span<const uint32_t> code, ProgramDecodePreCallback pre_callback,
+                 ProgramDecodePostCallback post_callback, void* userdata,
+                 bool require_terminal = true);
 
 void DecodeScalarSource(uint32_t code, uint32_t pc, Operand& operand);
 void DecodeScalarDestination(uint32_t code, uint32_t pc, Operand& operand);
