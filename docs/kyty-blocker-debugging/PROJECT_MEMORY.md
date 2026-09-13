@@ -1142,3 +1142,31 @@ FACT: The bounded same-run decode window is `pc=0x00..0x7c`; both paths from `S_
 WHY IT MATTERS: Do not add scalar-source table entries, fake fallthrough, or production CFG changes for this failure.
 EVIDENCE: `G:/KytyPS5/logs/E5_PROVENANCE_RUNTIME_20260913_/diagnostic-boundary-analysis.txt` lists all captured raw words and boundary reasoning.
 RELATED CODE/COMMIT: `ShaderDecoder.cpp` SOP2 decode; `ShaderRecompiler.cpp` fused front/back handoff.
+
+## Vulkan pipeline cache reuse and key stability — PROVEN (2026-09-13)
+
+FACT (**PROVEN**): The active NVIDIA device supports `VK_EXT_pipeline_creation_cache_control`
+(rev 3), `VK_EXT_pipeline_creation_feedback` (rev 1), and `VK_KHR_pipeline_binary` (rev 1),
+with pipeline-cache-control and pipeline-binary features reported enabled.
+
+FACT (**PROVEN**): The existing per-title Vulkan cache loaded a `79,150,623`-byte payload with a
+live cache handle. Ordinary compute pipelines returned `HIT`, `feedback_flags=0x3`, and
+`app_cache_hit=true`, while giant CS `0x78af8e269b528b5c` returned
+`COMPILE_REQUIRED` in two identical cache-probe runs.
+
+FACT (**PROVEN**): For that giant CS, specialization hash
+`0xdf4c4b5ea0432871` and descriptor-layout hash `0xf5863b4aec51aeea` remained stable, but the
+SPIR-V hash changed from `0xf24896587addb349` to `0xd4ab3a5cc5435144`; the full semantic
+fingerprint changed with it.
+
+WHY IT MATTERS: A loaded `VkPipelineCache` does not currently prove warm reuse for the giant
+path. Do not normalize generated SPIR-V, key by shader hash, or add pipeline binaries until the
+generic source of SPIR-V nondeterminism is understood. Keep the profile opt-in.
+
+EVIDENCE: `G:/KytyPS5/logs/VULKAN_PIPELINE_STARTUP_20260913_/cache-probe-run-v3/` through
+`-v7/`, `G:/KytyPS5/logs/VULKAN_PIPELINE_STARTUP_20260913_/cache-probe-analysis.txt`,
+and `G:/KytyPS5/logs/vulkaninfo_full_20260912.log` (extension/features). The giant cold timings
+are in `G:/KytyPS5/logs/SHADER_STARTUP_PERF_20260913_/analysis.txt`.
+
+RELATED CODE/COMMIT: `src/graphics/host_gpu/renderer/pipeline/pipelineCacheFingerprint.h`,
+`pipelineCache.cpp`, `shaders.cpp`, `vulkanWindow.cpp`; commits `1ecf6d6` and `567180f`.

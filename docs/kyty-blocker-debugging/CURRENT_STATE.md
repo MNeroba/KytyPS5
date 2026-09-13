@@ -1,6 +1,6 @@
 # Current KytyPS5 debugging state
 
-Last reconciled: 2026-09-13 14:10 Europe/Riga
+Last reconciled: 2026-09-13 16:05 Europe/Riga
 
 This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable mechanisms live in REFERENCE.md.
 
@@ -9,16 +9,16 @@ This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable
 Repository/worktree: G:/KytyPS5/repo
 Branch: astro/materialize-resources
 Repository HEAD for documentation checkpoint: current tip; use `git rev-parse HEAD` for the exact commit id.
-Current semantic source HEAD: `1459c38` (`diagnostics: serialize device-loss report completion`)
-Last ASTRO runtime source HEAD: `3901b80` (exact clean Release build; before the barrier-only follow-up)
-Working tree for this checkpoint: clean
+Current source HEAD: `567180f` (`test: cover Vulkan pipeline semantic fingerprint`)
+Last ASTRO runtime source HEAD: `60273f3` (profiling/probe runs are diagnostic and stopped before giant normal compilation)
+Working tree for this checkpoint: docs-only changes pending
 Build: Release, CMake/Ninja, clang-cl, clang-lld_link-64
 Executable: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.exe
-Executable SHA-256: `2FF864678DC7160AB097D0E7E32675531C843177F0B53E197F3AE86057B87B55`
-Executable built and copied to install from exact `5804443`
-Build label: `Source build 5804443`
-Matching PDB: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.pdb; SHA-256 `FFC530A963797118C54FE1C8F1CA083E77DEF1EB12495AD30D81052A2A87BBC1`
-Binary provenance: installed Release executable/PDB used by the single S_SWAPPC target-capture retry
+Executable SHA-256: `92321F0F685E92DA282EAE4476AE52E09E09F44872ACC55FECED693D1AFA177F`
+Executable built and copied to install from exact `567180f`
+Build label: verify from the next runtime log; no new ASTRO run in this task
+Matching PDB: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.pdb; SHA-256 `0610FC0DC84BE0AD977CA91E471D8FB7F9BC683DDB0FE85D2127D9CB43E9D6EC`
+Binary provenance: current Release executable/PDB rebuilt from `567180f`; prior probe artifacts predate the commits but contain the same profiling implementation
 
 The system-wide CMake install prefix was not used because it requires administrator access.
 
@@ -29,11 +29,47 @@ Title ID: PPSA21567
 Game input: G:/PS5 Games/PPSA21567/extracted
 Current milestone: M5 main menu — reached in the validated title-screen progression run
 Next milestone: M6 gameplay
-Current P0: validate the report-completion barrier on a future single ASTRO run, then classify the first post-M5 boundary.
-P0 class: tick filtering and duplicate-report interruption are proven reporting defects and fixed; no S_SWAPPC or GPU semantic change is justified until a corrected same-run window is observed.
-Last validated progress signal: focused fail-before/pass-after snapshot and concurrent barrier fixtures emit all retained records after `1459c38`; the one allowed ASTRO run from `3901b80` reached 40 CS / 22 PS / 14 VS / 1 GS, then observed `ErrorDeviceLost (-4)` at ticks 329171/329194 before MS `0x2b3be82b8235ac05` was invoked.
+Current P0: reduce time to the next M6 runtime milestone; the existing Vulkan cache loads but giant compute pipelines still require compilation because generated SPIR-V identity is unstable.
+P0 class: cache-reuse diagnosis is complete; no binary-cache or shader-semantic change is justified until the generic SPIR-V nondeterminism is understood.
+Last validated progress signal: the exact `60273f3` Release run recorded four successful giant CS pipelines: `0x78af...` 87,159 ms, `0x7bd...` 115,314 ms, `0xf3f4...` 132,923 ms, and `0x530d...` 155,779 ms. Each was >98% of total shader-to-ready time; no fatal or device-loss occurred before the profiling stop.
 Known P1 likely blockers: incorrect color/output interpretation remains P1 and is not a current fix target
-Known P2: cold-start large dispatcher pipeline compilation latency; successful creates are not a hang. Cache persistence/load is proven, but a substantial warm-time reduction is not.
+Known P2: cold-start large dispatcher pipeline compilation latency; successful creates are not a hang. Cache persistence/load is proven, but warm reuse is blocked by `COMPILE_REQUIRED` for the giant CS path.
+
+## Shader startup profiling — 2026-09-13
+
+The bounded opt-in profiler is committed as `60273f3` and is disabled by default. Its records cover
+decode, CFG, structurize, translation, resource/SRT tracking, optimization, SPIR-V emission,
+validation, shader-module creation, and Vulkan pipeline creation without changing compile inputs.
+Focused suites and replay validation passed before the runtime run. The deterministic 56-word
+production-derived fixture produced byte-identical SPIR-V with profiling disabled/enabled.
+
+The one allowed profiling run is under `G:/KytyPS5/logs/SHADER_STARTUP_PERF_20260913_/astro-run-v2/`.
+All four known giant CS pipelines completed successfully. The bounded analysis is
+`G:/KytyPS5/logs/SHADER_STARTUP_PERF_20260913_/analysis.txt`; it classifies Vulkan pipeline creation
+as the dominant cost (98.91–99.02% per shader). Do not optimize frontend/CFG/SPIR-V or add async
+compilation from this evidence. The opt-in cache probe below now separates cache reuse from
+SPIR-V identity stability before any persistent pipeline-binary work.
+
+## Vulkan pipeline cache probe — 2026-09-13
+
+The opt-in `--pipeline-cache-profile true` probe is committed in `1ecf6d6`; the semantic
+fingerprint bookkeeping test is committed in `567180f`. Device support is recorded in
+`G:/KytyPS5/logs/vulkaninfo_full_20260912.log`: cache-control rev 3, creation-feedback rev 1,
+and `VK_KHR_pipeline_binary` rev 1 with pipeline binaries enabled.
+
+The existing cache was loaded from `_PipelineCache\\PPSA21567.bin` with a `79,150,623`-byte
+payload (`cache_handle=true`) in `cache-probe-run-v6` and `-v7`. Ordinary compute probes report
+`HIT` with `feedback_flags=0x3` and `app_cache_hit=true`. The first giant CS
+`0x78af8e269b528b5c` reports `COMPILE_REQUIRED` in both runs, so the probe avoided another
+87-second normal compile. Across v6/v7 specialization hash `0xdf4c4b5ea0432871` and layout
+hash `0xf5863b4aec51aeea` are stable, while the SPIR-V hash changes
+(`0xf24896587addb349` → `0xd4ab3a5cc5435144`) and the semantic fingerprint changes. This is
+diagnostic evidence only; no pipeline-binary implementation is justified yet.
+
+Artifacts: `G:/KytyPS5/logs/VULKAN_PIPELINE_STARTUP_20260913_/cache-probe-run-v3/` through
+`-v7/`, `cache-probe-analysis.txt`, and the focused test logs. The probe runs stopped before
+normal giant compilation and make no new M6 claim. Next action is a generic source audit of
+SPIR-V determinism, followed by the narrowest safe cache design.
 
 M1, M2, M3, M4, and M5 are closed/reached. M6 gameplay is not proven. Do not reopen the cleared startup SRT/BDA-lifetime, pipeline-create, submission, visible-frame, bounded resource-remap, scalar-PHI materialization, or TTMP scalar-source conclusions without contradictory evidence.
 
