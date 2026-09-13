@@ -1,6 +1,6 @@
 # Current KytyPS5 debugging state
 
-Last reconciled: 2026-09-13 19:10 Europe/Riga
+Last reconciled: 2026-09-13 19:45 Europe/Riga
 
 This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable mechanisms live in REFERENCE.md.
 
@@ -8,17 +8,17 @@ This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable
 
 Repository/worktree: G:/KytyPS5/repo
 Branch: astro/materialize-resources
-Repository source HEAD for runtime checkpoint: `6e379ab68d4f75f2d7668b20d2914edb724deb88`
-Current source HEAD: `6e379ab` (bounded BDA translation fault snapshot diagnostic)
-Last ASTRO runtime source HEAD: `6e379ab` (BDA diagnostic capture attempt)
-Working tree for this checkpoint: clean after offline device-loss classification update
+Repository source HEAD for runtime checkpoint: `c24f4ba2dd62295b3227391c3f07df4c681cb4f4`
+Current source HEAD: `c24f4ba` (S_SWAPPC runtime provenance documentation checkpoint)
+Last ASTRO runtime source HEAD: `c24f4ba` (S_SWAPPC provenance capture attempt)
+Working tree for this checkpoint: clean after the diagnostic run (docs update pending)
 Build: Release, CMake/Ninja, clang-cl, clang-lld_link-64
 Executable: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.exe
-Executable SHA-256: `0C9ACEDF92BD16B3435263A2A397622CE6DD0A9C3CEA2058EBF166C00EADBFE7`
-Executable built and copied to install from exact `6e379ab`
-Build label: Release rebuild for bounded BDA translation diagnostic capture
-Matching PDB: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.pdb; SHA-256 `457EEB374A4BEEE43D7D533444989E61D3B3CFC709F2B0E20290B2F756039BAA`
-Binary provenance: current Release executable/PDB rebuilt from `6e379ab`; warm per-title cache loaded before capture attempt
+Executable SHA-256: `69A006D1CCA1B5064A5A03482FCF305EA92D6900464B053C27A320FB40B0871D`
+Executable built and copied to install from exact `c24f4ba`
+Build label: Release rebuild for opt-in S_SWAPPC resolver provenance capture
+Matching PDB: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.pdb; SHA-256 `7C9F8BCEDF1DAA66FD4963F20B1A03DF426FDEF70E7B655ABD09698F2E5EEA6D`
+Binary provenance: current Release executable/PDB rebuilt from `c24f4ba`; warmed per-title cache loaded before capture attempt
 
 The system-wide CMake install prefix was not used because it requires administrator access.
 
@@ -47,9 +47,9 @@ Title ID: PPSA21567
 Game input: G:/PS5 Games/PPSA21567/extracted
 Current milestone: M5 main menu — reached in the validated title-screen progression run
 Next milestone: M6 gameplay
-Current P0: explain the apparent `c0d46a2`/`6e379ab` S_SWAPPC divergence; the c0 artifact never enters the target MS invocation, while `6e379ab` reaches raw CFG and fails at `0x3da8`.
-P0 class: runtime provenance mismatch; resolver/splice/decoder source semantics are byte-identical across the two commits, and the target user-data/handler/splice result is absent from both runs.
-Last validated progress signal: the exact `6e379ab` Release run loaded the warmed cache and reached the target MS call site, but exited 321 (`0x141`) during CFG BuildGraph before CS `0x657ad04626bf9d55` and before any fault snapshot.
+Current P0: capture same-invocation S_SWAPPC resolver provenance for MS `0x2b3be82b8235ac05` at `pc=0x3da8`; the diagnostic run terminated earlier at device loss before this invocation.
+P0 class: runtime provenance capture is blocked by an earlier same-run GPU failure; no target reconstruction, handler, return, or splice result is available.
+Last validated progress signal: the exact `c24f4ba` Release run loaded the warmed cache, reached CS `0x657ad04626bf9d55` at `DispatchDirect 4096x1x1`, then observed `ErrorDeviceLost (-4)` at ticks `328388`/`328411` (`known=328387`, `current=328412`) before the target MS invocation.
 Known P1 likely blockers: incorrect color/output interpretation remains P1 and is not a current fix target
 Known P2: cold-start large dispatcher pipeline compilation latency; successful creates are not a hang. A fresh cache removes this cost on subsequent starts.
 
@@ -83,6 +83,21 @@ The only unresolved address path is the page-table translation of guest
 `0x00000005034ff4b0`; the snapshot has the page-table buffer identity but not
 entry contents or publication state. Keep the classification at C and do not add
 diagnostics or rerun ASTRO until that datum is specifically required.
+
+## S_SWAPPC provenance capture — 2026-09-13
+
+The exact `c24f4ba` Release build was installed with the warmed cache and run once using
+`--stub-bvh --shader-swappc-diagnostic true`. Provenance and complete runtime artifacts are in
+`G:/KytyPS5/logs/SWAPPC_PROVENANCE_20260913_1940/astro-run/`; the bounded classification is in
+`capture-report.txt`.
+
+The run produced no diagnostic invocation for target MS `0x2b3be82b8235ac05` (zero matches in
+runtime log or stderr). The only MS diagnostic invocation was fused MS `0x4e555b0ebf3b53f8`.
+The first terminal boundary was `vkDevice.waitSemaphores` returning `ErrorDeviceLost (-4)` at
+ticks `328388` and `328411` (`known=328387`, `current=328412`), process result `321` (`0x141`).
+The retained report identifies tick `328388` as CS `0x657ad04626bf9d55`, `DispatchDirect 4096x1x1`,
+with complete push/BDA/resource and device-fault records. The target resolver path was not reached;
+categories A–E are therefore not applicable, and no source or diagnostic expansion is justified.
 
 ## S_SWAPPC c0/6e runtime divergence audit — 2026-09-13
 

@@ -2,6 +2,24 @@
 
 Durable, non-chronological facts that are expensive to rediscover. Read `CURRENT_STATE.md` first. Put current milestones, P0, worktree, executable, and next action there; stable mechanisms live in `REFERENCE.md`.
 
+### S_SWAPPC provenance capture — PROVEN PREEMPTED BY DEVICE LOSS (2026-09-13)
+
+FACT: The exact `c24f4ba` Release run with `--stub-bvh --shader-swappc-diagnostic true` did not
+invoke target MS `0x2b3be82b8235ac05`; the target hash has zero runtime-log/stderr matches. The
+only MS diagnostic invocation was fused MS `0x4e555b0ebf3b53f8`.
+
+WHY IT MATTERS: Same-invocation user-data, descriptor load, target address, handler fetch, return
+validation, splice result, and final compile span remain unknown. The run terminated first at
+`vkDevice.waitSemaphores` with `VK_ERROR_DEVICE_LOST (-4)` for ticks `328388`/`328411`
+(`known=328387`, `current=328412`), before the target resolver path.
+
+EVIDENCE: `G:/KytyPS5/logs/SWAPPC_PROVENANCE_20260913_1940/astro-run/capture-report.txt`,
+`runtime.log`, and `process-result.txt`. The retained tick-328388 report identifies CS
+`0x657ad04626bf9d55`, `DispatchDirect 4096x1x1`, with complete push/BDA/resource and
+`GPU_DEVICE_FAULT` records.
+
+RELATED CODE/COMMIT: existing opt-in `ShaderSwapPcDiagnostic` path; no source change was made.
+
 ### S_SWAPPC c0/6e divergence — PROVEN PROVENANCE GAP (2026-09-13)
 
 FACT: `c0d46a2` is an ancestor of `6e379ab`. Resolver, splice, decoder, and production pipeline
