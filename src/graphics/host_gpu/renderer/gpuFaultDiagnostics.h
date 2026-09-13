@@ -5,6 +5,7 @@
 
 #include <array>
 #include <atomic>
+#include <condition_variable>
 #include <cstdint>
 #include <deque>
 #include <memory>
@@ -131,7 +132,13 @@ struct GpuFaultDiagnosticsTestAccess;
 
 class GpuFaultDiagnostics {
 public:
-	using Marker                                        = std::unique_ptr<GpuCheckpointMarker>;
+	enum class ReportTestHookStage {
+		OwnerEntered,
+		DuplicateObserved,
+		DuplicateWaiting,
+	};
+	using ReportTestHook = void (*)(void* context, ReportTestHookStage stage);
+	using Marker         = std::unique_ptr<GpuCheckpointMarker>;
 	static constexpr size_t MaxSubmittedSnapshotBatches = 64;
 	static constexpr size_t MaxCommandsPerBuffer        = 128;
 	static constexpr size_t MaxBuffersPerCommand        = 96;
@@ -151,6 +158,12 @@ public:
 	void ReportDeviceLost(const char* source, vk::Result result, uint64_t tick);
 
 private:
+	enum class ReportState {
+		NotStarted,
+		Reporting,
+		Complete,
+	};
+
 	struct SubmittedBatch {
 		uint64_t            tick = 0;
 		std::vector<Marker> markers;
@@ -167,10 +180,13 @@ private:
 
 	GraphicContext*                    m_graphics = nullptr;
 	std::mutex                         m_mutex;
+	std::condition_variable            m_report_complete;
 	std::deque<SubmittedBatch>         m_submitted;
 	std::deque<SubmittedSnapshotBatch> m_snapshot_batches;
 	std::atomic<uint64_t>              m_next_sequence {1};
-	bool                               m_reported = false;
+	ReportState                        m_report_state             = ReportState::NotStarted;
+	ReportTestHook                     m_report_test_hook         = nullptr;
+	void*                              m_report_test_hook_context = nullptr;
 
 	friend struct GpuFaultDiagnosticsTestAccess;
 };

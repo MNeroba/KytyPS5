@@ -148,6 +148,40 @@ struct GpuFaultDiagnosticsTestAccess {
                               uint64_t failing_tick) {
     return diagnostics.DumpCommandSnapshots(failing_tick);
   }
+
+  static void SetReportHook(GpuFaultDiagnostics &diagnostics,
+                            GpuFaultDiagnostics::ReportTestHook hook,
+                            void *context) {
+    std::lock_guard lock(diagnostics.m_mutex);
+    diagnostics.m_report_test_hook = hook;
+    diagnostics.m_report_test_hook_context = context;
+  }
+};
+
+struct ReportBarrierFixture {
+  std::binary_semaphore owner_entered{0};
+  std::binary_semaphore owner_release{0};
+  std::binary_semaphore duplicate_entered{0};
+  std::binary_semaphore duplicate_release{0};
+  std::binary_semaphore duplicate_waiting{0};
+
+  static void Hook(void *opaque,
+                   GpuFaultDiagnostics::ReportTestHookStage stage) {
+    auto &fixture = *static_cast<ReportBarrierFixture *>(opaque);
+    switch (stage) {
+      case GpuFaultDiagnostics::ReportTestHookStage::OwnerEntered:
+        fixture.owner_entered.release();
+        fixture.owner_release.acquire();
+        break;
+      case GpuFaultDiagnostics::ReportTestHookStage::DuplicateObserved:
+        fixture.duplicate_entered.release();
+        fixture.duplicate_release.acquire();
+        break;
+      case GpuFaultDiagnostics::ReportTestHookStage::DuplicateWaiting:
+        fixture.duplicate_waiting.release();
+        break;
+    }
+  }
 };
 
 template <typename Cache>
@@ -2248,6 +2282,70 @@ public:
         diagnostics, failing_tick);
     Require(name, "retained batch records", emitted == 3,
             "snapshot report did not emit every retained batch");
+    std::printf("[host]    %-32s ok\n", name);
+  }
+
+  void CheckGpuFaultReportBarrier() {
+    constexpr const char *name = "GpuFaultReportBarrier";
+    GpuFaultDiagnostics diagnostics(RuntimeContext());
+    constexpr uint64_t failing_tick = 100;
+    for (uint64_t tick = 101; tick <= 103; ++tick) {
+      GpuCommandSnapshotBatch batch{};
+      batch.total_commands = 1;
+      GpuCommandSnapshot command{};
+      command.operation_order = static_cast<uint32_t>(tick - 101);
+      command.debug_op = static_cast<uint32_t>(CommandBufferDebugOp::DispatchDirect);
+      command.guest_submit = 0x6200 + tick;
+      command.pipeline = 0x90000000 + tick;
+      command.shader_hashes[0] = 0x0102030405060708ull;
+      command.arguments = {4096, 1, 1, 65, 0x000000050052a400ull, 0, 0, 0};
+      GpuBufferSnapshot buffer{};
+      buffer.kind = static_cast<uint32_t>(GpuSnapshotBufferKind::ShaderData);
+      buffer.shader_stage = 2;
+      buffer.resource_index = 3;
+      buffer.vk_buffer = 0x10000000 + tick;
+      buffer.guest_address = 0x50000000 + tick * 0x1000;
+      buffer.host_bda = 0x20000000 + tick * 0x1000;
+      buffer.descriptor_range = 0x1000;
+      buffer.allocation_guest = buffer.guest_address;
+      buffer.allocation_size = 0x4000;
+      buffer.allocation_live = true;
+      command.buffers.push_back(buffer);
+      batch.commands.push_back(std::move(command));
+      diagnostics.CommitSubmit(tick, {}, std::move(batch));
+    }
+
+    ReportBarrierFixture barrier;
+    GpuFaultDiagnosticsTestAccess::SetReportHook(
+        diagnostics, &ReportBarrierFixture::Hook, &barrier);
+    std::atomic<bool> owner_returned{false};
+    std::atomic<bool> duplicate_returned{false};
+    std::thread owner([&] {
+      diagnostics.ReportDeviceLost("fixture-owner", vk::Result::eErrorDeviceLost,
+                                   failing_tick);
+      owner_returned = true;
+    });
+    barrier.owner_entered.acquire();
+    std::thread duplicate([&] {
+      diagnostics.ReportDeviceLost("fixture-duplicate", vk::Result::eErrorDeviceLost,
+                                   failing_tick);
+      duplicate_returned = true;
+    });
+    barrier.duplicate_entered.acquire();
+    Require(name, "owner remains active", !owner_returned.load(),
+            "report owner left before the deterministic hold was released");
+    barrier.duplicate_release.release();
+    barrier.duplicate_waiting.acquire();
+    Require(name, "duplicate waits for complete", !duplicate_returned.load(),
+            "duplicate caller passed the reporting barrier early");
+    barrier.owner_release.release();
+    owner.join();
+    duplicate.join();
+    GpuFaultDiagnosticsTestAccess::SetReportHook(diagnostics, nullptr, nullptr);
+    Require(name, "report completion", owner_returned.load() && duplicate_returned.load(),
+            "concurrent report callers did not complete");
+    diagnostics.ReportDeviceLost("fixture-after-complete", vk::Result::eErrorDeviceLost,
+                                 failing_tick);
     std::printf("[host]    %-32s ok\n", name);
   }
 
@@ -28906,6 +29004,16 @@ int main(int argc, char **argv) {
     Log::Initialize();
     VulkanHarness vulkan;
     vulkan.CheckGpuFaultSnapshotReporting();
+    Log::Shutdown();
+    return 0;
+  }
+  if (argc == 2 && std::strcmp(argv[1], "--gpu-fault-report-barrier-only") == 0) {
+    Config::ConfigOptions options;
+    options.printf_direction = Config::OutputDirection::Console;
+    Config::Load(options);
+    Log::Initialize();
+    VulkanHarness vulkan;
+    vulkan.CheckGpuFaultReportBarrier();
     Log::Shutdown();
     return 0;
   }

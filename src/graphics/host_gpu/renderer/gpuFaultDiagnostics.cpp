@@ -282,17 +282,46 @@ void GpuFaultDiagnostics::ReportDeviceLost(const char* source, vk::Result result
 	if (result != vk::Result::eErrorDeviceLost) {
 		return;
 	}
+	ReportTestHook report_test_hook         = nullptr;
+	void*          report_test_hook_context = nullptr;
+	bool           report_owner             = false;
 	{
-		std::lock_guard lock(m_mutex);
-		if (m_reported) {
-			LOGF("GPU_DEVICE_FAULT already_reported source=%s tick=%" PRIu64 "\n", source, tick);
-			return;
+		std::unique_lock lock(m_mutex);
+		if (m_report_state != ReportState::NotStarted) {
+			report_test_hook         = m_report_test_hook;
+			report_test_hook_context = m_report_test_hook_context;
+		} else {
+			m_report_state           = ReportState::Reporting;
+			report_owner             = true;
+			report_test_hook         = m_report_test_hook;
+			report_test_hook_context = m_report_test_hook_context;
 		}
-		m_reported = true;
+	}
+	if (report_test_hook != nullptr) {
+		report_test_hook(report_test_hook_context, report_owner
+		                                               ? ReportTestHookStage::OwnerEntered
+		                                               : ReportTestHookStage::DuplicateObserved);
+	}
+	if (!report_owner) {
+		std::unique_lock lock(m_mutex);
+		if (report_test_hook != nullptr) {
+			lock.unlock();
+			report_test_hook(report_test_hook_context, ReportTestHookStage::DuplicateWaiting);
+			lock.lock();
+		}
+		m_report_complete.wait(lock, [this] { return m_report_state == ReportState::Complete; });
+		LOGF("GPU_DEVICE_FAULT already_reported source=%s tick=%" PRIu64 "\n", source, tick);
+		return;
 	}
 	DumpDeviceFault(source, tick);
 	DumpCheckpoints();
 	static_cast<void>(DumpCommandSnapshots(tick));
+	Log::Flush();
+	{
+		std::lock_guard lock(m_mutex);
+		m_report_state = ReportState::Complete;
+	}
+	m_report_complete.notify_all();
 }
 
 } // namespace Libs::Graphics
