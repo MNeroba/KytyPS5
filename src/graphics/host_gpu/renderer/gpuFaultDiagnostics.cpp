@@ -254,6 +254,26 @@ size_t GpuFaultDiagnostics::DumpCommandSnapshots(uint64_t failing_tick) {
 					     batch.tick, command.operation_order, i, command.push_data[i]);
 				}
 			}
+			for (const auto& translation: command.bda_translations) {
+				const bool within_allocation =
+				    translation.owner_offset <= translation.owner_allocation_size &&
+				    translation.access_range <=
+				        translation.owner_allocation_size - translation.owner_offset;
+				LOGF("GPU_COMMAND_BDA tick=%" PRIu64 " order=%u push_pair=%u guest=0x%016" PRIx64
+				     " page_index=0x%016" PRIx64 " entry=0x%016" PRIx64 " resolved=0x%016" PRIx64
+				     " owner_slot=%u:%u"
+				     " owner_guest=0x%016" PRIx64 " owner_host_bda=0x%016" PRIx64
+				     " owner_size=0x%016" PRIx64 " owner_offset=0x%016" PRIx64
+				     " range=0x%016" PRIx64 " within_allocation=%u published=%u live=%u\n",
+				     batch.tick, command.operation_order, translation.push_pair_index,
+				     translation.guest_address, translation.page_index,
+				     translation.page_table_entry, translation.resolved_host_address,
+				     translation.owner_slot_index, translation.owner_slot_generation,
+				     translation.owner_guest_address, translation.owner_host_bda,
+				     translation.owner_allocation_size, translation.owner_offset,
+				     translation.access_range, within_allocation, translation.mapping_published,
+				     translation.allocation_live);
+			}
 			for (const auto& resource: command.buffers) {
 				LOGF("GPU_COMMAND_BUFFER tick=%" PRIu64 " order=%u kind=%s stage=%u resource=%u"
 				     " slot=%u:%u vk=0x%016" PRIx64 " guest=0x%016" PRIx64 " host_bda=0x%016" PRIx64

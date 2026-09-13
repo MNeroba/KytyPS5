@@ -431,6 +431,45 @@ void RenderExecutor::DispatchDirect(uint64_t submit_id, CommandBuffer& buffer,
 			snapshot.push_data_count = static_cast<uint32_t>(start + count);
 		}
 	}
+	// Preserve the host-side page-table translation for valid guest-address pairs
+	// present in a BDA dispatch's push data.  This is a bounded diagnostic snapshot;
+	// it does not alter descriptor binding or shader execution.
+	if (program.info.uses_dma && snapshot.push_data_count >= 2) {
+		auto& bda_translations = snapshot.bda_translations;
+		for (uint32_t pair = 0; pair + 1 < snapshot.push_data_count; pair += 2) {
+			const uint64_t guest_address =
+			    static_cast<uint64_t>(snapshot.push_data[pair]) |
+			    (static_cast<uint64_t>(snapshot.push_data[pair + 1]) << 32u);
+			if (guest_address == 0 ||
+			    bda_translations.size() == GpuFaultDiagnostics::MaxBdaTranslationsPerCommand) {
+				if (bda_translations.size() == GpuFaultDiagnostics::MaxBdaTranslationsPerCommand) {
+					snapshot.dropped_bda++;
+				}
+				continue;
+			}
+			const auto translation =
+			    m_context.GetBufferCache().DescribeBdaAddress(guest_address, sizeof(uint32_t));
+			if (!translation.has_value()) {
+				continue;
+			}
+			GpuBdaTranslationSnapshot record {};
+			record.push_pair_index       = pair;
+			record.guest_address         = translation->guest_address;
+			record.page_index            = translation->page_index;
+			record.page_table_entry      = translation->page_table_entry;
+			record.resolved_host_address = translation->resolved_host_address;
+			record.owner_slot_index      = translation->owner_id.index;
+			record.owner_slot_generation = translation->owner_id.generation;
+			record.owner_guest_address   = translation->owner_guest_address;
+			record.owner_host_bda        = translation->owner_host_bda;
+			record.owner_allocation_size = translation->owner_allocation_size;
+			record.owner_offset          = translation->owner_offset;
+			record.access_range          = translation->access_range;
+			record.mapping_published     = translation->mapping_published;
+			record.allocation_live       = translation->allocation_live;
+			bda_translations.push_back(record);
+		}
+	}
 	AppendBindingSnapshots(snapshot, bindings, static_cast<uint32_t>(ShaderType::Compute));
 	buffer.RecordGpuCommandSnapshot(std::move(snapshot));
 	buffer.SetGpuCheckpoint(GpuCheckpointPhase::Before);

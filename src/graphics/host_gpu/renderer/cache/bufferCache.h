@@ -12,6 +12,7 @@
 #include "graphics/host_gpu/renderer/cache/streamBuffer.h"
 
 #include <map>
+#include <optional>
 #include <span>
 #include <utility>
 #include <vector>
@@ -28,10 +29,26 @@ inline constexpr BufferId NULL_BUFFER_ID {0};
 
 class BufferCache {
 public:
-	static constexpr uint32_t CACHING_PAGEBITS   = 14;
-	static constexpr uint64_t CACHING_PAGESIZE   = uint64_t {1} << CACHING_PAGEBITS;
-	static constexpr uint64_t CACHING_NUMPAGES   = uint64_t {1} << (40 - CACHING_PAGEBITS);
+	static constexpr uint32_t CACHING_PAGEBITS           = 14;
+	static constexpr uint64_t CACHING_PAGESIZE           = uint64_t {1} << CACHING_PAGEBITS;
+	static constexpr uint64_t CACHING_NUMPAGES           = uint64_t {1} << (40 - CACHING_PAGEBITS);
+	static constexpr uint64_t CACHING_ADDRESS_SPACE_SIZE = uint64_t {1} << 40;
 	static constexpr uint64_t BDA_PAGETABLE_SIZE = CACHING_NUMPAGES * sizeof(vk::DeviceAddress);
+
+	struct BdaAddressInfo {
+		uint64_t          guest_address         = 0;
+		uint64_t          page_index            = 0;
+		vk::DeviceAddress page_table_entry      = 0;
+		vk::DeviceAddress resolved_host_address = 0;
+		BufferId          owner_id {};
+		uint64_t          owner_guest_address   = 0;
+		vk::DeviceAddress owner_host_bda        = 0;
+		uint64_t          owner_allocation_size = 0;
+		uint64_t          owner_offset          = 0;
+		uint64_t          access_range          = 0;
+		bool              mapping_published     = false;
+		bool              allocation_live       = false;
+	};
 
 	BufferCache(GraphicContext& graphics, CommandScheduler& scheduler, PageManager& page_manager,
 	            TextureCache& texture_cache);
@@ -59,6 +76,8 @@ public:
 	[[nodiscard]] const Buffer* GetGdsBuffer() const noexcept { return &m_gds_buffer; }
 	[[nodiscard]] Buffer*       GetBdaPageTableBuffer() noexcept { return &m_bda_pagetable_buffer; }
 	[[nodiscard]] Buffer* GetFaultBuffer() noexcept { return m_fault_manager.GetFaultBuffer(); }
+	[[nodiscard]] std::optional<BdaAddressInfo>
+	DescribeBdaAddress(uint64_t guest_address, uint64_t access_range) const noexcept;
 	[[nodiscard]] std::pair<Buffer*, uint64_t> ObtainBufferForImage(uint64_t vaddr, uint64_t size);
 	void FillBuffer(uint64_t vaddr, uint64_t size, uint32_t value, bool is_gds);
 	void CopyBuffer(uint64_t dst_vaddr, uint64_t src_vaddr, uint64_t size, bool dst_gds,

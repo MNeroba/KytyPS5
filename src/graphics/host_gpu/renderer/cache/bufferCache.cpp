@@ -51,6 +51,46 @@ void BufferCache::InitializeBdaPageTable() {
 	m_bda_pagetable_initialized = true;
 }
 
+std::optional<BufferCache::BdaAddressInfo>
+BufferCache::DescribeBdaAddress(uint64_t guest_address, uint64_t access_range) const noexcept {
+	if (guest_address >= CACHING_ADDRESS_SPACE_SIZE || access_range == 0 ||
+	    access_range > CACHING_ADDRESS_SPACE_SIZE - guest_address) {
+		return std::nullopt;
+	}
+
+	BdaAddressInfo info {};
+	info.guest_address = guest_address;
+	info.page_index    = guest_address >> CACHING_PAGEBITS;
+	info.access_range  = access_range;
+
+	const auto* owner = m_page_table.Find(static_cast<size_t>(info.page_index));
+	if (owner == nullptr || !*owner) {
+		return info;
+	}
+
+	const auto* buffer = m_slot_buffers.try_get(*owner);
+	if (buffer == nullptr) {
+		return info;
+	}
+	const auto page_guest_base  = guest_address & ~(CACHING_PAGESIZE - 1);
+	const auto buffer_guest_end = buffer->CpuAddress() + buffer->Size();
+	if (page_guest_base < buffer->CpuAddress() || page_guest_base >= buffer_guest_end) {
+		return info;
+	}
+
+	info.owner_id              = *owner;
+	info.owner_guest_address   = buffer->CpuAddress();
+	info.owner_host_bda        = buffer->DeviceAddressOrZero();
+	info.owner_allocation_size = buffer->Size();
+	info.owner_offset          = guest_address - buffer->CpuAddress();
+	info.allocation_live       = buffer->Handle() != nullptr && !buffer->is_deleted;
+	const auto page_offset     = page_guest_base - buffer->CpuAddress();
+	info.page_table_entry      = info.owner_host_bda + page_offset;
+	info.resolved_host_address = info.page_table_entry + (guest_address & (CACHING_PAGESIZE - 1));
+	info.mapping_published     = m_bda_pagetable_initialized && info.page_table_entry != 0;
+	return info;
+}
+
 struct BufferCache::DownloadCopy {
 	Buffer*  buffer        = nullptr;
 	uint64_t source_offset = 0;

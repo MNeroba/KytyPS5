@@ -109,6 +109,26 @@ struct GpuImageSnapshot {
 	bool                    retired         = false;
 };
 
+// A bounded, host-side description of a guest address considered by a BDA-capable
+// dispatch.  This is diagnostic state only; it does not participate in descriptor
+// binding or shader execution.
+struct GpuBdaTranslationSnapshot {
+	uint32_t push_pair_index       = 0;
+	uint64_t guest_address         = 0;
+	uint64_t page_index            = 0;
+	uint64_t page_table_entry      = 0;
+	uint64_t resolved_host_address = 0;
+	uint32_t owner_slot_index      = UINT32_MAX;
+	uint32_t owner_slot_generation = 0;
+	uint64_t owner_guest_address   = 0;
+	uint64_t owner_host_bda        = 0;
+	uint64_t owner_allocation_size = 0;
+	uint64_t owner_offset          = 0;
+	uint64_t access_range          = 0;
+	bool     mapping_published     = false;
+	bool     allocation_live       = false;
+};
+
 struct GpuCommandSnapshot {
 	static constexpr size_t MaxPushDataDwords = 32;
 
@@ -122,8 +142,10 @@ struct GpuCommandSnapshot {
 	uint32_t                                push_data_count = 0;
 	std::vector<GpuBufferSnapshot>          buffers;
 	std::vector<GpuImageSnapshot>           images;
+	std::vector<GpuBdaTranslationSnapshot>  bda_translations;
 	uint32_t                                dropped_buffers = 0;
 	uint32_t                                dropped_images  = 0;
+	uint32_t                                dropped_bda     = 0;
 };
 
 struct GpuCommandSnapshotBatch {
@@ -143,10 +165,11 @@ public:
 	};
 	using ReportTestHook = void (*)(void* context, ReportTestHookStage stage);
 	using Marker         = std::unique_ptr<GpuCheckpointMarker>;
-	static constexpr size_t MaxSubmittedSnapshotBatches = 64;
-	static constexpr size_t MaxCommandsPerBuffer        = 128;
-	static constexpr size_t MaxBuffersPerCommand        = 96;
-	static constexpr size_t MaxImagesPerCommand         = 96;
+	static constexpr size_t MaxSubmittedSnapshotBatches  = 64;
+	static constexpr size_t MaxCommandsPerBuffer         = 128;
+	static constexpr size_t MaxBuffersPerCommand         = 96;
+	static constexpr size_t MaxImagesPerCommand          = 96;
+	static constexpr size_t MaxBdaTranslationsPerCommand = 32;
 
 	explicit GpuFaultDiagnostics(GraphicContext& graphics): m_graphics(&graphics) {}
 	~GpuFaultDiagnostics() = default;
