@@ -1,6 +1,6 @@
 # Current KytyPS5 debugging state
 
-Last reconciled: 2026-09-13 18:20 Europe/Riga
+Last reconciled: 2026-09-13 18:45 Europe/Riga
 
 This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable mechanisms live in REFERENCE.md.
 
@@ -29,7 +29,7 @@ Title ID: PPSA21567
 Game input: G:/PS5 Games/PPSA21567/extracted
 Current milestone: M5 main menu — reached in the validated title-screen progression run
 Next milestone: M6 gameplay
-Current P0: classify the c0d46a2 post-S_SWAPPC `VK_ERROR_DEVICE_LOST (-4)` boundary in `G:/KytyPS5/logs/SWAPPC_EXTERNAL_SPLICE_FIX_20260913_/astro-run/`.
+Current P0: keep the c0d46a2 post-S_SWAPPC `VK_ERROR_DEVICE_LOST (-4)` boundary classified as C; the one missing causal datum is the tick-329960 BDA page-table entry for guest page `0x140d3f`.
 P0 class: real GPU/system hang observed after the former production CFG blocker; same-run classification remains C (no concrete command/resource cause proven).
 Last validated progress signal: the exact c0d46a2 warm-cache ASTRO run loaded the persisted cache, reached 40 CS shaders and continued beyond MS `0x2b3be82b8235ac05`; `vkDevice.waitSemaphores` then returned `ErrorDeviceLost (-4)` for known=329959, first non-retired=329960, current=329984.
 Known P1 likely blockers: incorrect color/output interpretation remains P1 and is not a current fix target
@@ -45,6 +45,26 @@ and live/non-deleted resource owners with no explicit range/layout violation. Ti
 is absent. Device fault returned 39 type-4 unknown addresses, no vendor records, and
 unknown checkpoints. Host observation required a forced reboot after a full-system hang,
 but the causal operation remains unproven; no semantic or diagnostic change is justified.
+
+## Target CS BDA/SPIR-V audit — 2026-09-13
+
+The bounded offline audit is recorded in
+`G:/KytyPS5/logs/DEVICE_LOSS_AUDIT_C0D46A2_20260913_1825/offline-audit.txt`.
+The c0d46a2 snapshot identifies a `DispatchDirect 4096x1x1` for CS
+`0x657ad04626bf9d55` (guest code `0x000000050052a400`, pipeline
+`0x000000ff6aae46d0`) with 18 push dwords, 10 buffers, and 13 images. The seven
+normal buffer allocations are live and allocation-bounded; non-null images are
+live and no explicit image layout/extent contradiction is recorded. The replay
+module comparison has 124012 words, four guarded physical-address loads, two
+image atomics with barriers, two bounds-guarded image stores, and four loops with
+explicit `+1` counters and subgroup termination tests. No concrete stale/range/
+layout defect or statically provable non-termination is established.
+
+The only unresolved address path is the page-table translation of guest
+`0x5034ff4d0`/`0x5034ff4d4` (page index `0x140d3f`) derived from push
+`0x00000005034ff4b0`; the snapshot has the page-table buffer identity but not
+entry contents or publication state. Keep the classification at C and do not add
+diagnostics or rerun ASTRO until that datum is specifically required.
 
 ## External S_SWAPPC runtime validation — 2026-09-13
 

@@ -25,6 +25,45 @@ unknown checkpoint markers.
 
 RELATED CODE/COMMIT: `MasterSemaphore::Wait`, `GpuFaultDiagnostics`, commit `c0d46a2`.
 
+### c0d46a2 target CS BDA/SPIR-V audit — PROVEN, CLASSIFICATION C
+
+FACT: The same-run tick-329960 snapshot is a `DispatchDirect 4096x1x1` for CS
+`0x657ad04626bf9d55` (guest code `0x000000050052a400`, pipeline
+`0x000000ff6aae46d0`) with 18 push dwords, 10 buffers, and 13 images. The seven
+normal buffer records are live/non-deleted and each subrange is within its recorded
+allocation. Non-null image owners are live; no explicit image extent/layout
+contradiction is present.
+
+FACT: The matching production replay module has `LocalSize 32x1x1`, 124012 words,
+`PhysicalStorageBuffer64`, four guarded page-table-mediated physical loads, two
+`OpAtomicIAdd` image operations followed by barriers, two bounds-guarded image
+writes, and four loops whose counters increment by one and exit through explicit
+bound/subgroup tests. No statically provable unbounded loop or unguarded null BDA
+conversion was found.
+
+WHY IT MATTERS: The physical path derives guest addresses
+`0x5034ff4d0`/`0x5034ff4d4` from push pair `0x00000005034ff4b0`, using 16 KiB page
+index `0x140d3f`; the descriptor subrange for buffer resource 0 ends at
+`0x5034ff2e0`, but the containing allocation remains large enough. A descriptor
+range mismatch alone is not proof of a BDA fault because the page-table mapping
+controls these physical accesses.
+
+EVIDENCE: `G:/KytyPS5/logs/DEVICE_LOSS_AUDIT_C0D46A2_20260913_1825/offline-audit.txt`,
+same-run snapshot in `G:/KytyPS5/logs/SWAPPC_EXTERNAL_SPLICE_FIX_20260913_/astro-run/runtime.log`,
+and the production replay SPIR-V/hash recorded by the audit. The c0 snapshot does
+not contain `bda_pagetable[0x140d3f]`, its mapped host base, publication/lifetime
+state, or binding source IDs.
+
+CLASSIFICATION: C — insufficient same-run evidence to attribute device loss to a
+specific command/resource or shader defect. The one precise missing runtime datum
+is the tick-329960 page-table entry at index `0x140d3f`, including mapped host base
+and publication/lifetime state. Do not transfer addresses/resources from other
+runs or add diagnostics until that datum is specifically required.
+
+RELATED CODE/COMMIT: generated `get_bda_pointer` helper in the target SPIR-V;
+`bufferCache.cpp`, `gpuResourceManager.cpp`, `spirvEmitterMemory.cpp`, `77d499e`,
+`c0d46a2`.
+
 ### External S_SWAPPC call lowering — PROVEN
 
 FACT: The local front end does not decode `S_SWAPPC_B64` as a normal CFG instruction. For a
