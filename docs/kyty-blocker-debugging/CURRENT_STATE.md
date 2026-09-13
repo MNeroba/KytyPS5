@@ -1,6 +1,6 @@
 # Current KytyPS5 debugging state
 
-Last reconciled: 2026-09-13 22:46 Europe/Riga
+Last reconciled: 2026-09-13 22:50 Europe/Riga
 
 This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable mechanisms live in REFERENCE.md.
 
@@ -9,7 +9,7 @@ This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable
 Repository/worktree: G:/KytyPS5/repo
 Branch: astro/materialize-resources
 Repository source HEAD for runtime checkpoint: `ea0512353e4598cd123469da480076b5a16019fd`
-Current source HEAD: `fa335cb` (AGC/PRT ownership audit documentation; semantic runtime source is `8717f42`)
+Current source HEAD: `12128e2` (AGC fixed-address provenance audit documentation; semantic runtime source is `8717f42`)
 Last ASTRO runtime source: `8717f42`
 Working tree for this checkpoint: clean after the documentation checkpoint
 Build: Release, CMake/Ninja, clang-cl, clang-lld_link-64
