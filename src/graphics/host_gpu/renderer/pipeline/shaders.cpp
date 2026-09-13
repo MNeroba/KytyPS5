@@ -50,6 +50,45 @@ static void LogShaderCompilePipelineProfile(const char* stage, uint64_t shader_h
 	     profile.total_ms + pipeline_ms, profile.spirv_words);
 }
 
+static void LogPipelineCacheProfile(const char* stage, uint64_t shader_hash, uint64_t fingerprint,
+                                    uint64_t spirv_hash, uint64_t specialization_hash,
+                                    uint64_t layout_hash, bool cache_present,
+                                    const char* probe_result, vk::Result probe_vk_result,
+                                    vk::PipelineCreationFeedbackFlags feedback_flags,
+                                    uint64_t feedback_duration, vk::Result pipeline_result) {
+	if (!Config::PipelineCacheProfileEnabled()) {
+		return;
+	}
+	const auto feedback_mask =
+	    static_cast<vk::PipelineCreationFeedbackFlags::MaskType>(feedback_flags);
+	LOGF("PipelineCacheProfile stage=%s shader_hash=0x%016" PRIx64 " fingerprint=0x%016" PRIx64
+	     " spirv_hash=0x%016" PRIx64 " specialization_hash=0x%016" PRIx64
+	     " layout_hash=0x%016" PRIx64 " cache_handle=%s probe=%s probe_vk=%s"
+	     " feedback_flags=0x%08" PRIx32 " app_cache_hit=%s feedback_duration_ns=%" PRIu64
+	     " pipeline_result=%s\n",
+	     stage, shader_hash, fingerprint, spirv_hash, specialization_hash, layout_hash,
+	     cache_present ? "present" : "absent", probe_result, vk::to_string(probe_vk_result).c_str(),
+	     static_cast<uint32_t>(feedback_mask),
+	     (feedback_flags & vk::PipelineCreationFeedbackFlagBits::eApplicationPipelineCacheHit)
+	         ? "true"
+	         : "false",
+	     feedback_duration, vk::to_string(pipeline_result).c_str());
+}
+
+static void LogPipelineCacheProbe(uint64_t shader_hash, uint64_t fingerprint, uint64_t spirv_hash,
+                                  uint64_t specialization_hash, uint64_t layout_hash,
+                                  bool cache_present, const char* result, vk::Result vk_result) {
+	if (!Config::PipelineCacheProfileEnabled()) {
+		return;
+	}
+	LOGF("PipelineCacheProbe stage=CS shader_hash=0x%016" PRIx64 " fingerprint=0x%016" PRIx64
+	     " spirv_hash=0x%016" PRIx64 " specialization_hash=0x%016" PRIx64
+	     " layout_hash=0x%016" PRIx64 " cache_handle=%s result=%s vk_result=%s\n",
+	     shader_hash, fingerprint, spirv_hash, specialization_hash, layout_hash,
+	     cache_present ? "present" : "absent", result, vk::to_string(vk_result).c_str());
+	Log::Flush();
+}
+
 // IDK: maybe we can remove it?
 constexpr uint8_t kTemporaryVertexAttribFormat113 =
     static_cast<uint8_t>(Prospero::VertexAttribFormat::k16_16SInt);
@@ -899,6 +938,15 @@ void CreatePipelineInternal(GraphicContext& graphics, PipelineCache::Pipeline& p
 	info.flags             = Config::ShaderDebugDisableOptimization()
 	                             ? vk::PipelineCreateFlagBits::eDisableOptimization
 	                             : vk::PipelineCreateFlags {};
+	vk::PipelineCreationFeedback           pipeline_feedback {};
+	vk::PipelineCreationFeedback           stage_feedback {};
+	vk::PipelineCreationFeedbackCreateInfo feedback_create_info {};
+	if (graphics.pipeline_creation_feedback_enabled) {
+		feedback_create_info.pPipelineCreationFeedback          = &pipeline_feedback;
+		feedback_create_info.pipelineStageCreationFeedbackCount = 1;
+		feedback_create_info.pPipelineStageCreationFeedbacks    = &stage_feedback;
+		info.pNext                                              = &feedback_create_info;
+	}
 
 	EXIT_IF(pipeline.pipeline != nullptr);
 
@@ -914,6 +962,33 @@ void CreatePipelineInternal(GraphicContext& graphics, PipelineCache::Pipeline& p
 		     static_cast<void*>(pipeline.pipeline_layout),
 		     Config::ShaderDebugDisableOptimization() ? "disable-optimization" : "normal");
 	}
+	const bool  cache_probe_enabled   = Config::PipelineCacheProfileEnabled() &&
+	                                    graphics.pipeline_cache_control_enabled &&
+	                                    driver_cache != nullptr;
+	const char* cache_probe_result    = "UNSUPPORTED";
+	vk::Result  cache_probe_vk_result = vk::Result::eErrorFeatureNotPresent;
+	if (cache_probe_enabled) {
+		vk::ComputePipelineCreateInfo probe_info = info;
+		probe_info.flags |= vk::PipelineCreateFlagBits::eFailOnPipelineCompileRequired;
+		vk::Pipeline probe_pipeline = nullptr;
+		cache_probe_vk_result = graphics.device.createComputePipelines(driver_cache, 1, &probe_info,
+		                                                               nullptr, &probe_pipeline);
+		if (cache_probe_vk_result == vk::Result::eSuccess) {
+			cache_probe_result = "HIT";
+			if (probe_pipeline != nullptr) {
+				graphics.device.destroyPipeline(probe_pipeline, nullptr);
+			}
+		} else if (cache_probe_vk_result == vk::Result::ePipelineCompileRequired ||
+		           cache_probe_vk_result == vk::Result::eErrorPipelineCompileRequiredEXT) {
+			cache_probe_result = "COMPILE_REQUIRED";
+		} else {
+			cache_probe_result = "ERROR";
+		}
+	}
+	LogPipelineCacheProbe(compute_program.shader_hash, compute_program.semantic_fingerprint,
+	                      compute_program.spirv_hash, compute_program.specialization_hash,
+	                      compute_program.descriptor_layout_hash, driver_cache != nullptr,
+	                      cache_probe_result, cache_probe_vk_result);
 	result =
 	    graphics.device.createComputePipelines(driver_cache, 1, &info, nullptr, &pipeline.pipeline);
 	const auto pipeline_elapsed_ms =
@@ -922,6 +997,11 @@ void CreatePipelineInternal(GraphicContext& graphics, PipelineCache::Pipeline& p
 	                              .count());
 	LogShaderCompilePipelineProfile("CS", compute_program.shader_hash, compute_program.profile,
 	                                pipeline_elapsed_ms);
+	LogPipelineCacheProfile("CS", compute_program.shader_hash, compute_program.semantic_fingerprint,
+	                        compute_program.spirv_hash, compute_program.specialization_hash,
+	                        compute_program.descriptor_layout_hash, driver_cache != nullptr,
+	                        cache_probe_result, cache_probe_vk_result, pipeline_feedback.flags,
+	                        pipeline_feedback.duration, result);
 	if (shader_pipeline_trace_enabled()) {
 		LOGF("PipelineTrace: vkCreateComputePipelines done result=%s pipeline=%p\n",
 		     vk::to_string(result).c_str(), static_cast<void*>(pipeline.pipeline));

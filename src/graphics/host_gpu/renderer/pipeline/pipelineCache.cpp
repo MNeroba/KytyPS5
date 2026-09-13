@@ -77,6 +77,79 @@ std::string DriverCacheSignature(const vk::PhysicalDeviceProperties& properties)
 	                   properties.deviceID, properties.driverVersion, uuid);
 }
 
+void MixPipelineFingerprint(uint64_t& hash, uint64_t value) {
+	hash = XXH3_64bits_withSeed(&value, sizeof(value), hash);
+}
+
+uint64_t HashResourceSpecialization(const ShaderRecompiler::IR::ResourceSpecialization& value) {
+	uint64_t hash = 0;
+	MixPipelineFingerprint(hash, value.bounded_srt_reads.size());
+	for (const auto& read: value.bounded_srt_reads) {
+		MixPipelineFingerprint(hash, read.count);
+		MixPipelineFingerprint(hash, read.flat_offset);
+	}
+	MixPipelineFingerprint(hash, value.buffers.size());
+	for (const auto& buffer: value.buffers) {
+		MixPipelineFingerprint(hash, buffer.packed_stride);
+		MixPipelineFingerprint(hash, static_cast<uint32_t>(buffer.descriptor_format));
+		MixPipelineFingerprint(hash, buffer.descriptor_swizzle);
+		MixPipelineFingerprint(hash, buffer.indirect_root);
+		MixPipelineFingerprint(hash, buffer.indirect_mapping_offset);
+		MixPipelineFingerprint(hash, buffer.indirect_search_iterations);
+	}
+	MixPipelineFingerprint(hash, value.images.size());
+	for (const auto& image: value.images) {
+		MixPipelineFingerprint(hash, static_cast<uint32_t>(image.numeric_class));
+		MixPipelineFingerprint(hash, static_cast<uint32_t>(image.dimension));
+		MixPipelineFingerprint(hash, image.mip_count);
+		MixPipelineFingerprint(hash, static_cast<uint32_t>(image.conversion_format));
+		MixPipelineFingerprint(hash, image.shader_swizzle);
+		MixPipelineFingerprint(hash, image.indirect_root);
+		MixPipelineFingerprint(hash, image.indirect_mapping_offset);
+		MixPipelineFingerprint(hash, image.indirect_search_iterations);
+		MixPipelineFingerprint(hash, image.cube ? 1u : 0u);
+		MixPipelineFingerprint(hash, image.fmask ? 1u : 0u);
+	}
+	return hash;
+}
+
+uint64_t HashBindingLayout(const ShaderRecompiler::IR::BindingLayout& value) {
+	uint64_t hash = 0;
+	MixPipelineFingerprint(hash, value.push_data_start_dword);
+	MixPipelineFingerprint(hash, value.memory_offset_dword);
+	MixPipelineFingerprint(hash, value.memory_offset_count);
+	MixPipelineFingerprint(hash, value.user_data_registers.size());
+	for (const auto register_index: value.user_data_registers) {
+		MixPipelineFingerprint(hash, register_index);
+	}
+	MixPipelineFingerprint(hash, value.descriptors.size());
+	for (const auto& descriptor: value.descriptors) {
+		MixPipelineFingerprint(hash, static_cast<uint32_t>(descriptor.kind));
+		MixPipelineFingerprint(hash, descriptor.resources.size());
+		for (const auto resource: descriptor.resources) {
+			MixPipelineFingerprint(hash, resource);
+		}
+	}
+	return hash;
+}
+
+uint64_t MakePipelineSemanticFingerprint(ShaderType stage, uint32_t wave_size, uint64_t spirv_hash,
+                                         uint64_t spirv_words, uint64_t specialization_hash,
+                                         uint64_t layout_hash, uint64_t pipeline_flags) {
+	uint64_t hash = 0;
+	MixPipelineFingerprint(hash, static_cast<uint32_t>(stage));
+	MixPipelineFingerprint(hash, wave_size);
+	MixPipelineFingerprint(hash, spirv_hash);
+	MixPipelineFingerprint(hash, spirv_words);
+	MixPipelineFingerprint(hash, specialization_hash);
+	MixPipelineFingerprint(hash, layout_hash);
+	MixPipelineFingerprint(hash, pipeline_flags);
+	// The compute path always uses the same push-constant range and entry point. Keep these
+	// explicit so the key documents the remaining pipeline state instead of relying on defaults.
+	MixPipelineFingerprint(hash, ShaderRecompiler::IR::NativePushConstantSize);
+	return hash;
+}
+
 std::string PipelineCacheTitleId() {
 	std::string title_id;
 	if ((!Loader::SystemContentParamSfoGetString("TITLE_ID", &title_id) || title_id.empty()) &&
@@ -611,6 +684,16 @@ struct PipelineCache::ProgramCache {
 		}
 		RequireVulkanSuccess(module_result, "create recompiled shader module");
 		EXIT_IF(module == nullptr);
+		const auto spirv_hash =
+		    XXH3_64bits(result.spirv.data(), result.spirv.size() * sizeof(uint32_t));
+		const auto specialization_hash    = HashResourceSpecialization(specialization);
+		const auto descriptor_layout_hash = HashBindingLayout(result.program.bindings);
+		const auto semantic_fingerprint   = MakePipelineSemanticFingerprint(
+		    options.stage, options.wave_size, spirv_hash, result.spirv.size(), specialization_hash,
+		    descriptor_layout_hash,
+		    Config::ShaderDebugDisableOptimization()
+		        ? static_cast<uint64_t>(vk::PipelineCreateFlagBits::eDisableOptimization)
+		        : 0);
 		LogShaderCompileProfile(stage_name, options.shader_hash, params.code.size(),
 		                        result.profile);
 		if (options.dump_ir) {
@@ -624,12 +707,16 @@ struct PipelineCache::ProgramCache {
 		return {
 		    .specialization = std::move(specialization),
 		    .program        = std::move(result.program).TakeCompiledInfo(),
-		    .handle         = {.id          = ++next_shader_id,
-		                       .module      = module,
-		                       .stage       = options.stage,
-		                       .shader_hash = options.shader_hash,
-		                       .spirv_words = result.spirv.size(),
-		                       .profile     = std::move(result.profile)},
+		    .handle         = {.id                     = ++next_shader_id,
+		                       .module                 = module,
+		                       .stage                  = options.stage,
+		                       .shader_hash            = options.shader_hash,
+		                       .spirv_words            = result.spirv.size(),
+		                       .spirv_hash             = spirv_hash,
+		                       .specialization_hash    = specialization_hash,
+		                       .descriptor_layout_hash = descriptor_layout_hash,
+		                       .semantic_fingerprint   = semantic_fingerprint,
+		                       .profile                = std::move(result.profile)},
 		};
 	}
 
@@ -818,9 +905,11 @@ void PipelineCache::InitializeDriverCache() {
 	if (title_id.empty()) {
 		return;
 	}
-	m_driver_cache_path     = std::filesystem::path("_PipelineCache") / (title_id + ".bin");
-	const auto path         = Common::PathToString(m_driver_cache_path);
-	const bool cache_exists = Common::File::IsFileExisting(m_driver_cache_path);
+	m_driver_cache_path      = std::filesystem::path("_PipelineCache") / (title_id + ".bin");
+	const auto  path         = Common::PathToString(m_driver_cache_path);
+	const bool  cache_exists = Common::File::IsFileExisting(m_driver_cache_path);
+	std::size_t initial_payload_size = 0;
+	bool        cache_loaded         = false;
 	if (cache_exists) {
 		PipelineCacheLog("Vulkan pipeline cache: loading {}", path);
 	} else {
@@ -845,6 +934,7 @@ void PipelineCache::InitializeDriverCache() {
 			file.Read(initial_data.data(), static_cast<uint32_t>(initial_data.size()),
 			          &payload_read);
 			file.Close();
+			initial_payload_size = initial_data.size();
 			if (signature_read != cached_signature.size() || hash_read != sizeof(payload_hash) ||
 			    payload_read != initial_data.size() || cached_signature != signature ||
 			    XXH3_64bits(initial_data.data(), initial_data.size()) != payload_hash) {
@@ -877,10 +967,16 @@ void PipelineCache::InitializeDriverCache() {
 		return;
 	}
 	if (!initial_data.empty()) {
+		cache_loaded = true;
 		PipelineCacheLog("Vulkan pipeline cache: loaded {} bytes from {}", initial_data.size(),
 		                 path);
 	} else {
 		PipelineCacheLog("Vulkan pipeline cache: initialized empty");
+	}
+	if (Config::PipelineCacheProfileEnabled()) {
+		PipelineCacheLog("PipelineCacheProfile cache_path={} initial_payload_bytes={} loaded={} "
+		                 "cache_handle={}",
+		                 path, initial_payload_size, cache_loaded, m_driver_cache != nullptr);
 	}
 }
 

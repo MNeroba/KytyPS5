@@ -607,6 +607,8 @@ static vk::Device VulkanCreateDevice(vk::PhysicalDevice physical_device, const V
 
 	const auto robustness2_ext_enabled =
 	    HasExtension(device_extensions, VK_EXT_ROBUSTNESS_2_EXTENSION_NAME);
+	const bool pipeline_cache_control_ext_enabled =
+	    HasExtension(device_extensions, VK_EXT_PIPELINE_CREATION_CACHE_CONTROL_EXTENSION_NAME);
 
 	vk::PhysicalDeviceRobustness2FeaturesEXT supported_robustness2 {};
 	supported_robustness2.sType = vk::StructureType::ePhysicalDeviceRobustness2FeaturesEXT;
@@ -652,7 +654,17 @@ static vk::Device VulkanCreateDevice(vk::PhysicalDevice physical_device, const V
 		supported_fault.pNext     = supported_features2.pNext;
 		supported_features2.pNext = &supported_fault;
 	}
+	vk::PhysicalDevicePipelineCreationCacheControlFeatures supported_pipeline_cache_control {};
+	if (pipeline_cache_control_ext_enabled) {
+		supported_pipeline_cache_control.sType =
+		    vk::StructureType::ePhysicalDevicePipelineCreationCacheControlFeatures;
+		supported_pipeline_cache_control.pNext = supported_features2.pNext;
+		supported_features2.pNext              = &supported_pipeline_cache_control;
+	}
 	physical_device.getFeatures2(&supported_features2);
+	graphics.pipeline_cache_control_enabled =
+	    pipeline_cache_control_ext_enabled &&
+	    supported_pipeline_cache_control.pipelineCreationCacheControl == VK_TRUE;
 	graphics.provoking_vertex_last_enabled =
 	    provoking_extension && provoking_vertex.provokingVertexLast;
 	graphics.attachment_feedback_loop_enabled = feedback_extensions &&
@@ -784,6 +796,14 @@ static vk::Device VulkanCreateDevice(vk::PhysicalDevice physical_device, const V
 	if (graphics.device_fault_enabled) {
 		fault_features.pNext = const_cast<void*>(create_info.pNext);
 		create_info.pNext    = &fault_features;
+	}
+	vk::PhysicalDevicePipelineCreationCacheControlFeatures pipeline_cache_control {};
+	if (graphics.pipeline_cache_control_enabled) {
+		pipeline_cache_control.sType =
+		    vk::StructureType::ePhysicalDevicePipelineCreationCacheControlFeatures;
+		pipeline_cache_control.pipelineCreationCacheControl = VK_TRUE;
+		pipeline_cache_control.pNext                        = const_cast<void*>(create_info.pNext);
+		create_info.pNext                                   = &pipeline_cache_control;
 	}
 	create_info.flags                   = {};
 	create_info.pQueueCreateInfos       = &queue_create_info;
@@ -1211,11 +1231,26 @@ void WindowContext::CreateVulkan() {
 			device_extensions.push_back(VK_NV_DEVICE_DIAGNOSTIC_CHECKPOINTS_EXTENSION_NAME);
 			graphic_ctx.diagnostic_checkpoints_enabled = true;
 		}
+		if (Config::PipelineCacheProfileEnabled()) {
+			if (HasExtension(available_extensions,
+			                 VK_EXT_PIPELINE_CREATION_CACHE_CONTROL_EXTENSION_NAME)) {
+				device_extensions.push_back(VK_EXT_PIPELINE_CREATION_CACHE_CONTROL_EXTENSION_NAME);
+				graphic_ctx.pipeline_cache_control_enabled = true;
+			}
+			if (HasExtension(available_extensions,
+			                 VK_EXT_PIPELINE_CREATION_FEEDBACK_EXTENSION_NAME)) {
+				device_extensions.push_back(VK_EXT_PIPELINE_CREATION_FEEDBACK_EXTENSION_NAME);
+				graphic_ctx.pipeline_creation_feedback_enabled = true;
+			}
+		}
 	}
 	LOGF("GPU fault diagnostics:\n\tVK_EXT_device_fault: %s\n"
 	     "\tVK_NV_device_diagnostic_checkpoints: %s\n",
 	     graphic_ctx.device_fault_enabled ? "enabled" : "unsupported",
 	     graphic_ctx.diagnostic_checkpoints_enabled ? "enabled" : "unsupported");
+	LOGF("Pipeline cache profiling: control=%s feedback=%s\n",
+	     graphic_ctx.pipeline_cache_control_enabled ? "enabled" : "unsupported",
+	     graphic_ctx.pipeline_creation_feedback_enabled ? "enabled" : "unsupported");
 
 	VulkanInitSubgroupSizeControl(graphic_ctx.physical_device, graphic_ctx);
 

@@ -59,6 +59,7 @@ struct ConfigOptions {
 	bool                   shader_debug_enabled              = false;
 	bool                   shader_swappc_diagnostic_enabled  = false;
 	bool                   shader_compile_profile_enabled    = false;
+	bool                   pipeline_cache_profile_enabled    = false;
 	bool                   shader_debug_disable_optimization = false;
 	ShaderOptimizationType shader_optimization_type          = ShaderOptimizationType::None;
 	ShaderLogDirection     shader_log_direction              = ShaderLogDirection::Silent;
@@ -98,6 +99,7 @@ bool                   ShaderValidationEnabled();
 bool                   ShaderDebugEnabled();
 bool                   ShaderSwapPcDiagnosticEnabled();
 bool                   ShaderCompileProfileEnabled();
+bool                   PipelineCacheProfileEnabled();
 bool                   ShaderDebugDisableOptimization();
 ShaderOptimizationType GetShaderOptimizationType();
 ShaderLogDirection     GetShaderLogDirection();

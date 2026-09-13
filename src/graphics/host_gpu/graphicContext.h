@@ -34,6 +34,8 @@ struct GraphicContext {
 	bool                                      device_fault_enabled                  = false;
 	bool                                      device_fault_vendor_binary_enabled    = false;
 	bool                                      diagnostic_checkpoints_enabled        = false;
+	bool                                      pipeline_cache_control_enabled        = false;
+	bool                                      pipeline_creation_feedback_enabled    = false;
 	bool                                      rt_extensions_enabled                 = false;
 	bool                                      compute_subgroup_size_control_enabled = false;
 	bool                                      sample_rate_shading_enabled           = false;
