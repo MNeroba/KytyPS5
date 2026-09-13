@@ -1170,3 +1170,29 @@ are in `G:/KytyPS5/logs/SHADER_STARTUP_PERF_20260913_/analysis.txt`.
 
 RELATED CODE/COMMIT: `src/graphics/host_gpu/renderer/pipeline/pipelineCacheFingerprint.h`,
 `pipelineCache.cpp`, `shaders.cpp`, `vulkanWindow.cpp`; commits `1ecf6d6` and `567180f`.
+
+## SPIR-V dispatcher spill determinism — PROVEN (2026-09-13)
+
+FACT: Giant CS `0x78af8e269b528b5c` uses the dispatcher fallback with `lane_count=2` (wave64,
+host subgroup32) and 520 spills. Before `f56a8fb`, three independent processes emitted the
+same 1040 spill `OpVariable` IDs in different orders, producing different SPIR-V hashes despite
+identical replay inputs.
+WHY IT MATTERS: Pointer-keyed unordered-map iteration changed emitted SPIR-V identity and
+prevented a loaded Vulkan cache from reusing the giant pipeline. This was a generic emitter
+ordering defect, not shader-specific semantics.
+EVIDENCE: fail-before hashes `8266A755...`, `C71B6394...`, `0E3CA4B5...`; first divergence
+was the spill-variable region. After `f56a8fb`, three giant runs match
+`386480C1F768721CF41D7888DB93F5921CD224E9562BBA3B2A8F5A7DFD63B3D6` and three small
+production-fixture runs match `F5EDA4E9B9EE5F65A6442384E89225D74F3410A08143C2BD7AC1ED65A92A83CF`.
+`spirv-val --target-env vulkan1.3` passes.
+RELATED CODE/COMMIT: `src/graphics/shader/recompiler/backend/spirv/spirvEmitterProgram.cpp`,
+commit `f56a8fb`; artifacts `G:/KytyPS5/logs/SPIRV_DETERMINISM_20260913_/`.
+
+FACT: The cache-only probe after the fix loaded the existing 79,150,623-byte cache but returned
+`COMPILE_REQUIRED` for the stable giant identity (`spirv_hash=0x271420d97ec99650`,
+fingerprint `0xb259b45ff04fb40b`).
+WHY IT MATTERS: The cache predates the deterministic identity and does not yet prove warm giant
+reuse. Do not infer a cache defect or add pipeline binaries without a fresh cache/progression
+experiment using this stable SPIR-V.
+EVIDENCE: `G:/KytyPS5/logs/SPIRV_DETERMINISM_20260913_/cache-probe-after/`; probe stopped
+before normal compilation.

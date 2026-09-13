@@ -1,6 +1,6 @@
 # Current KytyPS5 debugging state
 
-Last reconciled: 2026-09-13 16:05 Europe/Riga
+Last reconciled: 2026-09-13 16:30 Europe/Riga
 
 This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable mechanisms live in REFERENCE.md.
 
@@ -8,17 +8,17 @@ This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable
 
 Repository/worktree: G:/KytyPS5/repo
 Branch: astro/materialize-resources
-Repository HEAD for documentation checkpoint: `f873f320a4ca6f8846d2352f00c6a055c9d83332`
-Current semantic source HEAD: `567180f` (`test: cover Vulkan pipeline semantic fingerprint`)
+Repository HEAD for documentation checkpoint: `f56a8fbcfb3116016f1b71a1372c88fd20316484`
+Current semantic source HEAD: `f56a8fb` (`fix: stabilize dispatcher spill emission order`)
 Last ASTRO runtime source HEAD: `60273f3` (profiling/probe runs are diagnostic and stopped before giant normal compilation)
 Working tree for this checkpoint: docs-only changes pending
 Build: Release, CMake/Ninja, clang-cl, clang-lld_link-64
 Executable: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.exe
-Executable SHA-256: `92321F0F685E92DA282EAE4476AE52E09E09F44872ACC55FECED693D1AFA177F`
-Executable built and copied to install from exact `567180f`
-Build label: verify from the next runtime log; no new ASTRO run in this task
-Matching PDB: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.pdb; SHA-256 `0610FC0DC84BE0AD977CA91E471D8FB7F9BC683DDB0FE85D2127D9CB43E9D6EC`
-Binary provenance: current Release executable/PDB rebuilt from `567180f`; prior probe artifacts predate the commits but contain the same profiling implementation
+Executable SHA-256: `E7AB6EF182E390C2EED9F60F59D7142A4E615DB5C4ACEC233E703CCD8591A2D9`
+Executable built and copied to install from exact `f56a8fb`
+Build label: Release rebuild after deterministic dispatcher spill fix; no ASTRO run in this task
+Matching PDB: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.pdb; SHA-256 `7932D78DBFA98AD0D186DAC0B7E1038C0A5E24D1B5A084B0B4442592AD234B15`
+Binary provenance: current Release executable/PDB rebuilt from `f56a8fb`; cache-only probe stopped before normal giant compilation
 
 The system-wide CMake install prefix was not used because it requires administrator access.
 
@@ -29,11 +29,11 @@ Title ID: PPSA21567
 Game input: G:/PS5 Games/PPSA21567/extracted
 Current milestone: M5 main menu — reached in the validated title-screen progression run
 Next milestone: M6 gameplay
-Current P0: reduce time to the next M6 runtime milestone; the existing Vulkan cache loads but giant compute pipelines still require compilation because generated SPIR-V identity is unstable.
-P0 class: cache-reuse diagnosis is complete; no binary-cache or shader-semantic change is justified until the generic SPIR-V nondeterminism is understood.
-Last validated progress signal: the exact `60273f3` Release run recorded four successful giant CS pipelines: `0x78af...` 87,159 ms, `0x7bd...` 115,314 ms, `0xf3f4...` 132,923 ms, and `0x530d...` 155,779 ms. Each was >98% of total shader-to-ready time; no fatal or device-loss occurred before the profiling stop.
+Current P0: validate warm reuse or choose the next cache/runtime action after deterministic SPIR-V; the existing cache does not contain the new giant SPIR-V identity.
+P0 class: SPIR-V nondeterminism is fixed and proven; the existing cache predates the stable giant identity, so warm reuse remains unproven.
+Last validated progress signal: three independent giant replays now emit byte-identical SPIR-V after `f56a8fb`; the cache-only probe reached giant CS `0x78af...` without compiling.
 Known P1 likely blockers: incorrect color/output interpretation remains P1 and is not a current fix target
-Known P2: cold-start large dispatcher pipeline compilation latency; successful creates are not a hang. Cache persistence/load is proven, but warm reuse is blocked by `COMPILE_REQUIRED` for the giant CS path.
+Known P2: cold-start large dispatcher pipeline compilation latency; successful creates are not a hang. Cache persistence/load is proven, but the existing cache still returns `COMPILE_REQUIRED` for the newly stable giant CS identity.
 
 ## Shader startup profiling — 2026-09-13
 
@@ -904,3 +904,28 @@ linear non-fused walk stops at `S_ENDPGM` `pc=0x3d30`, while production decoding
 pending branch-target path through `0x3dac` to the later call site. No second runtime run is
 authorized by this checkpoint; next action is offline classification of that normal-shader
 diagnostic boundary before any further capture.
+
+## SPIR-V cross-process determinism — 2026-09-13
+
+The authentic production capsule for giant CS `0x78af8e269b528b5c` proves the dispatcher
+fallback path (`blocks=198`, `wave_size=64`, `host_subgroup_size=32`, therefore
+`lane_count=2`). The fail-before replay emitted three different SPIR-V SHA-256 values
+(`8266A755...`, `C71B6394...`, `0E3CA4B5...`) while the same 1040 spill `OpVariable` IDs
+were merely permuted (spill count `520`). The first divergence was the variable-order region,
+not shader inputs or semantics.
+
+Commit `f56a8fb` records deterministic low-half spill discovery in `spill_order` and allocates
+the high-half spill IDs in that order; unordered maps remain lookup-only. Three independent
+giant replays now match SHA-256 `386480C1F768721CF41D7888DB93F5921CD224E9562BBA3B2A8F5A7DFD63B3D6`,
+and three runs of the small production fixture match `F5EDA4E9B9EE5F65A6442384E89225D74F3410A08143C2BD7AC1ED65A92A83CF`.
+`spirv-val --target-env vulkan1.3` passes and byte comparison of giant runs A/B is clean.
+
+The post-fix cache-only probe loaded the existing `79,150,623`-byte cache and returned
+`COMPILE_REQUIRED` for the giant shader with stable SPIR-V hash `0x271420d97ec99650`,
+specialization `0xdf4c4b5ea0432871`, layout `0xf5863b4aec51aeea`, and fingerprint
+`0xb259b45ff04fb40b`. It stopped before normal compilation; the old cache was created from
+the unstable identity, so warm reuse is not yet proven. Artifacts:
+`G:/KytyPS5/logs/SPIRV_DETERMINISM_20260913_/`.
+
+M6 gameplay remains unproven. Do not add pipeline binaries or rerun ASTRO until the next
+runtime/cache decision is made from this stable identity.
