@@ -8,7 +8,7 @@ This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable
 
 Repository/worktree: G:/KytyPS5/repo
 Branch: astro/materialize-resources
-Repository HEAD for documentation checkpoint: `b1ef4bf` (`docs: refresh upstream audit provenance`)
+Repository HEAD for documentation checkpoint: `e18c741` (`docs: record current Release runtime blocker`)
 Documentation checkpoint is the current tip; use `git rev-parse HEAD` for its generated commit id.
 Current semantic source HEAD: `b1ef4bf2a058664655b6b5fe6193fb50ffc64e49`
 Last ASTRO runtime source HEAD: `b1ef4bf2a058664655b6b5fe6193fb50ffc64e49`
