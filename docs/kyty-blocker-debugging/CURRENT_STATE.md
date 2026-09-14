@@ -11,6 +11,7 @@ Branch: astro/materialize-resources
 Official repository checkout: G:/KytyPS5/OfficialRepo (main)
 Game root: G:/PS5_Games
 ASTRO BOT input: G:/PS5_Games/PPSA21567/extracted
+Demon's Souls input: G:/PS5_Games/PPSA01342/extracted
 Repository source HEAD for runtime checkpoint: `9515fd017c38385a35c4f93f06b96bdc50e2c218`
 Current source HEAD: `4215519` (path documentation; runtime source remains `9515fd0`)
 Last ASTRO runtime source: `9515fd0`
