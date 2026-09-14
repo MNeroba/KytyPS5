@@ -9,6 +9,8 @@ This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable
 Repository/worktree: G:/KytyPS5/Fork/repo
 Branch: astro/materialize-resources
 Official repository checkout: G:/KytyPS5/OfficialRepo (main)
+Game root: G:/PS5_Games
+ASTRO BOT input: G:/PS5_Games/PPSA21567/extracted
 Repository source HEAD for runtime checkpoint: `9515fd017c38385a35c4f93f06b96bdc50e2c218`
 Current source HEAD: `9515fd0` (provision AGC fixed DMEM work area)
 Last ASTRO runtime source: `9515fd0`
@@ -93,7 +95,7 @@ source change, regression, or ASTRO rerun is justified until this provenance is 
 
 ## AGC fixed-address provenance audit — 2026-09-13
 
-The official title library `G:/PS5 Games/PPSA21567/extracted/fakelib/libSceAgc.sprx` directly
+The official title library `G:/PS5_Games/PPSA21567/extracted/fakelib/libSceAgc.sprx` directly
 uses the same fixed `0x0fe0040000` address: its setter/getter at raw offsets `0x8b90` and
 `0x8bd0` compare a library-global pointer to that value and access indexed 16-byte slots. Its
 initializer at raw `0xe630` obtains a base/size from an imported AGC-driver Dmem query, aligns
@@ -130,7 +132,7 @@ reconciled offline.
 
 Target game: ASTRO BOT EU
 Title ID: PPSA21567
-Game input: G:/PS5 Games/PPSA21567/extracted
+Game input: G:/PS5_Games/PPSA21567/extracted
 Current milestone: M5 main menu — reached in the validated title-screen progression run
 Next milestone: M6 gameplay
 Current P0: establish the AGC work-area/descriptor ownership for production `S_SWAPPC_B64` at MS `0x2b3be82b8235ac05`, `pc=0x3da8`, raw `0xbe8e210e`; external-call resolution remains downstream of that read.
@@ -760,7 +762,7 @@ Vulkan device loss after M5. Do not rerun ASTRO or reopen resource/remap work in
 ## Latest progression checkpoint
 
 Run: `G:/KytyPS5/logs/ASTRO_TTMP_FIX_20260912_1510/`
-Launch: installed `kyty_emulator.exe --game "G:/PS5 Games/PPSA21567/extracted" --stub-bvh --shader-debug false --shader-log-direction Silent --graphics-debug-dump false --printf-direction File --printf-output-file "G:/KytyPS5/logs/ASTRO_TTMP_FIX_20260912_1510/runtime.log"`
+Launch: installed `kyty_emulator.exe --game G:/PS5_Games/PPSA21567/extracted --stub-bvh --shader-debug false --shader-log-direction Silent --graphics-debug-dump false --printf-direction File --printf-output-file "G:/KytyPS5/logs/ASTRO_TTMP_FIX_20260912_1510/runtime.log"`
 Result: wrapper exit `321` (`0x00000141`); no crash dump. The run decoded and emitted CS `0x657ad04626bf9d55` (`SPIR-V EmitProgram words=124012`), then reached 40 CS / 22 PS / 14 VS / 1 GS. The first later fatal boundary was `vkDevice.waitSemaphores` returning `ErrorDeviceLost (-4)` for ticks `328841` and `328864` (`known=328840`, `current=328865`), followed by the existing fatal check at `masterSemaphore.cpp:127`. GPU fault diagnostics completed with `address_count=57`, `vendor_count=0`, advertised/allocated vendor capacity `181328`, and `count_result=Success`, `info_result=Success`, `partial=false`. No pipeline-create failure is proven.
 
 ## TTMP decoder semantic checkpoint — 2026-09-12
@@ -791,7 +793,7 @@ Complete latest runtime trace and crash evidence:
 
 Run/archive: G:/KytyPS5/logs/ASTRO_HOSTTRACE_20260911_175340/
 Executable: G:/KytyPS5/Fork/repo/_Build/windows/install/kyty_emulator.exe (exact 4374a9d binary above); matching symbols are in the build tree PDB above
-Runtime: ASTRO BOT EU, input G:/PS5 Games/PPSA21567/extracted; final runtime.log write was 2026-09-11 18:02:58 Europe/Riga
+Runtime: ASTRO BOT EU, input G:/PS5_Games/PPSA21567/extracted; final runtime.log write was 2026-09-11 18:02:58 Europe/Riga
 Pipeline/command evidence: HostSubmit/HostWait/HostPresent/Flip completed; no Vulkan/device-lost/error is logged. Large compute creates, including 0x530dcd964f29983c (~152661 ms), eventually succeeded.
 Termination: Windows Application Error 1000 status 0xc0000409; dump C:/Users/mneroba/AppData/Local/CrashDumps/kyty_emulator.exe.9700.dmp (82,354,794 bytes, SHA-256 6F67CB93120E117E699B4B5CEFC50BFB24791A7BE61D94EC78A3A1E0454FE578; PID 9700, created 2026-09-11 18:02:56 Europe/Riga). Exception record is C++ EH 0xe06d7363 with catchable std::out_of_range; UCRT abort fast-fail subcode 7 (FATAL_APP_EXIT) is the terminal wrapper, not the source attribution.
 Throw path: exception thread 32576 (0x7f40); app call at RVA 0x20f021 to vector<IR::BufferResource>::_Xrange (RVA 0x188f90), from ExtractResourcePlan/ResourceControlFlow, source ResourceMaterialization.cpp:1838 (`program.info.buffers.at(memory.resource)`). Program.info.buffers size recovered as 7; numeric memory.resource is not present in the minidump, only proven >= 7.

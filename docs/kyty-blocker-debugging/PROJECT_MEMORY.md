@@ -301,7 +301,7 @@ RELATED CODE/COMMIT: `bufferCache.cpp`, `gpuResourceManager.cpp`,
 - **PROVEN:** Primary host is Windows 11 Pro, Intel i9-12900K, 32 GB RAM, NVIDIA RTX 3090 24 GB. The active Windows build uses CMake/Ninja with `clang-cl`; do not assume the MSVC frontend.
   Evidence: host and CMake inspection on 2026-09-10. See `REFERENCE.md § Build and runtime boundary`.
 - **STRONG EVIDENCE:** Secondary validation host is Apple M1 Max with 32 GB RAM.
-- **PROVEN:** ASTRO BOT EU is `PPSA21567`; its extraction is already solved. Do not mix Japan `PPSA21559` content into this baseline.
+- **PROVEN:** ASTRO BOT EU is `PPSA21567`; its extraction at `G:/PS5_Games/PPSA21567/extracted` is already solved. Do not mix Japan `PPSA21559` content into this baseline.
   Evidence: existing extracted game root and project setup records.
 - **PROVEN:** Relevant focused suites are `resource_materialization_tests`, `resource_tracking_tests`, `shader_cfg_tests`, `shader_recompiler_compute_tests`, and `scalar_provenance_tests`. `resource_tracking_tests / dynamic storage mips` is a known unrelated failure. An older aggregate `kyty_tests` failure involved obsolete `Log` symbol linkage.
   Evidence: repeated focused runs through `dfc7203`.
@@ -1375,7 +1375,7 @@ EVIDENCE: `G:/KytyPS5/logs/SWAPPC_ADDRESS_AUDIT_20260913_/address-ownership-audi
 
 ### Production S_SWAPPC AGC fixed-address provenance — PROVEN correlation, ownership still unresolved (2026-09-13)
 
-FACT: The official title `libSceAgc.sprx` (`G:/PS5 Games/PPSA21567/extracted/fakelib`,
+FACT: The official title `libSceAgc.sprx` (`G:/PS5_Games/PPSA21567/extracted/fakelib`,
 SHA-256 `EACE8AC152404132E632A7E170DDCCA47F230E7C0C02CD4B76F29CA9604037FF`) compares a
 library-global pointer with fixed `0x0fe0040000` before reading/writing indexed 16-byte slots.
 Its initializer obtains a Dmem base/size through an imported AGC-driver call, aligns the base,
