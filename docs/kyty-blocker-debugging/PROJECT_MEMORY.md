@@ -2,6 +2,23 @@
 
 Durable, non-chronological facts that are expensive to rediscover. Read `CURRENT_STATE.md` first. Put current milestones, P0, worktree, executable, and next action there; stable mechanisms live in `REFERENCE.md`.
 
+### AGC fixed DMEM work-area contract — PROVEN, provisioning insufficient (2026-09-14)
+
+FACT: The official `libSceAgc.sprx` initializer obtains a Dmem base/size from the AGC driver,
+requires base `0x0fe0040000`, and clears the first `0x60` bytes. The generic HLE now provisions
+that address as a fixed flexible mapping of size `0x001b0000` with CPU/GPU read-write access and
+clears the same header during `AgcInit` (commit `9515fd0`).
+
+WHY IT MATTERS: The authentic regression reproduces the production descriptor-chain shape and
+failed before the mapping, then passes after it. The post-fix warm-cache ASTRO run proves the
+mapping call but still reports unknown `s14:s15` and rejects the same MS `S_SWAPPC_B64` at
+`0x3da8`; the remaining divergence is upstream of external target resolution. This does not
+justify a resolver-reader fallback or an S_SWAPPC semantic change.
+
+EVIDENCE: `G:/KytyPS5/logs/AGC_DMEM_REGRESSION_20260913_2315/`,
+`G:/KytyPS5/logs/AGC_DMEM_ASTRO_20260913_2320/astro-run/`, and the official library audit under
+`G:/KytyPS5/logs/AGC_DMEM_AUDIT_20260913_2252/`.
+
 ### NVIDIA Aftermath wiring and runtime boundary — PROVEN (2026-09-13)
 
 FACT: The RTX 3090 exposes `VK_NV_device_diagnostics_config` (diagnosticsConfig=true) and
@@ -279,7 +296,7 @@ RELATED CODE/COMMIT: `bufferCache.cpp`, `gpuResourceManager.cpp`,
 
 ## Environment and baselines
 
-- **PROVEN:** Main repository is `G:/KytyPS5/repo`; the fork is `MNeroba/KytyPS5`. The normal installed executable is `G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.exe`.
+- **PROVEN:** Main repository is `G:/KytyPS5/Fork/repo`; the fork is `MNeroba/KytyPS5`. The normal installed executable is `G:/KytyPS5/Fork/repo/_Build/windows/install/kyty_emulator.exe`.
   Evidence: repository, build, and runtime inspection on 2026-09-10.
 - **PROVEN:** Primary host is Windows 11 Pro, Intel i9-12900K, 32 GB RAM, NVIDIA RTX 3090 24 GB. The active Windows build uses CMake/Ninja with `clang-cl`; do not assume the MSVC frontend.
   Evidence: host and CMake inspection on 2026-09-10. See `REFERENCE.md § Build and runtime boundary`.
@@ -666,7 +683,7 @@ the target stream. Do not add a `Family::0x30` case, infer a width fix, or reuse
 same-PC disassembly until raw bytes are captured before decode.
 
 EVIDENCE: `G:/KytyPS5/logs/MS_BOUNDARY_AUDIT_20260912_2205/boundary-audit.txt`; target hash search
-across `G:/KytyPS5/logs`, `G:/KytyPS5/repo`, and `G:/KytyPS5/_Shaders`; `ShaderDecoder.cpp` family
+across `G:/KytyPS5/logs`, `G:/KytyPS5/Fork/repo`, and `G:/KytyPS5/_Shaders`; `ShaderDecoder.cpp` family
 dispatch; Prosper `rdna2_decode.cpp` default/SMEM cases. Prosper and public RDNA2 identify SMEM
 as high-six-bit `0x3d`; local LLVM has no `llvm-mc.exe` and `llvm-objdump` cannot disassemble Kyty
 raw `.bin` files as object inputs. Archive streams at `pc=0x3e74` belong to other hashes and are

@@ -1,25 +1,44 @@
 # Current KytyPS5 debugging state
 
-Last reconciled: 2026-09-13 22:50 Europe/Riga
+Last reconciled: 2026-09-14 08:27 Europe/Riga
 
 This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable mechanisms live in REFERENCE.md.
 
 ## Repository and provenance
 
-Repository/worktree: G:/KytyPS5/repo
+Repository/worktree: G:/KytyPS5/Fork/repo
 Branch: astro/materialize-resources
-Repository source HEAD for runtime checkpoint: `ea0512353e4598cd123469da480076b5a16019fd`
-Current source HEAD: `12128e2` (AGC fixed-address provenance audit documentation; semantic runtime source is `8717f42`)
-Last ASTRO runtime source: `8717f42`
-Working tree for this checkpoint: clean after the documentation checkpoint
+Official repository checkout: G:/KytyPS5/OfficialRepo (main)
+Repository source HEAD for runtime checkpoint: `9515fd017c38385a35c4f93f06b96bdc50e2c218`
+Current source HEAD: `9515fd0` (provision AGC fixed DMEM work area)
+Last ASTRO runtime source: `9515fd0`
+Working tree for this checkpoint: clean
 Build: Release, CMake/Ninja, clang-cl, clang-lld_link-64
-Executable: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.exe
-Executable SHA-256 (current clean rebuild): `8B38B9711FBC9FC3A1E693F60AB08631190EC8F72E5BA88F050666D5352ADB62`
-Executable/PDB used by the capture (pre-commit diagnostic tree): EXE `144A8890A1793CE6AC0FFFCD7DC4B8CD2A75A3DBB54627C9FD5880D25941F39A`, PDB `387D1B0DC87DE544A6B3EDE2C65D7AB4CA3CBAA15845FA28EADC114DC2D61811`
-Matching PDB (current clean rebuild): G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.pdb; SHA-256 `EB209C46E16568795D102FCD626ADD47C5C1BB0F76876A7FF8833F685B9792E4`
-Binary provenance: post-capture Release rebuild from `8717f42`; warmed per-title cache remains the runtime input
+Executable: G:/KytyPS5/Fork/repo/_Build/windows/install/kyty_emulator.exe
+Executable SHA-256 (runtime build): `84A6FAC8B1496E202921FA9CEFA528F560674A64EE949D2041C3CC11ADE0B617`
+Matching PDB: G:/KytyPS5/Fork/repo/_Build/windows/install/kyty_emulator.pdb; SHA-256 `B3E84D1E9EA6B070F753D80B980188A8BEC2470F968D881D70459BA77EE6DA74`
+Binary provenance: Release rebuild from `9515fd0`; warmed per-title cache remains the runtime input
 
 The system-wide CMake install prefix was not used because it requires administrator access.
+
+## Repository split and AGC work-area fix — 2026-09-14
+
+The fork checkout is now `G:/KytyPS5/Fork/repo`; its linked `test-pr497` worktree is
+`G:/KytyPS5/Fork/repo-pr497`. The official upstream checkout is `G:/KytyPS5/OfficialRepo` on
+`main`. The root `AGENTS.md` records these paths.
+
+Commit `9515fd0` provisions the official AGC fixed DMEM work area generically: a flexible fixed
+mapping at `0x0fe0040000` of size `0x001b0000`, followed by clearing the first `0x60` bytes during
+`AgcInit`. The authentic regression failed before the mapping (`KernelVirtualQuery` returned
+`0x8002000d`) and passes after it. Focused `shader_cfg_tests` and
+`shader_recompiler_compute_tests` also pass.
+
+The single post-fix warm-cache ASTRO run is under
+`G:/KytyPS5/logs/AGC_DMEM_ASTRO_20260913_2320/astro-run/`. It proves the fixed mapping call and
+still reaches the same MS `0x2b3be82b8235ac05`, `pc=0x3da8`, unsupported SOP1 `0x21` rejection;
+the diagnostic still reports unknown `s14:s15`, so mapping provisioning alone did not resolve the
+descriptor-chain read. The current P0 remains the unresolved scalar descriptor read; no S_SWAPPC
+semantic change is justified.
 
 ## Exact MS S_SWAPPC CFG trace — 2026-09-13
 
@@ -771,7 +790,7 @@ Target module: 0019_new_shader_cs_78af8e269b528b5c.spv, 941,496 bytes, 45,225 de
 Complete latest runtime trace and crash evidence:
 
 Run/archive: G:/KytyPS5/logs/ASTRO_HOSTTRACE_20260911_175340/
-Executable: G:/KytyPS5/repo/_Build/windows/install/kyty_emulator.exe (exact 4374a9d binary above); matching symbols are in the build tree PDB above
+Executable: G:/KytyPS5/Fork/repo/_Build/windows/install/kyty_emulator.exe (exact 4374a9d binary above); matching symbols are in the build tree PDB above
 Runtime: ASTRO BOT EU, input G:/PS5 Games/PPSA21567/extracted; final runtime.log write was 2026-09-11 18:02:58 Europe/Riga
 Pipeline/command evidence: HostSubmit/HostWait/HostPresent/Flip completed; no Vulkan/device-lost/error is logged. Large compute creates, including 0x530dcd964f29983c (~152661 ms), eventually succeeded.
 Termination: Windows Application Error 1000 status 0xc0000409; dump C:/Users/mneroba/AppData/Local/CrashDumps/kyty_emulator.exe.9700.dmp (82,354,794 bytes, SHA-256 6F67CB93120E117E699B4B5CEFC50BFB24791A7BE61D94EC78A3A1E0454FE578; PID 9700, created 2026-09-11 18:02:56 Europe/Riga). Exception record is C++ EH 0xe06d7363 with catchable std::out_of_range; UCRT abort fast-fail subcode 7 (FATAL_APP_EXIT) is the terminal wrapper, not the source attribution.

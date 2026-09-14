@@ -14,7 +14,7 @@ Use the canonical project paths in `AGENTS.md`; the installed skill directory is
 1. Read `CURRENT_STATE.md`, then `PROJECT_MEMORY.md`.
 2. Open only the relevant `REFERENCE.md` section if architecture is still unclear.
 3. Inspect current source/tests/saved logs for the exact unknown.
-4. Only if an exact semantic question remains, use [DEBUG_REFERENCE_SOURCES.md](G:/KytyPS5/repo/docs/kyty-blocker-debugging/DEBUG_REFERENCE_SOURCES.md) to select the smallest relevant external source set. No mandatory external search per blocker.
+4. Only if an exact semantic question remains, use [DEBUG_REFERENCE_SOURCES.md](G:/KytyPS5/Fork/repo/docs/kyty-blocker-debugging/DEBUG_REFERENCE_SOURCES.md) to select the smallest relevant external source set. No mandatory external search per blocker.
 
 | Canonical home | Contents / update trigger |
 |---|---|
