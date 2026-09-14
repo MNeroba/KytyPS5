@@ -1,6 +1,6 @@
 # Current KytyPS5 debugging state
 
-Last reconciled: 2026-09-14 08:27 Europe/Riga
+Last reconciled: 2026-09-14 08:33 Europe/Riga
 
 This is the volatile checkpoint. Durable facts live in PROJECT_MEMORY.md; stable mechanisms live in REFERENCE.md.
 
@@ -12,7 +12,7 @@ Official repository checkout: G:/KytyPS5/OfficialRepo (main)
 Game root: G:/PS5_Games
 ASTRO BOT input: G:/PS5_Games/PPSA21567/extracted
 Repository source HEAD for runtime checkpoint: `9515fd017c38385a35c4f93f06b96bdc50e2c218`
-Current source HEAD: `9515fd0` (provision AGC fixed DMEM work area)
+Current source HEAD: `4215519` (path documentation; runtime source remains `9515fd0`)
 Last ASTRO runtime source: `9515fd0`
 Working tree for this checkpoint: clean
 Build: Release, CMake/Ninja, clang-cl, clang-lld_link-64
