@@ -43,6 +43,22 @@ the diagnostic still reports unknown `s14:s15`, so mapping provisioning alone di
 descriptor-chain read. The current P0 remains the unresolved scalar descriptor read; no S_SWAPPC
 semantic change is justified.
 
+## Demon’s Souls OfficialRepo launch — 2026-09-14
+
+The clean upstream `OfficialRepo` checkout at `bbebb6419b7891d634931c45e7ec005fc9e6c5ad` was
+built as Release and launched from
+`G:/KytyPS5/OfficialRepo/_Build/windows/install/kyty_emulator.exe` (SHA-256
+`D8714D3A25B7C3347563DBA809A43B61CCA44DC014F4E1D02949AC91BAE846B0`) with
+`--game G:/PS5_Games/PPSA01342/extracted`, without quoting the game path. The run initialized
+Vulkan and compiled 96 compute shaders before terminating during shader compilation.
+
+The first recorded error is compute shader hash `0xfb0becc9db83db77`, `pc=0x00001044`:
+`GetImageResource dword 0 is not a valid runtime value` at
+`OfficialRepo/src/graphics/shader/recompiler/ir/passes/ResourceTracking.cpp:167`. `stderr` is
+empty; the asynchronous launch wrapper did not preserve a numeric process exit code. Full
+provenance and logs are under
+`G:/KytyPS5/logs/DEMON_SOULS_OFFICIAL_20260914_083900/`.
+
 ## Exact MS S_SWAPPC CFG trace — 2026-09-13
 
 The complete warmed-cache capture is under
